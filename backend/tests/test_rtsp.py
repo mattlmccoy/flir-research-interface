@@ -140,7 +140,10 @@ def test_parse_www_authenticate_digest_challenge() -> None:
 def test_parse_rtsp_response_splits_status_headers_body() -> None:
     from flir_research_interface.visible.rtsp import parse_rtsp_response
 
-    raw = b'RTSP/1.0 401 Unauthorized\r\nCSeq: 2\r\nWWW-Authenticate: Digest realm="x", nonce="y"\r\n\r\n'
+    raw = (
+        b"RTSP/1.0 401 Unauthorized\r\nCSeq: 2\r\n"
+        b'WWW-Authenticate: Digest realm="x", nonce="y"\r\n\r\n'
+    )
     status, headers, body = parse_rtsp_response(raw)
     assert status == 401 and headers["www-authenticate"].startswith("Digest") and body == b""
     raw_ok = b"RTSP/1.0 200 OK\r\nCSeq: 3\r\nContent-Length: 5\r\n\r\nv=0\r\n"
