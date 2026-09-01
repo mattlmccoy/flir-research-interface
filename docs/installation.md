@@ -16,36 +16,67 @@ uv run fri-probe --simulated # exercises the probe report against the simulated 
 
 ## 2. FLIR Spinnaker SDK + PySpin (required for the real camera)
 
-PySpin is **not on PyPI** and Spinnaker is proprietary; both must be downloaded from Teledyne
-FLIR (free account): <https://www.teledynevisionsolutions.com/products/spinnaker-sdk/>.
+PySpin is **not on PyPI** and Spinnaker is proprietary; both come from Teledyne FLIR (free
+account): <https://www.teledynevisionsolutions.com/products/spinnaker-sdk/>.
 
-### Pick the right build (facts from the Spinnaker release notes, fetched 2026-09-01)
-
-| Host | Spinnaker | PySpin wheel |
-|---|---|---|
-| macOS Apple Silicon (this Mac, arm64) | **4.4.x** (Apple Silicon support since 4.1.0.157; "For Intel-based Macs (up to macOS 11.6), use version 3.2") | `spinnaker_python-4.4.x-cp312-cp312-macosx_*_arm64.whl` (or cp310/cp311) |
-| macOS Intel | 3.2.x (last Intel release) | cp3x x86_64 wheel |
-| Windows 11 x64 | 4.4.x | cp310/311/312 win_amd64 |
-| Linux Ubuntu 22.04 x64 / arm64 | 4.4.x | cp310/311/312 linux |
-
-**Already on this Mac:** `/Applications/Spinnaker` 3.1.0.79, an Intel-only (x86_64) build with
-PySpin wheels for Python 3.6–3.8. It cannot be imported by any installed interpreter and must be
-replaced (run the `uninstall_spinnaker.sh` script from the old DMG first, then install 4.4.x).
-
-### macOS steps
+Run the checker first; it detects your OS/CPU/Python and tells you exactly which artifact you
+need, whether a local copy exists, and whether PySpin already imports:
 
 ```bash
-brew install pkg-config libomp libusb           # Spinnaker README prerequisites
-# 1. Install the Spinnaker .pkg (4.4.x, Apple Silicon) from the downloaded DMG.
-# 2. Install the matching PySpin wheel into this project's venv:
-cd backend
-uv pip install /path/to/spinnaker_python-4.4.*-cp312-cp312-macosx_*_arm64.whl
-# 3. Verify:
-uv run python -c "import PySpin; s=PySpin.System.GetInstance(); v=s.GetLibraryVersion(); print(v.major, v.minor, v.type, v.build); s.ReleaseInstance()"
+cd backend && uv run fri-sdk-check
 ```
 
-If the wheel targets a different Python minor version, recreate the venv with that version:
-`uv venv --python 3.11 .venv && uv sync --extra dev`.
+### Which build (from the Spinnaker 4.4.0.246 downloads and release notes, verified 2026-09-01)
+
+| Host | Spinnaker | PySpin |
+|---|---|---|
+| macOS Apple Silicon (this Mac) | **4.4.x** .dmg → .pkg (Apple Silicon since 4.1; macOS Sonoma 14+) | **bundled inside the installer**: `/Applications/Spinnaker/PySpin/spinnaker_python-4.4.0.246-cp{38,39,310,312}-*-macosx_*_arm64.tar.gz`. There is no separate macOS PySpin download on the website. |
+| macOS Intel | 3.2.x only (last Intel release; PySpin ≤ Python 3.8) | not usable with this project's Python 3.10–3.12 requirement |
+| Windows 11 x64 | `SpinnakerSDK_FULL_4.4.0.246_x64.exe` | separate download `spinnaker_python-4.4.0.246-cp3XX-cp3XX-win_amd64.*` |
+| Ubuntu 20.04 / 22.04 / 24.04, amd64 or arm64 | `spinnaker-4.4.0.246-{focal,jammy,noble}-{amd64,arm64}-pkg.tar.gz` | separate download `spinnaker_python-4.4.0.246-cp3XX-cp3XX-linux_{x86_64,aarch64}.tar.gz` |
+
+A Linux or Windows wheel will **not** install on macOS (pip rejects the platform tag); use the
+bundled macOS tarball.
+
+### macOS steps (what actually worked on this Mac)
+
+```bash
+brew install pkg-config libomp libusb ffmpeg@6   # Spinnaker README: "Using a newer version of FFMPEG will result in failure"
+# 1. Install the Spinnaker 4.4.x Apple Silicon .pkg from the DMG.
+# 2. Extract the bundled wheel matching your venv's Python (3.12 here) and install it:
+mkdir -p /tmp/pyspin && tar -xzf /Applications/Spinnaker/PySpin/spinnaker_python-4.4.0.246-cp312-cp312-macosx_14_0_arm64.tar.gz -C /tmp/pyspin
+cd backend && uv pip install /tmp/pyspin/spinnaker_python-4.4.0.246-cp312-cp312-macosx_14_0_arm64.whl
+uv run fri-sdk-check    # should print "PySpin importable: True (4.4.0.246)"
+```
+
+Notes:
+
+* Without `ffmpeg@6` the import fails with `Library not loaded: /opt/homebrew/opt/ffmpeg@6/lib/libswscale.7.dylib`
+  (Spinnaker's `libSpinVideo` links against it). Having ffmpeg 7 installed does not help; both can coexist.
+* PySpin's README: Python 3.12+ needs NumPy 2.x; Python < 3.12 needs NumPy 1.x.
+* `uv sync` removes packages not declared in `pyproject.toml`, which would uninstall PySpin. After
+  the wheel is installed, use `uv sync --extra dev --inexact` for dependency updates, or re-run the
+  `uv pip install` above.
+* If an old Intel Spinnaker 3.x was installed before, its leftover `spinnaker_python-3.1.*` tarballs
+  and `README.txt` may remain in `/Applications/Spinnaker`; they are harmless. The libraries in
+  `/usr/local/lib` are replaced by the 4.4 installer (verify with `file -L /usr/local/lib/libSpinnaker.dylib` → arm64).
+
+### Local installer cache (`vendor/spinnaker/`, git-ignored)
+
+The Spinnaker EULA (§3) prohibits copying the SDK or providing it to third parties, and its OEM
+clause (§4) only permits redistributing runtime binaries as part of a derivative product, with
+end-user redistribution prohibited. **Installers, wheels and tarballs are therefore never
+committed.** Downloaded artifacts may be kept locally in `vendor/spinnaker/` (ignored by git);
+`fri-sdk-check` scans that folder and `/Applications/Spinnaker/PySpin` and reports which file
+matches your machine. A future packaged release will ship an installer that detects the platform
+and prompts for the matching Teledyne download in the same way.
+
+### Disk space
+
+The acquisition machine needs headroom: 640×480 × 2 bytes × 30 Hz ≈ 18 MB/s ≈ 1.1 GB/min of raw
+counts before compression. The development Mac was at 100 % (1.8 GB free) when the SDK install
+failed with "No space left on device". Recording will refuse to start below a configurable
+free-space threshold (Milestone 4).
 
 ## 3. Camera network setup
 

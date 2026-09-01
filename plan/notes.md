@@ -76,3 +76,20 @@
 ### Licensing
 - Spinnaker README header: "confidential and proprietary information of FLIR" — do not redistribute SDK libs/examples; user installs Spinnaker runtime separately.
 - FLIR gige_example script has no license header — keep out of git (plan/reference/ gitignored), cite URL.
+
+## Session 2 (2026-09-01, later): PySpin install debugging
+- ROOT CAUSE 1: macOS PySpin wheels are NOT a separate Teledyne download; they are bundled by the
+  macOS installer at /Applications/Spinnaker/PySpin/spinnaker_python-4.4.0.246-cp{38,39,310,312}-*-macosx_*_arm64.tar.gz.
+  Linux aarch64 wheel fails on macOS (platform tag). Fixed by installing the bundled cp312 arm64 wheel into backend/.venv.
+- ROOT CAUSE 2: import then failed: libSpinVideo.4.4.0.246.dylib links /opt/homebrew/opt/ffmpeg@6/*.dylib;
+  only ffmpeg 7 was installed. Spinnaker README §1: `brew install pkg-config libomp libusb ffmpeg@6`,
+  "Using a newer version of FFMPEG will result in failure". Fixed with brew install ffmpeg@6.
+- BLOCKER hit on the way: disk at 100% (1.8 GiB free of 926). Freed ~280 MB of my scratch + ~1 GB via `brew cleanup`.
+  Now ~2.9 GiB free. Still far too little for 30 Hz recording (~1.1 GB/min raw). User must free space.
+- VERIFIED: PySpin 4.4.0.246 imports; System.GetInterfaces() -> GEV 127.0.0.1, GEV 10.90.70.74 (en0), USB3; cameras=0
+  (camera not attached/reachable at that time). fri-probe hardware path runs cleanly through init/release.
+- EULA (FLIR_license.txt in PySpin tarball): §3 no copying/disclosing SDK to third parties; §4 OEM may redistribute
+  only runtime binaries as part of a derivative product and must prohibit end-user redistribution.
+  => installers moved to vendor/spinnaker/ (git-ignored), never committed; fri-sdk-check points users to the right file.
+- `uv sync` would remove the manually installed PySpin wheel; use `uv sync --extra dev --inexact`.
+- Leftover Intel 3.1 tarballs remain in /Applications/Spinnaker/PySpin (harmless); /usr/local/lib libs are arm64 4.4.

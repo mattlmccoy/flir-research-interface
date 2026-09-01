@@ -352,6 +352,27 @@ def run_hardware_probe(
         report["spinnaker_version"] = f"{v.major}.{v.minor}.{v.type}.{v.build}"
         logger.info("Spinnaker library %s", report["spinnaker_version"])
 
+        interfaces: list[dict[str, Any]] = []
+        iface_list = system.GetInterfaces()
+        try:
+            for i in range(iface_list.GetSize()):
+                itf = iface_list.GetByIndex(i)
+                tl = itf.GetTLNodeMap()
+                interfaces.append(
+                    {
+                        "name": _read_str(pyspin, tl, "InterfaceDisplayName"),
+                        "type": _read_str(pyspin, tl, "InterfaceType"),
+                        "subnet_ip": _read_str(pyspin, tl, "GevInterfaceSubnetIPAddress"),
+                        "subnet_mask": _read_str(pyspin, tl, "GevInterfaceSubnetMask"),
+                    }
+                )
+                del itf
+        finally:
+            iface_list.Clear()
+        report["interfaces"] = interfaces
+        for itf_info in interfaces:
+            logger.info("Interface: %s", itf_info)
+
         cam_list = system.GetCameras()
         devices: list[dict[str, Any]] = []
         for i in range(cam_list.GetSize()):
@@ -384,7 +405,10 @@ def run_hardware_probe(
                 d["firmware"],
             )
         if not devices:
-            report["error"] = "no cameras detected"
+            report["error"] = (
+                "no cameras detected. Check: camera powered (PoE), same subnet as one of the "
+                "GigE interfaces above, visible in SpinView, firewall allows UDP 3956."
+            )
             return report
 
         chosen = 0

@@ -26,3 +26,6 @@ node_modules/
 .DS_Store
 .claude/logs/
 .claude/session-context-*.md
+
+# Vendor SDK installers (FLIR Spinnaker EULA forbids redistribution; keep local only)
+vendor/

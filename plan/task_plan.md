@@ -33,4 +33,4 @@ the probe output from the real A70 before touching radiometric node names.
 - hatchling: `readme = "../README.md"` rejected (must be inside project dir) -> removed readme field from backend/pyproject.toml.
 
 ## Status
-**Session 1 complete.** Blocked on: probe output from the physical A70 (needs Spinnaker 4.4.x Apple-Silicon + PySpin cp312 wheel installed first). Next session: review probe_report.json, then implement camera/spinnaker.py and Milestone 2 validation.
+**Session 2:** PySpin 4.4.0.246 installed and importable on this Mac (see notes.md Session 2). Blocked on: camera physically connected/reachable, then run `uv run fri-probe`. Disk nearly full (~2.9 GiB free) — user must free space before any recording work. Next session: review probe_report.json, then implement camera/spinnaker.py and Milestone 2 validation.

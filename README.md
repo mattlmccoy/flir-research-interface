@@ -35,9 +35,9 @@ uv run fri-probe --simulated --output-dir /tmp/fri-sim
 
 ## Probe the real A70
 
-See [docs/installation.md](docs/installation.md). Short version: install Spinnaker SDK 4.4.x
-for your OS (Apple Silicon build on this Mac), install the matching `spinnaker_python` wheel
-into `backend/.venv`, connect the camera, then:
+See [docs/installation.md](docs/installation.md). `uv run fri-sdk-check` tells you which
+Spinnaker/PySpin artifact your machine needs (on macOS the PySpin wheel is bundled inside the
+Spinnaker installer). PySpin 4.4.0.246 is verified importable on this Mac. Connect the camera, then:
 
 ```bash
 cd backend

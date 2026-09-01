@@ -19,6 +19,7 @@ dev = [
 
 [project.scripts]
 fri-probe = "flir_research_interface.probe:main"
+fri-sdk-check = "flir_research_interface.sdk_install:main"
 
 [build-system]
 requires = ["hatchling"]
