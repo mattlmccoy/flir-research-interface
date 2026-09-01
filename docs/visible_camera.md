@@ -42,6 +42,19 @@ Experiment log (all settings restored afterwards):
 5. **Not chosen**: switching the GigE stream to Visual between thermal frames (would drop
    radiometric frames and break the 30 Hz record).
 
+### Probing the streams with credentials (`fri-rtsp-check`)
+
+```bash
+cd backend
+cp .env.example .env          # then edit .env: FRI_RTSP_USER / FRI_RTSP_PASSWORD from the calibration certificate
+uv run fri-rtsp-check         # probes /avc/ch1 (visible 1280x960) and /avc/ (display) with ffprobe
+```
+
+`.env` is git-ignored. The tool percent-encodes the credentials into the RTSP URL and prints
+every URL with the password redacted (`rtsp://admin:***@host/...`). Passwords must never be put
+in shell history, chat, logs, or the repository; if one has been exposed, change it in the
+camera web UI (`http://<ip>/`).
+
 Open items before implementing: confirm `/avc/ch1` codec/fps/latency once credentials are
 available (`ffprobe rtsp://USER:PASS@<ip>/avc/ch1`, run by the user); check how the visible
 camera's field of view registers to the thermal FOV (needed for any overlay); decide whether the

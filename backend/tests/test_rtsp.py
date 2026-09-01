@@ -1,0 +1,68 @@
+"""Tests for RTSP URL/credential handling (visible camera subsystem)."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from flir_research_interface.visible.rtsp import (
+    RTSP_PATHS,
+    build_rtsp_url,
+    load_dotenv,
+    parse_ffprobe_json,
+    redact_url,
+)
+
+
+def test_paths_match_manual_t810579() -> None:
+    assert RTSP_PATHS["visible_full"] == "/avc/ch1"
+    assert RTSP_PATHS["display_h264"] == "/avc/"
+    assert RTSP_PATHS["display_h264_no_overlay"] == "/avc/?overlay=off"
+
+
+def test_build_url_percent_encodes_credentials() -> None:
+    url = build_rtsp_url("192.168.7.2", "/avc/ch1", user="admin", password="p@ss:w/rd#1")
+    assert url == "rtsp://admin:p%40ss%3Aw%2Frd%231@192.168.7.2/avc/ch1"
+
+
+def test_build_url_without_credentials() -> None:
+    assert build_rtsp_url("cam.local", "/avc/") == "rtsp://cam.local/avc/"
+
+
+def test_redact_hides_password_but_keeps_user_and_host() -> None:
+    url = build_rtsp_url("192.168.7.2", "/avc/ch1", user="admin", password="secret")
+    assert redact_url(url) == "rtsp://admin:***@192.168.7.2/avc/ch1"
+    assert "secret" not in redact_url(url)
+
+
+def test_load_dotenv_parses_simple_file_and_ignores_comments(tmp_path: Path) -> None:
+    f = tmp_path / ".env"
+    f.write_text('# camera\nFRI_RTSP_USER=admin\nFRI_RTSP_PASSWORD="a b"\nEMPTY=\n\nBAD LINE\n')
+    env = load_dotenv(f)
+    assert env == {"FRI_RTSP_USER": "admin", "FRI_RTSP_PASSWORD": "a b", "EMPTY": ""}
+
+
+def test_load_dotenv_missing_file_is_empty(tmp_path: Path) -> None:
+    assert load_dotenv(tmp_path / "nope") == {}
+
+
+def test_parse_ffprobe_json_extracts_video_stream() -> None:
+    raw = (
+        '{"streams":[{"codec_type":"video","codec_name":"h264","width":1280,"height":960,'
+        '"r_frame_rate":"30/1","avg_frame_rate":"0/0","pix_fmt":"yuvj420p"}],'
+        '"format":{"format_name":"rtsp"}}'
+    )
+    info = parse_ffprobe_json(raw)
+    assert info == {
+        "codec": "h264",
+        "width": 1280,
+        "height": 960,
+        "fps": 30.0,
+        "pix_fmt": "yuvj420p",
+    }
+
+
+def test_parse_ffprobe_json_without_video_raises() -> None:
+    with pytest.raises(ValueError, match="no video stream"):
+        parse_ffprobe_json('{"streams":[]}')

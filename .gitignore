@@ -29,3 +29,8 @@ node_modules/
 
 # Vendor SDK installers (FLIR Spinnaker EULA forbids redistribution; keep local only)
 vendor/
+
+# Local secrets (camera credentials)
+.env
+.env.*
+!.env.example
