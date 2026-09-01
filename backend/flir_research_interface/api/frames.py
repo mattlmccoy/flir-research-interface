@@ -64,8 +64,13 @@ def frame_header(frame: Frame, stats: dict[str, Any] | None = None) -> dict[str,
     return header
 
 
-def encode_frame_message(frame: Frame, stats: dict[str, Any] | None = None) -> bytes:
-    header = json.dumps(frame_header(frame, stats)).encode("utf-8")
+def encode_frame_message(
+    frame: Frame, stats: dict[str, Any] | None = None, extra: dict[str, Any] | None = None
+) -> bytes:
+    hdr = frame_header(frame, stats)
+    if extra:
+        hdr.update(extra)
+    header = json.dumps(hdr).encode("utf-8")
     payload = np.ascontiguousarray(frame.counts, dtype="<u2").tobytes()
     return struct.pack(">I", len(header)) + header + payload
 

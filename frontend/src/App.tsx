@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Status } from "./lib/api.ts";
 import { decodeFrameMessage, type FrameMessage } from "./lib/protocol.ts";
-import { PALETTE_NAMES, type PaletteName } from "./lib/palette.ts";
+import type { PaletteName } from "./lib/palette.ts";
 import type { Range, ScaleMode } from "./lib/scale.ts";
 import { ThermalView } from "./components/ThermalView.tsx";
-import { ColorBar } from "./components/ColorBar.tsx";
 import { SetupPage } from "./components/SetupPage.tsx";
 import { RecordPanel } from "./components/RecordPanel.tsx";
+import { ExperimentsPage } from "./components/ExperimentsPage.tsx";
+import { PlaybackPage } from "./components/PlaybackPage.tsx";
+import { DisplayControls } from "./components/DisplayControls.tsx";
 
-type Page = "live" | "setup";
+type Page = "live" | "setup" | "experiments" | "playback";
 
 export function App() {
   const [page, setPage] = useState<Page>("setup");
+  const [openExp, setOpenExp] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>({ state: "disconnected" });
   const [frame, setFrame] = useState<FrameMessage | null>(null);
   const [palette, setPalette] = useState<PaletteName>("iron");
@@ -76,6 +79,7 @@ export function App() {
         <nav className="tabs">
           <button className={page === "live" ? "active" : ""} onClick={() => setPage("live")}>Live</button>
           <button className={page === "setup" ? "active" : ""} onClick={() => setPage("setup")}>Setup</button>
+          <button className={page === "experiments" || page === "playback" ? "active" : ""} onClick={() => setPage("experiments")}>Experiments</button>
         </nav>
         <span style={{ marginLeft: "auto" }}>
           <span className={`dot ${dotClass}`} />
@@ -88,27 +92,15 @@ export function App() {
 
       {page === "setup" ? (
         <SetupPage onConnected={() => { void refreshStatus(); setPage("live"); }} />
+      ) : page === "experiments" ? (
+        <ExperimentsPage onOpen={(name) => { setOpenExp(name); setPage("playback"); }} />
+      ) : page === "playback" && openExp ? (
+        <PlaybackPage name={openExp} palette={palette} setPalette={setPalette} scaleMode={scaleMode} setScaleMode={setScaleMode} manual={manual} setManual={setManual} onBack={() => setPage("experiments")} />
       ) : (
         <main className="main">
           <ThermalView frame={frame} palette={palette} scaleMode={scaleMode} manual={manual} onScale={setShown} />
           <aside className="side">
-            <h3>Display (visualization only)</h3>
-            <div className="row">
-              <select value={palette} onChange={(e) => setPalette(e.target.value as PaletteName)}>
-                {PALETTE_NAMES.map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
-              <span className={`badge ${scaleMode}`}>{scaleMode === "auto" ? "AUTO" : "LOCKED"}</span>
-              <button className="secondary" onClick={() => {
-                if (scaleMode === "auto") { setManual({ min: Math.round(shown.min * 10) / 10, max: Math.round(shown.max * 10) / 10 }); setScaleMode("manual"); } else setScaleMode("auto");
-              }}>{scaleMode === "auto" ? "Lock range" : "Auto range"}</button>
-            </div>
-            {scaleMode === "manual" && (
-              <div className="row">
-                <label>min <input type="number" value={manual.min} onChange={(e) => setManual({ ...manual, min: Number(e.target.value) })} /></label>
-                <label>max <input type="number" value={manual.max} onChange={(e) => setManual({ ...manual, max: Number(e.target.value) })} /></label>
-              </div>
-            )}
-            <ColorBar palette={palette} range={shown} />
+            <DisplayControls palette={palette} setPalette={setPalette} scaleMode={scaleMode} setScaleMode={setScaleMode} manual={manual} setManual={setManual} shown={shown} />
 
             <h3>Measurements</h3>
             {hdr ? (

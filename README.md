@@ -5,9 +5,10 @@ A50/A70 radiometric thermal cameras (GigE Vision / GenICam via the FLIR Spinnake
 built for RF-heating experiments on polymer powder and intended to replace day-to-day use of
 FLIR Research Studio.
 
-**Status: Milestones 3 (live view) and 4 (recording) implemented; Milestone 2 validation table
-still open.** `fri-serve` + the React UI show live temperature-linear video at 30 Hz with setup
-diagnostics and record lossless Zarr experiments with full frame accounting. What exists:
+**Status: Milestones 3 (live view), 4 (recording) and 5 (playback) implemented; Milestone 2
+validation table still open.** `fri-serve` + the React UI show live temperature-linear video at
+30 Hz, record lossless Zarr experiments with full frame accounting, and replay them without the
+camera. What exists:
 
 | Piece | Location | State |
 |---|---|---|
@@ -21,6 +22,7 @@ diagnostics and record lossless Zarr experiments with full frame accounting. Wha
 | Acquisition service + FastAPI/WebSocket API | `backend/flir_research_interface/acquisition/`, `api/` | tested (TestClient), verified live |
 | Browser UI (setup + live view, palettes client-side) | `frontend/` (Vite + React + TS) | logic tested with `node --test`; verified in browser against the A70 |
 | Recorder (Zarr v2, bounded queue, gaps/drops accounting, disk guard, crash-detectable manifest) | `backend/flir_research_interface/recording/recorder.py` | tested |
+| Playback (read-only ExperimentReader, experiment/timeline/frame endpoints, scrub/play/step/speed UI) | `backend/flir_research_interface/playback/`, `frontend/src/components/PlaybackPage.tsx` | tested; store verified unchanged after playback |
 | Docs | `docs/` | architecture, radiometry, installation, camera_setup, validation protocol, data_format, visible_camera |
 
 ## Scientific stance

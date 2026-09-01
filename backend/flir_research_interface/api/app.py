@@ -7,7 +7,6 @@ and authentication are Milestone 10 concerns (brief §5).
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import platform
 import shutil
@@ -16,7 +15,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -27,7 +26,8 @@ from flir_research_interface.api.frames import encode_frame_message
 from flir_research_interface.camera import CAMERA_BACKENDS, create_backend
 from flir_research_interface.camera.base import CameraBackend, CameraError, DeviceDescriptor
 from flir_research_interface.camera.simulated import HotspotRampScene
-from flir_research_interface.recording.recorder import Recorder, RecorderState, inspect_experiment
+from flir_research_interface.playback.reader import ExperimentReader, list_experiments
+from flir_research_interface.recording.recorder import Recorder, RecorderState
 from flir_research_interface.sdk_install import detect_and_select, pyspin_importable
 
 logger = logging.getLogger(__name__)
@@ -286,17 +286,48 @@ def create_app(
 
     @app.get("/api/experiments")
     def experiments() -> list[dict[str, Any]]:
+        return list_experiments(app.state.experiments_root)
+
+    def _open(name: str) -> ExperimentReader:
         root: Path = app.state.experiments_root
-        if not root.is_dir():
-            return []
-        out = []
-        for d in sorted(p for p in root.iterdir() if p.is_dir()):
-            info = inspect_experiment(d)
-            info["name"] = d.name
-            meta_path = d / "metadata.json"
-            info["metadata"] = json.loads(meta_path.read_text()) if meta_path.is_file() else None
-            out.append(info)
-        return out
+        if "/" in name or "\\" in name or name in ("", ".", ".."):
+            raise HTTPException(400, "invalid experiment name")
+        d = root / name
+        if not d.is_dir():
+            raise HTTPException(404, f"experiment {name!r} not found")
+        try:
+            return ExperimentReader(d)
+        except FileNotFoundError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.get("/api/experiments/{name}")
+    def experiment_info(name: str) -> dict[str, Any]:
+        r = _open(name)
+        info = r.info()
+        info["events"] = r.events
+        return info
+
+    @app.get("/api/experiments/{name}/timeline")
+    def experiment_timeline(name: str) -> dict[str, list[Any]]:
+        return _open(name).timeline()
+
+    @app.get("/api/experiments/{name}/frames/{index}")
+    def experiment_frame(name: str, index: int) -> Response:
+        r = _open(name)
+        try:
+            frame = r.frame(index)
+        except IndexError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        payload = encode_frame_message(
+            frame,
+            extra={
+                "index": index,
+                "n_frames": r.n_frames,
+                "t_s": r.t_s(index),
+                "source": "playback",
+            },
+        )
+        return Response(content=payload, media_type="application/octet-stream")
 
     # -- live frames -----------------------------------------------------------------------
 

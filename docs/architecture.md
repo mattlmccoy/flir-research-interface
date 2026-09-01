@@ -102,6 +102,15 @@ least every 0.5 s, detects camera frame-id gaps, guards free disk space, and fin
 disconnect and on service shutdown. A second signal-linear stream is not recorded (the camera
 streams one format at a time; temperature-linear is the chosen one).
 
+## 6b. Playback (Milestone 5)
+
+`playback/reader.py` opens an experiment read-only (`zarr` mode `r`, arrays flagged read-only)
+and serves frames through `/api/experiments/{name}/frames/{index}` in the same wire format as
+the live WebSocket, so the browser renderer, palettes and display-range logic are shared between
+live and playback. Timeline pacing uses the recorded device timestamps. Incomplete experiments
+(no manifest) open normally and are labelled INCOMPLETE. Reading never writes: verified by
+hashing the experiment tree before and after a playback session.
+
 ## 7. Network model (Milestone 10)
 
 The acquisition machine owns the camera link (GigE/PoE). The UI is served on the LAN,
