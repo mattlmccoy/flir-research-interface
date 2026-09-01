@@ -66,3 +66,16 @@ def test_parse_ffprobe_json_extracts_video_stream() -> None:
 def test_parse_ffprobe_json_without_video_raises() -> None:
     with pytest.raises(ValueError, match="no video stream"):
         parse_ffprobe_json('{"streams":[]}')
+
+
+def test_find_ffprobe_skips_candidates_that_do_not_run(tmp_path: Path) -> None:
+    from flir_research_interface.visible.rtsp import find_ffprobe
+
+    broken = tmp_path / "broken"
+    broken.write_text("#!/bin/sh\necho 'dyld: Library not loaded' >&2\nexit 1\n")
+    good = tmp_path / "good"
+    good.write_text("#!/bin/sh\necho 'ffprobe version 6.1.6'\n")
+    for f in (broken, good):
+        f.chmod(0o755)
+    assert find_ffprobe(candidates=(str(broken), str(good))) == str(good)
+    assert find_ffprobe(candidates=(str(broken),)) is None

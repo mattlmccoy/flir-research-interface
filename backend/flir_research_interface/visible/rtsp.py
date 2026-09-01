@@ -34,9 +34,11 @@ ENV_HOST = "FRI_CAMERA_HOST"
 ENV_USER = "FRI_RTSP_USER"
 ENV_PASSWORD = "FRI_RTSP_PASSWORD"  # noqa: S105 - variable name, not a secret
 FFPROBE_CANDIDATES = (
-    "ffprobe",
+    # Spinnaker itself requires ffmpeg@6 on macOS, so that build is preferred and known-good.
     "/opt/homebrew/opt/ffmpeg@6/bin/ffprobe",
+    "ffprobe",
     "/opt/homebrew/bin/ffprobe",
+    "/usr/local/bin/ffprobe",
 )
 
 
@@ -94,10 +96,21 @@ def credentials(dotenv: Path | None = None) -> tuple[str | None, str | None, str
     return get(ENV_HOST), get(ENV_USER), get(ENV_PASSWORD)
 
 
-def find_ffprobe() -> str | None:
-    for c in FFPROBE_CANDIDATES:
+def find_ffprobe(candidates: tuple[str, ...] = FFPROBE_CANDIDATES) -> str | None:
+    """First candidate that exists *and runs* (``ffprobe -version`` exits 0).
+
+    A binary that exists but fails to load its libraries (e.g. a Homebrew ffmpeg with a missing
+    dylib) is skipped.
+    """
+    for c in candidates:
         p = shutil.which(c) if "/" not in c else (c if Path(c).is_file() else None)
-        if p:
+        if not p:
+            continue
+        try:
+            r = subprocess.run([p, "-version"], capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if r.returncode == 0:
             return p
     return None
 
