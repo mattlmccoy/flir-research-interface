@@ -123,3 +123,9 @@
 - Visible full-res 1280x960 only via RTSP ch1. Recommendation: thermal over GigE + visible via RTSP as separate subsystem,
   host-clock sync. Wi-Fi: leave off; management/preview only. docs/visible_camera.md written.
 - Homebrew ffmpeg 7 binary broken (libbluray missing); ffmpeg@6 works: /opt/homebrew/opt/ffmpeg@6/bin/ffprobe.
+
+## Session 6: RTSP auth
+- RTSP server = GStreamer; Digest realm "GStreamer RTSP Server"; admin web credentials rejected (401); unknown paths 404.
+- Roles admin/user/viewer; user+viewer disabled by default (manual 10.2, 10.5.5). Hypothesis: RTSP uses user/viewer account,
+  or an "Authentication method Digest/Off" setting exists under Settings > Video (third-party note, unverified).
+- fri-rtsp-check fixed to verify ffprobe binary runs (Homebrew ffmpeg 7 broken; ffmpeg@6 selected).

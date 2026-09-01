@@ -55,6 +55,22 @@ every URL with the password redacted (`rtsp://admin:***@host/...`). Passwords mu
 in shell history, chat, logs, or the repository; if one has been exposed, change it in the
 camera web UI (`http://<ip>/`).
 
+### RTSP authentication findings (2026-09-01)
+
+* Server: `GStreamer RTSP server`; `OPTIONS` works unauthenticated; every real path
+  (`/avc/`, `/avc`, `/avc/ch1`, `/avc?ch0`, `/avc?ch1`, `/mjpg?ch1`) answers
+  `401 Unauthorized` with `WWW-Authenticate: Digest realm="GStreamer RTSP Server"`; unknown
+  paths answer `404`. So routing is fine and the server wants HTTP-Digest credentials.
+* The web-UI **admin** account was rejected by RTSP (ffprobe handles Digest correctly).
+* Manual §10.2/§10.5.5: the camera has three roles, `admin`, `user`, `viewer`; `user` and
+  `viewer` are **disabled by default** and are enabled/given passwords under
+  Administration → User management. Third-party notes for this family mention a video-stream
+  "Authentication method" setting (Digest / Off) in the web UI — not confirmed in the manual.
+* Still to determine on this camera: which account the RTSP server authenticates against
+  (admin vs an enabled `user`/`viewer`), and whether stream authentication can be switched off
+  for a lab-only network. Both are web-UI actions for the operator; the application will accept
+  whichever account works via `.env`.
+
 Open items before implementing: confirm `/avc/ch1` codec/fps/latency once credentials are
 available (`ffprobe rtsp://USER:PASS@<ip>/avc/ch1`, run by the user); check how the visible
 camera's field of view registers to the thermal FOV (needed for any overlay); decide whether the
