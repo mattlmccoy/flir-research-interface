@@ -170,8 +170,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         info = cam.camera_info()
         print(
-            f"Connected: {info.get('model')} serial={info.get('serial')} fw={info.get('firmware')} "
-            f"lens={info.get('lens')} ir_format={info.get('ir_format')} case={info.get('active_case')}"
+            f"Connected: {info.get('model')} serial={info.get('serial')} "
+            f"fw={info.get('firmware')} lens={info.get('lens')} "
+            f"ir_format={info.get('ir_format')} case={info.get('active_case')}"
         )
         print("Object parameters:", info.get("object_parameters"))
         header = csv_header(spots=spots, rois=rois)
@@ -185,9 +186,9 @@ def main(argv: list[str] | None = None) -> int:
             if (len(rows) - 1) % args.print_every == 0:
                 extras = "  ".join(f"{k}={row[k]:.2f}" for k in header[9:])
                 print(
-                    f"t={row['time_s']:7.3f}s id={row['frame_id']:<6} center={row['center_C']:7.2f}C "
-                    f"min={row['frame_min_C']:7.2f} max={row['frame_max_C']:7.2f} "
-                    f"mean={row['frame_mean_C']:7.2f}  {extras}"
+                    f"t={row['time_s']:7.3f}s id={row['frame_id']:<6} "
+                    f"center={row['center_C']:7.2f}C min={row['frame_min_C']:7.2f} "
+                    f"max={row['frame_max_C']:7.2f} mean={row['frame_mean_C']:7.2f}  {extras}"
                 )
             if time.monotonic() >= t_end:
                 break
