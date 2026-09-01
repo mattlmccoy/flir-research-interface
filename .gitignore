@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+
+# Third-party reference downloads (FLIR/Teledyne copyrighted material — never commit)
+plan/reference/
+
+# Experiment data & probe outputs (may contain serial numbers / private data)
+experiments/
+outputs/
+probe_output*/
+*.zarr/
+*.h5
+
+# Node
+node_modules/
+
+# OS / editors
+.DS_Store
+.claude/logs/
+.claude/session-context-*.md
