@@ -129,3 +129,8 @@
 - Roles admin/user/viewer; user+viewer disabled by default (manual 10.2, 10.5.5). Hypothesis: RTSP uses user/viewer account,
   or an "Authentication method Digest/Off" setting exists under Settings > Video (third-party note, unverified).
 - fri-rtsp-check fixed to verify ffprobe binary runs (Homebrew ffmpeg 7 broken; ffmpeg@6 selected).
+
+## Session 7: RTSP resolved
+- Stream account is a dedicated user `rtsp` (Settings > Video settings > Authentication, Digest/Off). Web accounts are irrelevant.
+- /avc/ch1: H.264 1280x960 ~29.25 fps yuv420p (+ONVIF metadata track). /avc/: H.264 640x480 ~30 fps.
+- Raw RFC 2617 Digest client and ffmpeg 6.1 both authenticate -> ffmpeg usable for the visible recorder (M9).

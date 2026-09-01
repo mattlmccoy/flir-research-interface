@@ -42,6 +42,18 @@ Experiment log (all settings restored afterwards):
 5. **Not chosen**: switching the GigE stream to Visual between thermal frames (would drop
    radiometric frames and break the 30 Hz record).
 
+### Measured streams (2026-09-01, `fri-rtsp-check --method both`, account `rtsp`, Digest on)
+
+| URL | Codec | Resolution | Frame rate (ffprobe) | Notes |
+|---|---|---|---|---|
+| `rtsp://<ip>/avc/ch1` | H.264, profile-level-id 424020 (Baseline 4.2), yuv420p | **1280×960** | ~29.25 fps | visible camera, uncropped; plus an `application/vnd.onvif.metadata` RTP track |
+| `rtsp://<ip>/avc/` | H.264, profile-level-id 42401e (Baseline 3.0), yuv420p | 640×480 | ~29.97 fps | web-UI display image (follows the camera's image mode/palette); same metadata track |
+
+Both Digest handshakes were accepted by the built-in RFC 2617 client **and** by ffmpeg 6.1
+(`ffprobe -rtsp_transport tcp`), so ffmpeg is a valid RTSP stack for the recorder. Plan for
+Milestone 9: `ffmpeg -rtsp_transport tcp -i <url> -c copy -f mp4 visible.mp4` (no re-encode) with
+per-packet host receive timestamps, or PyAV for frame-level timestamps if needed.
+
 ### Probing the streams with credentials (`fri-rtsp-check`)
 
 ```bash
