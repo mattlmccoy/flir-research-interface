@@ -32,5 +32,25 @@ the probe output from the real A70 before touching radiometric node names.
 ## Errors Encountered
 - hatchling: `readme = "../README.md"` rejected (must be inside project dir) -> removed readme field from backend/pyproject.toml.
 
+## Outstanding tasks (as of 2026-09-01 evening)
+
+### Blocked on the user
+- [ ] P0 Research Studio comparison: fri-live vs Research Studio at room temp, ~100 C, ~180 C -> docs/validation.md table (Milestone 2 gate).
+- [ ] P0 Free disk space on the acquisition Mac (~2.9 GiB free; recording needs ~1.1 GB/min raw).
+- [ ] P1 Change the camera admin password (it was pasted into chat) and update anything that uses it.
+- [ ] P2 (optional) `brew reinstall libbluray` or `brew reinstall ffmpeg` to repair the broken Homebrew ffmpeg 7.
+
+### Development (next milestones)
+- [ ] M3 Live view: FastAPI + WebSocket service on the verified backend; React/TS UI with one palette, min/max/center, FPS; guided-setup pages (SDK check, subnet fix, camera connect).
+- [ ] M4 Recording: storage format decision (Zarr vs HDF5) -> docs/data_format.md; bounded queues, dropped-frame accounting, crash recovery, disk-space guard, metadata + software version.
+- [ ] M5 Playback, M6 ROI/plots, M7 export, M8 experiment metadata/events.
+- [ ] M9 Visible camera recorder (RTSP /avc/ch1 H.264 1280x960 via ffmpeg -c copy; host-clock alignment).
+- [ ] M10 Packaging + mDNS hostname + installer that prompts for the right Teledyne download.
+
+### Open technical unknowns (docs/radiometry.md s10)
+- [ ] Out-of-range/saturation encoding in temperature-linear counts.
+- [ ] Temperature-linear stream behaviour during NUC and range switch (gaps? stale frames?).
+- [ ] Content of the 3 extra sensor rows (HeightMax 483 vs 480); whether Focus nodes act on this lens.
+
 ## Status
 **Session 4 end:** Milestone 1 DONE. Milestone 2 tooling DONE: SpinnakerCameraBackend (hardware tests pass), analysis/stats.py, `fri-live` validation CLI (149 frames @30.03 fps, 0 lost/dropped). BLOCKED on user: Research Studio side-by-side comparison at >=3 temperatures (docs/validation.md table). Disk ~2.9 GiB free — must be freed before Milestone 4 recording. Next dev: Milestone 3 live view (FastAPI + WebSocket + React) once validation table has at least one row. Next session: review probe_report.json, then implement camera/spinnaker.py and Milestone 2 validation.
