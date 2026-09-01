@@ -326,6 +326,48 @@ def _mac_from_int(value: str | None) -> str | None:
     return ":".join(f"{(v >> shift) & 0xFF:02x}" for shift in (40, 32, 24, 16, 8, 0))
 
 
+def _enumerate_cases(pyspin: Any, nodemap: Any) -> list[dict[str, Any]]:
+    """List measurement cases via NumCases/QueryCase/QueryCase{Low,High}Limit (Kelvin).
+
+    QueryCase is a read-selector: writing it only changes which case the *Query* nodes
+    describe; it does not change the active case (CurrentCase). The original value is restored.
+    """
+    cases: list[dict[str, Any]] = []
+    try:
+        num = nodemap.GetNode("NumCases")
+        query = nodemap.GetNode("QueryCase")
+        if (
+            num is None
+            or query is None
+            or not pyspin.IsReadable(num)
+            or not pyspin.IsWritable(query)
+        ):
+            return cases
+        n = int(pyspin.CIntegerPtr(num).GetValue())
+        q = pyspin.CIntegerPtr(query)
+        original = int(q.GetValue())
+        try:
+            for i in range(n):
+                q.SetValue(i)
+                low = _read_str(pyspin, nodemap, "QueryCaseLowLimit")
+                high = _read_str(pyspin, nodemap, "QueryCaseHighLimit")
+                cases.append(
+                    {
+                        "index": i,
+                        "low_k": float(low) if low else None,
+                        "high_k": float(high) if high else None,
+                        "low_c": round(float(low) - 273.15, 2) if low else None,
+                        "high_c": round(float(high) - 273.15, 2) if high else None,
+                        "enabled": _read_str(pyspin, nodemap, "QueryCaseEnabled"),
+                    }
+                )
+        finally:
+            q.SetValue(original)
+    except Exception as exc:  # noqa: BLE001 - diagnostics only
+        cases.append({"error": f"{type(exc).__name__}: {exc}"})
+    return cases
+
+
 def _ip_from_int(value: str | None) -> str | None:
     try:
         v = int(value) if value is not None else None
@@ -480,6 +522,7 @@ def run_hardware_probe(
         ):
             basics[name] = _read_str(pyspin, nodemap, name)
         report["basics_before"] = basics
+        report["measurement_cases"] = _enumerate_cases(pyspin, nodemap)
 
         if set_temperature_linear:
             logger.warning(
@@ -659,6 +702,10 @@ def _print_summary(report: dict[str, Any]) -> None:
                 f"  {n['name']:<40} {n.get('type', '?'):<12} value={val!r}"
                 + (f" entries={entries}" if entries else "")
             )
+    if report.get("measurement_cases"):
+        print("Measurement cases (Kelvin limits from QueryCase):")
+        for c in report["measurement_cases"]:
+            print(f"  {c}")
     if "timestamp_latch" in report:
         print("Timestamp latch:", json.dumps(report["timestamp_latch"], indent=2))
     if "frame" in report:

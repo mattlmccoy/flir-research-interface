@@ -5,16 +5,20 @@ A50/A70 radiometric thermal cameras (GigE Vision / GenICam via the FLIR Spinnake
 built for RF-heating experiments on polymer powder and intended to replace day-to-day use of
 FLIR Research Studio.
 
-**Status: Milestone 0/1 (feasibility + camera probe).** There is no UI yet. What exists:
+**Status: Milestone 1 done, Milestone 2 (radiometry validation) in progress.** The probe has run
+against the real A70; the Spinnaker backend streams temperature-linear frames and passes its
+hardware tests. There is no UI yet. What exists:
 
 | Piece | Location | State |
 |---|---|---|
 | Hardware abstraction (`CameraBackend`, `Frame`) | `backend/flir_research_interface/camera/base.py` | tested |
 | Simulated camera (uniform / gradient / hotspot ramp scenes) | `backend/flir_research_interface/camera/simulated.py` | tested |
-| FLIR temperature-linear counts to °C conversion | `backend/flir_research_interface/radiometry/temperature_linear.py` | tested, hardware-unverified |
-| Milestone-1 camera probe (`fri-probe`) | `backend/flir_research_interface/probe.py`, `scripts/camera_probe.py` | simulated path tested; **PySpin path not yet run on hardware** |
-| Spinnaker backend | `backend/flir_research_interface/camera/spinnaker.py` | placeholder, gated on probe output |
-| Docs | `docs/` | architecture, radiometry (evidence-only), installation |
+| FLIR temperature-linear counts to °C conversion | `backend/flir_research_interface/radiometry/temperature_linear.py` | tested; Kelvin scale confirmed on the A70 |
+| Milestone-1 camera probe (`fri-probe`) | `backend/flir_research_interface/probe.py`, `scripts/camera_probe.py` | run on the A70; node map, cases, timestamps captured |
+| SDK/PySpin platform checker (`fri-sdk-check`) | `backend/flir_research_interface/sdk_install.py` | tested |
+| Raw GigE Vision discovery + subnet diagnosis | `backend/flir_research_interface/camera/gvcp.py` | tested against a real A70 reply |
+| Spinnaker backend (`SpinnakerCameraBackend`) | `backend/flir_research_interface/camera/spinnaker.py` | **hardware tests pass on the A70** (`pytest --hardware`) |
+| Docs | `docs/` | architecture, radiometry (from the camera's node map), installation, camera_setup, validation template |
 
 ## Scientific stance
 

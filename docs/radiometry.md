@@ -1,132 +1,144 @@
 # Radiometry: how a temperature number is produced
 
-This document contains only claims backed by FLIR/Teledyne documentation or by direct
-inspection of the local SDK. Anything not yet observed on **this** camera is marked
-**UNKNOWN** and is blocked on the Milestone-1 probe (`fri-probe`). Nothing here has been
-verified against the physical A70 yet.
+Every claim below is backed either by FLIR/Teledyne documentation or by direct introspection of
+**this** camera (FLIR A70, firmware 42.0.0, lens `FOL08`, Spinnaker 4.4.0.246) on 2026-09-01
+using `fri-probe`. Items still unverified are marked **UNKNOWN**. Software equivalence with
+FLIR Research Studio (docs/validation.md) has **not** been demonstrated yet.
 
 ## 1. Non-negotiable rules
 
 * FLIR's factory calibration and FLIR-supported radiometric output are the source of truth.
-* The application does **not** implement a detector-count-to-temperature fit, does not hard-code
-  Planck/calibration coefficients, and does not infer temperature from rendered or RTSP video.
-* If a conversion step cannot be tied to FLIR documentation or to nodes observed on the camera,
-  development stops and the gap is recorded here.
+* No detector-count-to-temperature fit, no hard-coded coefficients, no temperatures from
+  rendered or RTSP video.
+* Temperature-linear output is the primary path. Host-side conversion of signal-linear
+  (`Radiometric`) counts is used only as a cross-check, with the camera's own constants.
 
-## 2. Preferred pipeline (temperature-linear mode)
+## 2. The pipeline used by the application
 
 ```
-detector  --factory calibration + object parameters, ON CAMERA-->  16-bit "temperature linear" counts
-        --GigE Vision (PixelFormat=Mono16)-->  Spinnaker Image  --GetNDArray().copy(); Release()-->
-        Frame.counts (uint16)  --T_K = counts * k; T_C = T_K - 273.15-->  temperature (float32 °C)
+detector --factory calibration + object parameters, ON CAMERA--> 16-bit temperature-linear counts
+  --GigE Vision, PixelFormat=Mono16, IRFormat=TemperatureLinear10mK--> Spinnaker Image
+  --GetNDArray().copy(); Release()--> Frame.counts (uint16)
+  --T_K = counts * 0.01 ; T_C = T_K - 273.15--> float32 °C   (radiometry/temperature_linear.py)
 ```
 
-with `k = 0.01 K/count` for `IRFormat = TemperatureLinear10mK` and `k = 0.1 K/count` for
-`IRFormat = TemperatureLinear100mK`. Implemented in
-`backend/flir_research_interface/radiometry/temperature_linear.py`.
+### Verified on this camera (probe run with `--set-temperature-linear`, 2026-09-01 18:13)
 
-### Evidence
-
-| Claim | Source (fetched 2026-09-01) |
+| Observation | Value |
 |---|---|
-| A50/A70 stream "Temperature Linear 16-bit"; pixel formats YUV411/MONO8/MONO16; GigE Vision + GenICam (SFNC 2.4); 30 Hz; A70 640×480 | FLIR A50/A70 Image Streaming datasheet, REV1 01/06/2022 (moviTHERM mirror) |
-| "For Image Streaming cameras, use a GigE Vision SDK to control the camera and receive a radiometric image stream." | FLIR A50/A70 user's manual T810579 (en-US), §7 |
-| "To stream temperature linear, the PixelFormat should be set to Mono16 and IRFormat should be set to TemperatureLinear 100mK or TemperatureLinear 10mK." Cameras listed: Ax5, **A50, A70**, A400, A700, A3xx, A6xx, A6xxx, A8xxx. "the counts-to-temperature conversion take place on the camera" | FLIR KB 1021 "Temperature Linear Mode", <https://flir.custhelp.com/app/answers/detail/a_id/1021> |
-| "TemperatureLinear 10 mK: multiply the signal by 0.01 to get correct temperature … Signal of 50000 will correspond to 500 Kelvin." 100 mK: multiply by 0.1 | FLIR KB "How do I configure my camera to stream a temperature linear signal?", <https://www.flir.com/support-center/instruments2/how-do-i-configure-my-camera-to-stream-a-temperature-linear-signal/> |
-| Exact enumeration strings `TemperatureLinear10mK`, `TemperatureLinear100mK`, `Radiometric` on node `IRFormat`; `PixelFormat` entry `Mono16`; Celsius = `(image_data * 0.01) - 273.15` | FLIR example `gige_example_A400_A700.py` attached to KB 4186 "Spinnaker SDK – Connecting to a FLIR A50/A70 or A400/A500/A700 image streaming camera", <https://flir.custhelp.com/app/answers/detail/a_id/4186> (local copy: `plan/reference/`, not committed) |
-| Same node names observed on an A70 through a third-party GenICam stack: `IRFormat`, `ObjectEmissivity` (0.85), `ReflectedTemperature` (298 K), `AtmosphericTemperature` (298 K), `ImageMode = Thermal`, `Mono16` | MathWorks, "Acquire and Analyze Images from FLIR A70 Thermal Infrared Camera" |
-| Same node names used with PySpin on an A50 (`IRFormat`, `PixelFormat`, calibration nodes `R,B,F,X,alpha1,alpha2,beta1,beta2,J1,J0`) | LDAQ `LDAQ.flir.acquisition` (open-source, "adapted from examples provided by FLIR") |
+| `IRFormat` entries | `Radiometric` (as found), `TemperatureLinear100mK`, `TemperatureLinear10mK` |
+| `PixelFormat` entries | `Mono8`, `Mono16` (as found), `YUV422_8_UYVY`, `YCbCr411_8_Planar` |
+| Frame in `TemperatureLinear10mK` | 640×480 `uint16`, min 30258, max 30394, center 30283 |
+| Decoded with k = 0.01 K/count | 29.43 … 30.79 °C, center 29.68 °C (room + warm desk scene) |
+| Cross-check: FLIR thermography formula on the `Radiometric` frame two minutes earlier, using the camera's own `R,B,F,J0,J1,X,alpha1,alpha2,beta1,beta2` and object parameters | center 30.23 °C, 29.94 … 31.66 °C |
+| Camera's own auto-scale at the time (`ScaleLimitLow/Upper`) | 301.1 … 305.1 K = 28.0 … 32.0 °C |
+
+Conclusion: the multiplier yields **Kelvin**, exactly as FLIR's KB and example script state
+(the MathWorks page's "°C per unit" wording is wrong). The 0.5 °C spread between the two methods
+is within the drift expected of two frames taken two minutes apart on an uncontrolled scene and
+is not a calibration statement; the formal comparison is Research Studio (docs/validation.md).
+
+### Documentary sources
+
+| Claim | Source |
+|---|---|
+| "PixelFormat … Mono16 and IRFormat … TemperatureLinear 100mK or … 10mK"; conversion "take[s] place on the camera"; cameras include A50/A70 | FLIR KB 1021 "Temperature Linear Mode" |
+| 10 mK: ×0.01; 100 mK: ×0.1; "Signal of 50000 will correspond to 500 Kelvin" | FLIR KB "How do I configure my camera to stream a temperature linear signal?" |
+| Exact entry strings; `(image_data * 0.01) - 273.15`; signal-linear formula with `R,B,F,J0,J1,X,alpha1,alpha2,beta1,beta2` | FLIR `gige_example_A400_A700.py` (KB 4186) |
 | "Temperature linear data is calculated based off of the object parameters that are set in the camera. If these are inaccurate, there is no way to change them in post-process like you can with raw data." | FLIR KB 1021 |
 
-### Consequence for the application
+## 3. Object parameters (all present, category `ObjectParameters`)
 
-* Object parameters (emissivity, reflected temperature, atmospheric temperature, distance,
-  humidity, external optics) must be **set on the camera before recording**, displayed at all
-  times, and stored with every experiment. Changing them mid-recording changes the data; the
-  application must timestamp and log such changes (project brief §30).
-* Because the conversion is linear and documented, storing raw `uint16` counts plus the
-  active `IRFormat` is lossless and sufficient; temperature is derived on load.
+| Node | Unit | Range | Value found |
+|---|---|---|---|
+| `ObjectEmissivity` | – | 0…1 | 0.95 |
+| `ReflectedTemperature` | Kelvin | 0…5000 | 293.15 |
+| `AtmosphericTemperature` | Kelvin | 0…5000 | 293.15 |
+| `ObjectDistance` | meters | 0…10000 | 1.0 |
+| `RelativeHumidity` | fraction | 0…1 | 0.5 |
+| `ExtOpticsTemperature` | Kelvin | 0…5000 | 293.15 |
+| `ExtOpticsTransmission` | – | 0…1 | 1.0 |
+| `EstimatedTransmission` | – | 0…1 | 0.0 (read-back of the camera's own estimate) |
+| `UseWindowTemperature` | enum | Off/On | Off |
 
-### Known discrepancy to resolve on hardware
+Consequence: because the camera applies these before emitting temperature-linear counts, the
+application must set them **before recording**, display them at all times, store them with every
+experiment, and log any mid-run change with old/new values (brief §30).
 
-The MathWorks page describes the multiplier as giving "°C per unit". FLIR's own KB and FLIR's
-example script both say the product is **Kelvin** (subtract 273.15 for °C). We implement the
-FLIR statement. The probe verifies it trivially: a room-temperature scene in 10 mK mode should
-read roughly 29 300 counts (≈293 K), not roughly 2 000.
+## 4. Measurement range ("case") selection (category `CameraControl`)
 
-## 3. `Radiometric` (signal-linear) mode: out of scope for v1
+`NumCases`=3, `CurrentCase` (RW) selects the active range, `QueryCase` (RW) selects which case
+`QueryCaseLowLimit`/`QueryCaseHighLimit` (Kelvin) and `QueryCaseEnabled` describe. Enumerated:
 
-In `IRFormat = Radiometric` the camera streams signal-linear counts and the host must apply
-FLIR's thermography formula using per-camera calibration constants (`R, B, F, X, alpha1,
-alpha2, beta1, beta2, J0, J1`, read from camera nodes) plus object parameters. FLIR's example
-script shows this computation. We do **not** implement it now because:
+| Case | Low | High |
+|---|---|---|
+| 0 | −20 °C | 175 °C |
+| **1 (active)** | **−20 °C** | **250 °C** |
+| 2 | 175 °C | 1000 °C |
 
-1. Temperature-linear mode already delivers FLIR's own conversion.
-2. Reproducing the formula on the host is exactly the class of work we must first validate
-   against Research Studio before trusting.
+`LensName`=`FOL08`, `Segment`=`scientific`. This is what Research Studio shows as "FOL08NOF,
+−20…250 °C". Switching case triggers a NUC and the `RangeSwitchStart/End` events (§6).
+**UNKNOWN:** out-of-range encoding in temperature-linear counts (clamp vs sentinel). To be
+measured with a target hotter than 250 °C or by switching to case 0 and viewing a >175 °C source.
 
-Whether signal-linear frames should additionally be recorded (to allow post-hoc emissivity
-changes) is an open storage question; it doubles storage and is deferred until the probe shows
-the mode is available on this camera.
+## 5. Signal-linear (`Radiometric`) mode: cross-check only
 
-## 4. Object parameters
+Camera exposes the constants (category `Measurement`): `R` 22474.88, `B` 1520.0, `F` 1.05,
+`J0` 19896 (offset), `J1` 20.4925 (gain), `X` 0.732, `alpha1` 1.239e-8, `alpha2` 1.1095e-8,
+`beta1` 3.18e-3, `beta2` 3.1802e-3 ("Calibration parameter for conversion between corrected
+signal to temperature in Kelvin"). A `ChunkSelector` entry `Calibration` exists (chunk mode off
+by default). The application does not convert signal-linear data for measurement; it may record
+these constants as metadata and use FLIR's formula only for diagnostics.
 
-Manual names (web UI): Emissivity, Reflected temperature, Distance, Relative humidity,
-Atmospheric temperature. GenICam names observed on an A70 by MathWorks: `ObjectEmissivity`,
-`ReflectedTemperature`, `AtmosphericTemperature` (temperatures in Kelvin).
-**UNKNOWN:** exact node names for distance, relative humidity and external optics on this
-camera; their units and ranges. The probe highlights every node whose name contains
-`Emiss`, `Reflected`, `Atmospher`, `Humidity`, `Distance`, `ExtOptics`, `Transmission`.
+## 6. NUC, events, frame rate
 
-## 5. Measurement range / calibration case
+* `NUCAction` (command) performs a NUC; `NUCMode` ∈ {Off, Automatic}, found Automatic.
+* Events available via `EventSelector`/`EventNotification`: `NUCStart`, `NUCEnd`,
+  `RangeSwitchStart`, `RangeSwitchEnd`, `FOVSwitchStart/End`, `AcquisitionStart/End`. These let
+  the recorder mark NUCs and range switches in the experiment timeline (brief §9, §21).
+* `LineTrigger` can map a digital input to `ExecuteNuc`/`DisableNuc`; `CounterEventSource` can
+  count `NUC` events.
+* `IRFrameRate` ∈ {Rate60Hz, Rate30Hz (found), Rate15Hz, Rate7Hz, Rate4Hz}; `AcquisitionFrameRate`
+  1…60 Hz, found 30. `ImageCompressionMode` description: "Radiometric framerate locked at 30 Hz".
+* `ImageMode` ∈ {Thermal (found), MSX, Visual, Macro, FSX}; `VideoSourceSelector` ∈ {IR, Visual}.
+  Only `Thermal` + `IR` is radiometric.
 
-Research Studio shows this camera's active calibration as approximately `FOL08NOF, -20…250 °C`.
-The datasheet lists A70 object-temperature ranges −20…175 °C, −20…250 °C and 175…1000 °C. The
-manual states the range "can also be changed over GenICam" for Image Streaming cameras but
-names no node. **UNKNOWN:** the node(s) that list and select ranges/cases. The probe
-highlights nodes containing `Case`, `Range`, `Calibrat`, `Sensor`. Do not hard-code any range.
+## 7. Timestamps (verified)
 
-## 6. Timestamps
+* `Image.GetTimeStamp()` returned e.g. 1788300782851000000 with `GevTimestampTickFrequency` =
+  1 000 000 000 → **nanoseconds**, and the value is Unix-epoch-like (the camera keeps wall-clock
+  time, SNTP is in its protocol list). Frame timestamps end in `000000`: **1 ms granularity**.
+* `TimestampLatch` + `TimestampLatchValue` work (`GevTimestampControlLatch` absent). Two latches
+  40 s apart gave camera − host = **−40.762 s** both times, so the offset is stable and can be
+  measured once per session and stored. Latch round-trip on the host was ~3 ms.
+* `PtpEnable`/`PtpStatus` exist (PTP disabled). Option for future multi-instrument sync.
+* Per frame the recorder stores `frame_id` (`Image.GetFrameID()`), device timestamp, host
+  `time.time_ns()` at receipt, and the session's measured camera↔host offset.
 
-* `Image.GetTimeStamp()` – "Gets the time stamp for the image in nanoseconds" (PySpin 3.1
-  API reference, local `PySpinDoc.pdf`). `ChunkData.GetTimestamp()` – "Timestamp of the image
-  … at the time of the FrameStart internal event".
-* Camera-to-host offset: Teledyne example `CameraTimeToPCTime.py` latches the camera clock
-  (`TimestampLatch` + `TimestampLatchValue`, or on older GigE models `GevTimestampControlLatch`
-  + `GevTimestampValue`) and compares with `time.time()`; timestamps are divided by 1e9.
-* The A50/A70 datasheet lists IEEE 1588 (PTP) among supported protocols.
-* **UNKNOWN for the A70:** which latch nodes exist, the tick unit actually reported, whether
-  chunk data is supported, whether timestamps are monotonic across NUC events. The probe
-  executes whichever latch exists, bracketed by host `time_ns()`, and records one frame's
-  `GetTimeStamp()` and `GetFrameID()`.
+## 8. Frame geometry and buffers
 
-## 7. NUC
+* `Width` 640, `Height` 480, but `SensorHeight`/`HeightMax` = 483 and `OffsetY` 0…3.
+  **UNKNOWN:** content of the 3 extra rows (telemetry?). The application uses the default 640×480.
+* `PayloadSize` 614400 = 640×480×2 bytes. `GevSCPSPacketSize` 1444; `GevDeviceMaximumPacketSize`
+  1440 on the current adapter (MTU 1500, no jumbo frames yet).
+* Stream layer (TL stream node map) exposes `StreamBufferHandlingMode` {OldestFirst,
+  OldestFirstOverwrite, NewestOnly, NewestFirst}, `StreamBufferCountManual`, and counters
+  `StreamLostFrameCount`, `StreamDroppedFrameCount`, `StreamIncompleteFrameCount`,
+  `StreamMissedPacketCount`, `StreamPacketResendRequestCount`. The recorder will read these to
+  account for every frame (brief §16, §27).
+* Buffer ownership: `GetNextImage()` → `IsIncomplete()` → `GetNDArray()` copied → `Release()`;
+  teardown `EndAcquisition()`, `DeInit()`, `del cam`, `cam_list.Clear()`, `ReleaseInstance()`.
+  A pending Python exception whose traceback references SDK objects makes `ReleaseInstance()`
+  fail with "something still holds a reference"; handle SDK exceptions before teardown.
 
-Manual §10.4.7 / §18.6: NUC is an offset update with an internal shutter; performed at start-up,
-on range change, on ambient change; automatic intervals Auto / 10 / 30 / 60 min / custom / OFF
-and manual trigger exist in the web UI. **UNKNOWN:** GenICam node names for triggering NUC,
-setting the interval, and detecting a NUC in progress. The probe highlights `NUC`/`Nuc`/
-`Shutter`/`Calibrat` nodes.
+## 9. Focus and other hardware nodes
 
-## 8. Buffer ownership
+`FocusControl` exposes `FocusPos`, `AutoFocus`, `FocusDistance`, etc., and `LensConnected`=True.
+The datasheet describes the A50/A70 as fixed-focus with a manual focus tool. **UNKNOWN:** whether
+these nodes act on this lens. Not part of the MVP.
 
-FLIR's examples: `GetNextImage()` → `IsIncomplete()` check → `GetNDArray()` → `Release()`, and
-"Images retrieved directly from the camera … need to be released in order to keep from filling
-the buffer." The probe copies the array (`np.array(..., copy=True)`) before `Release()` and the
-`Frame` type stores only that copy. Teardown order follows the examples: `EndAcquisition()`,
-`DeInit()`, `del cam`, `cam_list.Clear()`, `system.ReleaseInstance()`.
+## 10. Remaining before the pipeline is trusted for experiments
 
-## 9. Out-of-range / saturation
-
-**UNKNOWN:** how temperature-linear output encodes values outside the selected range
-(clamped, 0, 65535, or flagged). Until the probe and a hot/cold target answer this, the
-application must not present clamped values as valid; range warnings are mandatory (brief §42).
-
-## 10. What the probe must show before Milestone 2 starts
-
-1. Device identity (model, serial, firmware, IP, MAC).
-2. Full device / TL-device / TL-stream node maps (`probe_report.json`).
-3. Whether `IRFormat` exists, its entries and current value; whether `PixelFormat` offers `Mono16`.
-4. Range/case nodes; object-parameter nodes; NUC nodes; timestamp latch nodes.
-5. One frame: pixel format, bits/pixel, shape, `GetTimeStamp()`, `GetFrameID()`, min/max/center counts.
-6. If already in temperature-linear mode: the derived center temperature, for a plausibility check.
+1. Software equivalence vs Research Studio at ≥3 temperatures (docs/validation.md).
+2. Out-of-range/saturation encoding (§4).
+3. Behaviour of temperature-linear output during a NUC and a range switch (frame gaps? stale frames?).

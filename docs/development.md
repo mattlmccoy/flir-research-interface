@@ -4,7 +4,8 @@
 
 * Red-green TDD for all testable logic (`backend/tests`). Write the failing test first.
 * `uv run pytest` – unit tests (no hardware). `uv run pytest --hardware` – also run tests marked
-  `hardware` (need a camera + PySpin; none exist yet).
+  `hardware` (need PySpin and a reachable camera; they change `IRFormat`/`PixelFormat` temporarily
+  and restore them).
 * `uv run ruff check . && uv run ruff format .` – lint/format. `uv run mypy flir_research_interface` – types (strict).
 * Only `camera/spinnaker.py` and `probe.py` may import PySpin. Everything else consumes
   `CameraBackend`/`Frame`.

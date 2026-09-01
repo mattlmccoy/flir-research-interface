@@ -102,3 +102,15 @@
 - Spinnaker GetInterfaces() did not list en13 at all (only Wi-Fi + loopback) -> to re-check after static IP is set.
 - Fix requires admin: `sudo networksetup -setmanual "USB 10/100/1000 LAN" 192.168.7.1 255.255.255.0`.
 - Added camera/gvcp.py (TDD, real redacted fixture) + probe fallback + docs/camera_setup.md.
+
+## Session 4 (2026-09-01 18:1x): probe against A70 SUCCEEDED (host adapter set to 192.168.7.1/24)
+- Spinnaker lists en13 as GEV Interface 2 once it has a routable IP. Camera Init OK, 249 device nodes, TL stream 61 nodes.
+- IRFormat entries exactly {Radiometric, TemperatureLinear100mK, TemperatureLinear10mK}; found Radiometric + Mono16.
+- TempLinear10mK frame: 30258..30394 counts -> 29.4..30.8 C (Kelvin*100 confirmed). FLIR formula on Radiometric frame w/ camera constants: 30.2 C center.
+- Cases: NumCases=3; QueryCase 0: -20..175 C, 1 (CurrentCase): -20..250 C, 2: 175..1000 C. LensName FOL08, Segment scientific.
+- Object params: ObjectEmissivity 0.95, ReflectedTemperature 293.15 K, AtmosphericTemperature 293.15 K, ObjectDistance 1.0 m, RelativeHumidity 0.5, ExtOptics*.
+- NUCAction/NUCMode; events NUCStart/End, RangeSwitchStart/End. IRFrameRate enum 4-60 Hz.
+- Timestamps: ns @1e9 tick, epoch-like, 1 ms granularity; camera-host offset -40.762 s (stable across 2 latches).
+- Stream counters: StreamLostFrameCount, StreamDroppedFrameCount, StreamIncompleteFrameCount, StreamMissedPacketCount.
+- HeightMax/SensorHeight 483 vs Height 480 (3 extra rows, unknown content). Focus nodes exist (motorized?) despite fixed-focus datasheet.
+- Probe outputs live in probe_output_a70*/ (gitignored; contain serial).

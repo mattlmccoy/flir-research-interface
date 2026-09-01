@@ -42,8 +42,10 @@ def create_backend(name: str, **kwargs: Any) -> CameraBackend:
 
 # Register built-in backends. Import here (not at the top) so base types are defined first.
 from flir_research_interface.camera.simulated import SimulatedCameraBackend  # noqa: E402
+from flir_research_interface.camera.spinnaker import SpinnakerCameraBackend  # noqa: E402
 
 register_backend("simulated")(SimulatedCameraBackend)
+register_backend("spinnaker")(SpinnakerCameraBackend)
 
 __all__ = [
     "CAMERA_BACKENDS",
@@ -53,6 +55,7 @@ __all__ = [
     "Frame",
     "NotConnectedError",
     "SimulatedCameraBackend",
+    "SpinnakerCameraBackend",
     "create_backend",
     "register_backend",
 ]
