@@ -35,13 +35,17 @@ the probe output from the real A70 before touching radiometric node names.
 ## Outstanding tasks (as of 2026-09-01 evening)
 
 ### Blocked on the user
-- [ ] P0 Research Studio comparison: fri-live vs Research Studio at room temp, ~100 C, ~180 C -> docs/validation.md table (Milestone 2 gate).
+- [ ] P0 Research Studio comparison (software equivalence): fri-live vs Research Studio on available scenes (room temperature, a warm object such as a hand/laptop/coffee mug), same case/object params -> docs/validation.md table. No hot targets exist; the camera's 3 factory cases ARE the calibration, we never do our own.
 - [ ] P0 Free disk space on the acquisition Mac (~2.9 GiB free; recording needs ~1.1 GB/min raw).
-- [ ] P1 Change the camera admin password (it was pasted into chat) and update anything that uses it.
 - [ ] P2 (optional) `brew reinstall libbluray` or `brew reinstall ffmpeg` to repair the broken Homebrew ffmpeg 7.
 
 ### Development (next milestones)
-- [ ] M3 Live view: FastAPI + WebSocket service on the verified backend; React/TS UI with one palette, min/max/center, FPS; guided-setup pages (SDK check, subnet fix, camera connect).
+- [x] M3 Live view (DONE 2026-09-01 evening; verified in browser against the A70: 30 fps camera, ~15 fps display, palettes, auto/lock range, hover readout, setup page with SDK check + discovery + connect):
+  1. acquisition/service.py: camera thread, newest-wins viz slot, counters, state machine (TDD, simulated backend)
+  2. api/app.py: FastAPI REST (/api/health, /api/setup/sdk, /api/setup/discovery, /api/camera/{connect,disconnect,info,status}) + WS /ws/frames (JSON header + uint16 LE counts, <=15 Hz) (TDD, TestClient)
+  3. frontend/: Vite+React+TS; palette LUTs, counts->C, autoscale in pure TS modules tested with `node --test`; canvas view, hover readout, status bar, setup page
+  4. e2e: browser against simulated camera, then real A70
+  Decisions: palette applied client-side only; server never sends colorized data; viz drops counted, never silent; recording not in M3.
 - [ ] M4 Recording: storage format decision (Zarr vs HDF5) -> docs/data_format.md; bounded queues, dropped-frame accounting, crash recovery, disk-space guard, metadata + software version.
 - [ ] M5 Playback, M6 ROI/plots, M7 export, M8 experiment metadata/events.
 - [ ] M9 Visible camera recorder (RTSP /avc/ch1 H.264 1280x960 via ffmpeg -c copy; host-clock alignment).

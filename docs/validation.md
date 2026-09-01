@@ -40,7 +40,9 @@ timestamps. Use `--simulated` for a dry run without hardware.
    image; confirm Research Studio's indexing convention once by placing a spot at an unmistakable
    feature) and a box matching `--roi` (half-open: `x0,y0,x1,y1` covers columns x0..x1-1).
 4. Run `fri-live` for ≥5 s and read both tools within the same seconds. Record the pairs below.
-5. Repeat at ≥3 temperatures spanning the experimental range (room temperature, ~100 °C, ~180 °C).
+5. Repeat on the scenes available: room-temperature background, then warmer objects (a hand, a laptop
+   exhaust, a mug of hot water). No reference hot targets exist and none are required for question A;
+   the camera's three factory cases are the calibration and are never re-derived here.
 6. Also record: firmware, Spinnaker version, `fri-live` commit, and the camera's own
    `ScaleLimitLow/Upper` if visible.
 
@@ -55,5 +57,5 @@ format's own resolution is 0.01 K; differences beyond ~0.1 °C indicate a differ
 parameter, a different case, or a NUC between readings). ROI min/max/mean should match to the same
 tolerance when the boxes cover identical pixels.
 
-Until this table is filled at three temperatures, the application is **not** validated for
-experimental use.
+Until this table has rows covering at least two distinct scene temperatures, the application is
+**not** validated for experimental use.

@@ -60,7 +60,7 @@ frames() -> Iterator[Frame]           blocking generator of frames
 Backends register under a name (`register_backend("simulated")`) so a future
 `AravisCameraBackend` or a second SDK can be added without touching callers.
 
-## 4. Acquisition and recording model (planned, Milestone 3–4)
+## 4. Acquisition and recording model (acquisition implemented in Milestone 3; recording is Milestone 4)
 
 ```
    camera thread (PySpin GetNextImage loop; owns SDK buffers; copies + releases)
@@ -69,6 +69,15 @@ Backends register under a name (`register_backend("simulated")`) so a future
         +--> analysis queue    (bounded; drops are counted separately)
         +--> visualization queue (bounded, newest-wins; drops are expected and counted)
 ```
+
+Implemented: `acquisition/service.py` runs the camera generator on one thread, keeps a
+newest-wins slot for visualization (`viz_dropped` counts frames replaced unread; expected and
+reported, never silent), tracks camera fps from device timestamps, exposes a
+`disconnected/connected/acquiring/error` state, and offers `add_listener()` for the future
+recorder. `api/app.py` (FastAPI) exposes REST for setup diagnostics and camera control and a
+WebSocket that sends a JSON header (FLIR conversion rule + server-side stats) followed by the
+raw `uint16` counts, rate-limited (default 15 Hz); the browser derives °C and applies palettes
+locally, so no colorized pixels ever leave the server.
 
 Rules: the camera thread never blocks on a consumer; the recording path has priority; every
 queue reports its dropped-frame count; the recorder runs inside the service process so a

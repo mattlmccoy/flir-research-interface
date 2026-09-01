@@ -34,3 +34,14 @@ deterministic noise, `realtime=True` to pace at `fps`.
 | 2 Radiometry validation | `probe_report.json` from the real A70 reviewed; node names confirmed |
 | 3 Live view | Milestone 2 results in `docs/validation.md` |
 | 4 Recording | storage format decision recorded in `docs/data_format.md` |
+
+## Running the live view (Milestone 3)
+
+```bash
+cd frontend && npm install && npm run build     # builds frontend/dist, served by the backend
+cd ../backend && uv run fri-serve               # http://127.0.0.1:8000  (--backend spinnaker|simulated, --viz-fps 15)
+```
+
+Frontend development with hot reload: `npm run dev` in `frontend/` (port 5173, proxies `/api`
+and `/ws` to :8000). Frontend logic tests: `npm test` (Node's built-in runner on `src/lib/*.test.ts`).
+The service binds to localhost only; LAN exposure with authentication is Milestone 10.
