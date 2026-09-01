@@ -18,7 +18,7 @@ hardware tests. There is no UI yet. What exists:
 | SDK/PySpin platform checker (`fri-sdk-check`) | `backend/flir_research_interface/sdk_install.py` | tested |
 | Raw GigE Vision discovery + subnet diagnosis | `backend/flir_research_interface/camera/gvcp.py` | tested against a real A70 reply |
 | Spinnaker backend (`SpinnakerCameraBackend`) | `backend/flir_research_interface/camera/spinnaker.py` | **hardware tests pass on the A70** (`pytest --hardware`) |
-| Docs | `docs/` | architecture, radiometry (from the camera's node map), installation, camera_setup, validation template |
+| Docs | `docs/` | architecture, radiometry (from the camera's node map), installation, camera_setup, validation protocol, visible_camera investigation |
 
 ## Scientific stance
 

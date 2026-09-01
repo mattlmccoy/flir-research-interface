@@ -114,3 +114,12 @@
 - Stream counters: StreamLostFrameCount, StreamDroppedFrameCount, StreamIncompleteFrameCount, StreamMissedPacketCount.
 - HeightMax/SensorHeight 483 vs Height 480 (3 extra rows, unknown content). Focus nodes exist (motorized?) despite fixed-focus datasheet.
 - Probe outputs live in probe_output_a70*/ (gitignored; contain serial).
+
+## Session 5 (2026-09-01 18:2x): visible camera / RTSP / Wi-Fi investigation
+- RTSP port 554 open; all URLs (/avc/, /avc/ch1, /mjpg/ch1, /mpeg4/ch1) -> 401 Unauthorized. Web UI redirects to /login.
+  Credentials are on the calibration certificate; user must supply (never typed by the assistant, never committed).
+- GigE single stream: Mono16 = radiometric regardless of ImageMode/VideoSourceSelector; Mono8/YUV422 = display rendering
+  following ImageMode (Thermal palette / MSX / Visual 640x480). YUV422 needs ImageProcessor.Convert -> BGR8 (GetNDArray fails).
+- Visible full-res 1280x960 only via RTSP ch1. Recommendation: thermal over GigE + visible via RTSP as separate subsystem,
+  host-clock sync. Wi-Fi: leave off; management/preview only. docs/visible_camera.md written.
+- Homebrew ffmpeg 7 binary broken (libbluray missing); ffmpeg@6 works: /opt/homebrew/opt/ffmpeg@6/bin/ffprobe.
