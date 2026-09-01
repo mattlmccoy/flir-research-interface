@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import platform
+import shutil
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -271,10 +272,15 @@ def create_app(
     @app.get("/api/recording/status")
     def recording_status() -> dict[str, Any]:
         rec = recorder()
+        root: Path = app.state.experiments_root
         if rec is None:
+            probe = root if root.exists() else root.parent
+            free = shutil.disk_usage(probe).free / 1e9 if probe.exists() else None
             return {
                 "state": RecorderState.IDLE.value,
-                "experiments_root": str(app.state.experiments_root),
+                "experiments_root": str(root),
+                "free_space_gb": free,
+                "min_free_gb": app.state.min_free_gb,
             }
         return rec.stats()
 
