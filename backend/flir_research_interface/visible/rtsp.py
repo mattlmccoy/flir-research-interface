@@ -11,9 +11,13 @@ video is compressed display/visible imagery, never measurement data.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import re
+import secrets
 import shutil
+import socket
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -165,6 +169,143 @@ def probe_stream(url: str, *, ffprobe: str, timeout_s: float = 20.0) -> dict[str
     return parse_ffprobe_json(r.stdout)
 
 
+# --------------------------------------------------------------------------------------
+# Raw RTSP client with HTTP-Digest (RFC 2617 / RFC 2069) — independent of ffmpeg.
+# Used to tell "ffmpeg's handshake fails" apart from "the camera rejects this account".
+# --------------------------------------------------------------------------------------
+
+
+def parse_digest_challenge(header: str) -> dict[str, str]:
+    """Parse ``WWW-Authenticate: Digest k="v", k2=v2`` into a dict (keys lower-case)."""
+    body = header.strip()
+    if body.lower().startswith("digest"):
+        body = body[6:]
+    out: dict[str, str] = {}
+    for m in re.finditer(r'(\w+)\s*=\s*(?:"([^"]*)"|([^,\s]+))', body):
+        out[m.group(1).lower()] = m.group(2) if m.group(2) is not None else m.group(3)
+    return out
+
+
+def digest_response(
+    *,
+    user: str,
+    password: str,
+    realm: str,
+    method: str,
+    uri: str,
+    nonce: str,
+    qop: str | None,
+    nc: str = "00000001",
+    cnonce: str = "",
+) -> str:
+    """MD5 Digest ``response`` value (RFC 2617 with qop; RFC 2069 form when qop is None)."""
+
+    def h(x: str) -> str:
+        return hashlib.md5(x.encode("utf-8")).hexdigest()  # noqa: S324 - mandated by the RFC
+
+    ha1 = h(f"{user}:{realm}:{password}")
+    ha2 = h(f"{method}:{uri}")
+    if qop:
+        return h(f"{ha1}:{nonce}:{nc}:{cnonce}:{qop}:{ha2}")
+    return h(f"{ha1}:{nonce}:{ha2}")
+
+
+def parse_rtsp_response(raw: bytes) -> tuple[int, dict[str, str], bytes]:
+    """Split an RTSP response into (status, lower-case headers, body)."""
+    head, _, body = raw.partition(b"\r\n\r\n")
+    lines = head.decode("utf-8", errors="replace").split("\r\n")
+    status = int(lines[0].split()[1])
+    headers: dict[str, str] = {}
+    for line in lines[1:]:
+        k, _, v = line.partition(":")
+        if k:
+            headers[k.strip().lower()] = v.strip()
+    return status, headers, body
+
+
+def _rtsp_exchange(host: str, port: int, request: str, timeout_s: float = 6.0) -> bytes:
+    sock = socket.create_connection((host, port), timeout=timeout_s)
+    try:
+        sock.sendall(request.encode("utf-8"))
+        data = b""
+        while b"\r\n\r\n" not in data:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+        # read body if announced
+        head, _, body = data.partition(b"\r\n\r\n")
+        m = re.search(rb"(?i)content-length:\s*(\d+)", head)
+        if m:
+            need = int(m.group(1))
+            while len(body) < need:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                body += chunk
+            data = head + b"\r\n\r\n" + body
+        return data
+    finally:
+        sock.close()
+
+
+def describe_with_digest(
+    host: str, path: str, *, user: str, password: str, port: int = 554
+) -> dict[str, Any]:
+    """DESCRIBE with a proper Digest handshake; returns status, challenge, and SDP summary.
+
+    Never includes the password in the result; the Authorization header is not returned.
+    """
+    url = f"rtsp://{host}{path}"
+    first = _rtsp_exchange(
+        host, port, f"DESCRIBE {url} RTSP/1.0\r\nCSeq: 1\r\nAccept: application/sdp\r\n\r\n"
+    )
+    status, headers, _ = parse_rtsp_response(first)
+    result: dict[str, Any] = {"url": url, "first_status": status}
+    if status != 401:
+        result["final_status"] = status
+        return result
+    challenge = parse_digest_challenge(headers.get("www-authenticate", ""))
+    result["challenge"] = challenge
+    qop = "auth" if "auth" in (challenge.get("qop") or "") else None
+    cnonce = secrets.token_hex(8) if qop else ""
+    resp = digest_response(
+        user=user,
+        password=password,
+        realm=challenge.get("realm", ""),
+        method="DESCRIBE",
+        uri=url,
+        nonce=challenge.get("nonce", ""),
+        qop=qop,
+        cnonce=cnonce,
+    )
+    auth = (
+        f'Digest username="{user}", realm="{challenge.get("realm", "")}", '
+        f'nonce="{challenge.get("nonce", "")}", uri="{url}", response="{resp}"'
+    )
+    if qop:
+        auth += f', qop={qop}, nc=00000001, cnonce="{cnonce}"'
+    if challenge.get("algorithm"):
+        auth += f", algorithm={challenge['algorithm']}"
+    second = _rtsp_exchange(
+        host,
+        port,
+        f"DESCRIBE {url} RTSP/1.0\r\nCSeq: 2\r\nAccept: application/sdp\r\n"
+        f"Authorization: {auth}\r\n\r\n",
+    )
+    status2, headers2, body = parse_rtsp_response(second)
+    result["final_status"] = status2
+    result["final_headers"] = {k: v for k, v in headers2.items() if k != "authorization"}
+    if status2 == 200 and body:
+        sdp = body.decode("utf-8", errors="replace")
+        result["sdp_media"] = [
+            ln
+            for ln in sdp.splitlines()
+            if ln.startswith(("m=", "a=rtpmap", "a=framerate", "a=framesize", "a=fmtp"))
+        ]
+    return result
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI ``fri-rtsp-check``: probe the camera's RTSP endpoints using local credentials."""
     p = argparse.ArgumentParser(
@@ -183,6 +324,12 @@ def main(argv: list[str] | None = None) -> int:
             f"and {RTSP_PATHS['display_h264']}"
         ),
     )
+    p.add_argument(
+        "--method",
+        choices=["ffprobe", "raw", "both"],
+        default="both",
+        help="ffprobe = full stream probe; raw = built-in Digest DESCRIBE (diagnoses auth)",
+    )
     args = p.parse_args(argv)
 
     env_host, user, password = credentials(Path(args.dotenv))
@@ -197,20 +344,43 @@ def main(argv: list[str] | None = None) -> int:
             "That file is git-ignored."
         )
         return 2
-    ffprobe = find_ffprobe()
-    if not ffprobe:
-        print("ffprobe not found (macOS: brew install ffmpeg@6)")
-        return 2
     paths = args.path or [RTSP_PATHS["visible_full"], RTSP_PATHS["display_h264"]]
     rc = 0
-    for path in paths:
-        url = build_rtsp_url(host, path, user=user, password=password)
-        try:
-            info = probe_stream(url, ffprobe=ffprobe)
-            print(f"{redact_url(url)} -> {info}")
-        except (RuntimeError, ValueError) as exc:
-            print(f"{redact_url(url)} -> ERROR {exc}")
-            rc = 1
+    if args.method in ("raw", "both"):
+        for path in paths:
+            try:
+                res = describe_with_digest(host, path, user=user, password=password)
+            except OSError as exc:
+                print(f"[raw] rtsp://{host}{path} -> ERROR {exc}")
+                rc = 1
+                continue
+            verdict = (
+                "OK (Digest accepted)"
+                if res.get("final_status") == 200
+                else (
+                    "REJECTED by camera (credentials/account)"
+                    if res.get("final_status") == 401
+                    else f"status {res.get('final_status')}"
+                )
+            )
+            print(f"[raw] rtsp://{host}{path} -> {verdict}; challenge={res.get('challenge')}")
+            for ln in res.get("sdp_media", []):
+                print(f"      {ln}")
+            if res.get("final_status") != 200:
+                rc = 1
+    if args.method in ("ffprobe", "both"):
+        ffprobe = find_ffprobe()
+        if not ffprobe:
+            print("ffprobe not found (macOS: brew install ffmpeg@6)")
+            return 2
+        for path in paths:
+            url = build_rtsp_url(host, path, user=user, password=password)
+            try:
+                info = probe_stream(url, ffprobe=ffprobe)
+                print(f"[ffprobe] {redact_url(url)} -> {info}")
+            except (RuntimeError, ValueError) as exc:
+                print(f"[ffprobe] {redact_url(url)} -> ERROR {exc}")
+                rc = 1
     return rc
 
 

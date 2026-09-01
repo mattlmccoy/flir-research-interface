@@ -66,6 +66,15 @@ camera web UI (`http://<ip>/`).
   `viewer` are **disabled by default** and are enabled/given passwords under
   Administration → User management. Third-party notes for this family mention a video-stream
   "Authentication method" setting (Digest / Off) in the web UI — not confirmed in the manual.
+* FLIR firmware release notes (KB 5907), firmware 4.45.003: "Authenticated RTSP video stream is
+  now available and enabled by default." and "For disabling the RTSP authentication, go to the
+  camera web interface at Settings → Video Settings and change the Authentication method from
+  Digest to Off." Latest A50/A70 firmware listed there: 4.60.003 (this unit reports 42.0.0 via
+  GenICam `DeviceVersion`, a different numbering; check the web UI System page).
+* Both `admin` and an enabled `user` account were rejected by RTSP via ffprobe although both log
+  into the web UI. Reports exist of ffmpeg failing Digest against cameras where VLC succeeds, so
+  `fri-rtsp-check --method raw` now performs its own RFC 2617 Digest DESCRIBE to separate an
+  ffmpeg handshake problem from a camera-side rejection.
 * Still to determine on this camera: which account the RTSP server authenticates against
   (admin vs an enabled `user`/`viewer`), and whether stream authentication can be switched off
   for a lab-only network. Both are web-UI actions for the operator; the application will accept

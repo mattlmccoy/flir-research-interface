@@ -79,3 +79,70 @@ def test_find_ffprobe_skips_candidates_that_do_not_run(tmp_path: Path) -> None:
         f.chmod(0o755)
     assert find_ffprobe(candidates=(str(broken), str(good))) == str(good)
     assert find_ffprobe(candidates=(str(broken),)) is None
+
+
+# ----------------------------------------------------------------------------- raw Digest client
+
+
+def test_digest_response_matches_rfc2617_example_vector() -> None:
+    from flir_research_interface.visible.rtsp import digest_response
+
+    # RFC 2617 §3.5 worked example (qop=auth)
+    resp = digest_response(
+        user="Mufasa",
+        password="Circle Of Life",
+        realm="testrealm@host.com",
+        method="GET",
+        uri="/dir/index.html",
+        nonce="dcd98b7102dd2f0e8b11d0f600bfb0c093",
+        qop="auth",
+        nc="00000001",
+        cnonce="0a4f113b",
+    )
+    assert resp == "6629fae49393a05397450978507c4ef1"
+
+
+def test_digest_response_without_qop_uses_rfc2069_form() -> None:
+    import hashlib
+
+    from flir_research_interface.visible.rtsp import digest_response
+
+    ha1 = hashlib.md5(b"u:GStreamer RTSP Server:p").hexdigest()
+    ha2 = hashlib.md5(b"DESCRIBE:rtsp://h/avc/ch1").hexdigest()
+    expected = hashlib.md5(f"{ha1}:abc:{ha2}".encode()).hexdigest()
+    assert (
+        digest_response(
+            user="u",
+            password="p",
+            realm="GStreamer RTSP Server",
+            method="DESCRIBE",
+            uri="rtsp://h/avc/ch1",
+            nonce="abc",
+            qop=None,
+        )
+        == expected
+    )
+
+
+def test_parse_www_authenticate_digest_challenge() -> None:
+    from flir_research_interface.visible.rtsp import parse_digest_challenge
+
+    hdr = 'Digest realm="GStreamer RTSP Server", nonce="5830bb66c652baff"'
+    assert parse_digest_challenge(hdr) == {
+        "realm": "GStreamer RTSP Server",
+        "nonce": "5830bb66c652baff",
+    }
+    hdr2 = 'Digest realm="r", nonce="n", qop="auth,auth-int", algorithm=MD5, stale=FALSE'
+    ch = parse_digest_challenge(hdr2)
+    assert ch["qop"] == "auth,auth-int" and ch["algorithm"] == "MD5"
+
+
+def test_parse_rtsp_response_splits_status_headers_body() -> None:
+    from flir_research_interface.visible.rtsp import parse_rtsp_response
+
+    raw = b'RTSP/1.0 401 Unauthorized\r\nCSeq: 2\r\nWWW-Authenticate: Digest realm="x", nonce="y"\r\n\r\n'
+    status, headers, body = parse_rtsp_response(raw)
+    assert status == 401 and headers["www-authenticate"].startswith("Digest") and body == b""
+    raw_ok = b"RTSP/1.0 200 OK\r\nCSeq: 3\r\nContent-Length: 5\r\n\r\nv=0\r\n"
+    status, headers, body = parse_rtsp_response(raw_ok)
+    assert status == 200 and body == b"v=0\r\n"
