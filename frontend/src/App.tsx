@@ -98,7 +98,7 @@ export function App() {
               </select>
               <span className={`badge ${scaleMode}`}>{scaleMode === "auto" ? "AUTO" : "LOCKED"}</span>
               <button className="secondary" onClick={() => {
-                if (scaleMode === "auto") { setManual(shown); setScaleMode("manual"); } else setScaleMode("auto");
+                if (scaleMode === "auto") { setManual({ min: Math.round(shown.min * 10) / 10, max: Math.round(shown.max * 10) / 10 }); setScaleMode("manual"); } else setScaleMode("auto");
               }}>{scaleMode === "auto" ? "Lock range" : "Auto range"}</button>
             </div>
             {scaleMode === "manual" && (
