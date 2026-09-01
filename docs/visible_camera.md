@@ -75,10 +75,12 @@ camera web UI (`http://<ip>/`).
   into the web UI. Reports exist of ffmpeg failing Digest against cameras where VLC succeeds, so
   `fri-rtsp-check --method raw` now performs its own RFC 2617 Digest DESCRIBE to separate an
   ffmpeg handshake problem from a camera-side rejection.
-* Still to determine on this camera: which account the RTSP server authenticates against
-  (admin vs an enabled `user`/`viewer`), and whether stream authentication can be switched off
-  for a lab-only network. Both are web-UI actions for the operator; the application will accept
-  whichever account works via `.env`.
+* **Resolved (web UI, Settings → Video settings → Authentication):** the stream has a dedicated
+  account, user **`rtsp`**, with its own password, independent of the `admin`/`user`/`viewer`
+  web accounts. "Authentication method" offers Digest (keep it) or Off. The operator sets the
+  `rtsp` password there and puts `FRI_RTSP_USER=rtsp` / `FRI_RTSP_PASSWORD=...` in
+  `backend/.env`. The same page holds the camera's own recording settings (video format H264,
+  30 Hz, pre/post-trigger durations) which are unrelated to our recorder.
 
 Open items before implementing: confirm `/avc/ch1` codec/fps/latency once credentials are
 available (`ffprobe rtsp://USER:PASS@<ip>/avc/ch1`, run by the user); check how the visible
