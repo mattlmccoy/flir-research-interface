@@ -93,3 +93,12 @@
   => installers moved to vendor/spinnaker/ (git-ignored), never committed; fri-sdk-check points users to the right file.
 - `uv sync` would remove the manually installed PySpin wheel; use `uv sync --extra dev --inexact`.
 - Leftover Intel 3.1 tarballs remain in /Applications/Spinnaker/PySpin (harmless); /usr/local/lib libs are arm64 4.4.
+
+## Session 3 (2026-09-01 18:xx): camera found via raw GVCP discovery
+- Camera IS attached: USB GigE adapter en13 ("USB 10/100/1000 LAN", AX88179-class), host 169.254.168.103/16 (LLA fallback).
+- Raw GVCP DISCOVERY_CMD broadcast on en13 -> DISCOVERY_ACK from FLIR A70 fw 42.0.0 at 192.168.7.2/24,
+  gw 0.0.0.0, ip-config current=0x5 (PersistentIP+LLA, no DHCP), mfr-info "ACAM,Gen_A,GEV,1.0.0,GEV,1.1.0".
+  (Serial recorded only in git-ignored probe outputs; NOT here.)
+- Spinnaker GetInterfaces() did not list en13 at all (only Wi-Fi + loopback) -> to re-check after static IP is set.
+- Fix requires admin: `sudo networksetup -setmanual "USB 10/100/1000 LAN" 192.168.7.1 255.255.255.0`.
+- Added camera/gvcp.py (TDD, real redacted fixture) + probe fallback + docs/camera_setup.md.

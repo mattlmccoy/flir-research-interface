@@ -315,6 +315,17 @@ def _set_enum(pyspin: Any, nodemap: Any, name: str, symbolic: str) -> str | None
     return str(previous)
 
 
+def _mac_from_int(value: str | None) -> str | None:
+    """GenICam GevDeviceMACAddress is a 48-bit integer; render as aa:bb:cc:dd:ee:ff."""
+    try:
+        v = int(value) if value is not None else None
+    except ValueError:
+        return value
+    if v is None:
+        return None
+    return ":".join(f"{(v >> shift) & 0xFF:02x}" for shift in (40, 32, 24, 16, 8, 0))
+
+
 def _ip_from_int(value: str | None) -> str | None:
     try:
         v = int(value) if value is not None else None
@@ -391,8 +402,11 @@ def run_hardware_probe(
                     "firmware": _read_str(pyspin, tl, "DeviceVersion"),
                     "device_type": _read_str(pyspin, tl, "DeviceType"),
                     "ip_address": _ip_from_int(_read_str(pyspin, tl, "GevDeviceIPAddress")),
-                    "mac_address": _read_str(pyspin, tl, "GevDeviceMACAddress"),
+                    "subnet_mask": _ip_from_int(_read_str(pyspin, tl, "GevDeviceSubnetMask")),
+                    "gateway": _ip_from_int(_read_str(pyspin, tl, "GevDeviceGateway")),
+                    "mac_address": _mac_from_int(_read_str(pyspin, tl, "GevDeviceMACAddress")),
                     "access_status": _read_str(pyspin, tl, "DeviceAccessStatus"),
+                    "wrong_subnet": _read_str(pyspin, tl, "GevDeviceIsWrongSubnet"),
                 }
             )
             del c
@@ -409,10 +423,7 @@ def run_hardware_probe(
                 d["firmware"],
             )
         if not devices:
-            report["error"] = (
-                "no cameras detected. Check: camera powered (PoE), same subnet as one of the "
-                "GigE interfaces above, visible in SpinView, firewall allows UDP 3956."
-            )
+            report["error"] = "no cameras detected by Spinnaker"
             return report
 
         chosen = 0
@@ -422,6 +433,12 @@ def run_hardware_probe(
                 raise SystemExit(f"no camera with serial {serial!r}")
             chosen = int(matches[0])
         report["device"] = devices[chosen]
+        if str(devices[chosen].get("wrong_subnet")).lower() in ("1", "true"):
+            report["error"] = (
+                "Spinnaker reports the camera is on a wrong subnet (GevDeviceIsWrongSubnet). "
+                "Put the host adapter on the camera's subnet, then re-run (see gvcp_discovery)."
+            )
+            return report
 
         cam = cam_list.GetByIndex(chosen)
         cam.Init()
@@ -533,6 +550,15 @@ def run_hardware_probe(
             image.Release()
         report["frame"] = frame_report
         return report
+    except pyspin.SpinnakerException as exc:
+        # Handle here so the exception (and the SDK objects its traceback pins) is cleared
+        # before the finally block releases Spinnaker.
+        msg = str(exc).strip()
+        logger.error("Spinnaker error: %s", msg)
+        report["error"] = f"SpinnakerException: {msg}"
+        if "wrong subnet" in msg.lower():
+            report["error"] += " -> host adapter and camera are on different subnets."
+        return report
     finally:
         try:
             if cam is not None:
@@ -549,9 +575,65 @@ def run_hardware_probe(
                 del cam
             if cam_list is not None:
                 cam_list.Clear()
+                del cam_list
         finally:
-            system.ReleaseInstance()
-            logger.info("Spinnaker released")
+            try:
+                system.ReleaseInstance()
+                logger.info("Spinnaker released")
+            except Exception as exc:  # noqa: BLE001 - report must still be written
+                logger.error("Spinnaker ReleaseInstance failed: %s", exc)
+                report["release_error"] = f"{type(exc).__name__}: {exc}"
+
+
+def _gvcp_fallback() -> dict[str, Any]:
+    """Raw GigE Vision discovery on every host interface, with a subnet diagnosis."""
+    from flir_research_interface.camera import gvcp
+
+    system = platform.system()
+    out: dict[str, Any] = {"host_interfaces": [], "devices": []}
+    try:
+        for iface in gvcp.host_interfaces():
+            out["host_interfaces"].append(iface.__dict__)
+        for hit in gvcp.discover():
+            d = hit.device
+            entry: dict[str, Any] = {
+                "via_interface": hit.interface.name,
+                "host_ip": f"{hit.interface.ip}/{hit.interface.netmask}",
+                "manufacturer": d.manufacturer,
+                "model": d.model,
+                "firmware": d.device_version,
+                "serial": d.serial,
+                "mac": d.mac,
+                "camera_ip": f"{d.current_ip}/{d.subnet_mask}",
+                "gateway": d.gateway,
+                "persistent_ip": d.persistent_ip_enabled,
+                "dhcp": d.dhcp_enabled,
+                "lla": d.lla_enabled,
+                "reachable_by_sdk": hit.reachable_by_sdk,
+            }
+            if not hit.reachable_by_sdk:
+                entry["fix"] = list(
+                    gvcp.host_fix_commands(
+                        d,
+                        system=system,
+                        interface=hit.interface.name,
+                        service_name=hit.interface.service_name,
+                    )
+                )
+            out["devices"].append(entry)
+            logger.warning(
+                "GVCP: %s %s fw %s at %s via %s (%s) — %s",
+                d.manufacturer,
+                d.model,
+                d.device_version,
+                entry["camera_ip"],
+                hit.interface.name,
+                entry["host_ip"],
+                "same subnet" if hit.reachable_by_sdk else "SUBNET MISMATCH",
+            )
+    except Exception as exc:  # noqa: BLE001 - diagnosis must never crash the probe
+        out["error"] = f"{type(exc).__name__}: {exc}"
+    return out
 
 
 # --------------------------------------------------------------------------------------
@@ -581,6 +663,16 @@ def _print_summary(report: dict[str, Any]) -> None:
         print("Timestamp latch:", json.dumps(report["timestamp_latch"], indent=2))
     if "frame" in report:
         print("Frame:", json.dumps(report["frame"], indent=2))
+    if report.get("gvcp_discovery", {}).get("devices"):
+        print("Raw GigE Vision discovery found:")
+        for d in report["gvcp_discovery"]["devices"]:
+            print(
+                f"  {d['manufacturer']} {d['model']} fw {d['firmware']} at {d['camera_ip']} "
+                f"via {d['via_interface']} (host {d['host_ip']}) -> "
+                f"{'OK' if d['reachable_by_sdk'] else 'SUBNET MISMATCH'}"
+            )
+            for c in d.get("fix", []):
+                print(f"      {c}")
     if "error" in report:
         print("ERROR:", report["error"])
     print("=" * 72)
@@ -618,6 +710,21 @@ def main(argv: list[str] | None = None) -> int:
             set_temperature_linear=args.set_temperature_linear,
             grab_timeout_ms=args.timeout_ms,
         )
+        if "frame" not in report:
+            logger.info("No frame acquired; running raw GigE Vision discovery for diagnosis ...")
+            report["gvcp_discovery"] = _gvcp_fallback()
+            hits = report["gvcp_discovery"].get("devices", [])
+            if hits and not any(h["reachable_by_sdk"] for h in hits):
+                report["error"] = (
+                    report.get("error", "") + " | Raw GigE Vision discovery reached the camera "
+                    "but it is outside every host adapter's subnet: apply the fix command shown, "
+                    "then re-run the probe."
+                ).strip(" |")
+            elif not hits and not report.get("devices"):
+                report["error"] = (
+                    "no cameras detected by Spinnaker or by raw GigE Vision broadcast. Check: "
+                    "camera powered (PoE), cable/link light, firewall allows UDP 3956."
+                )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     out = output_dir / "probe_report.json"

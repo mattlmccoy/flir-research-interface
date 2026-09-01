@@ -100,7 +100,23 @@ non-loopback interfaces is opt-in and will require at least a shared token; came
 and file access are never exposed unauthenticated to arbitrary networks. During development
 `localhost` is fine.
 
-## 8. Environment facts that shaped this session
+## 8. First-run / onboarding flow (target UX)
+
+Goal: on a new machine, open one page, be guided to the right downloads, and end up connected
+to the camera. A browser tab cannot install the Spinnaker SDK or open raw UDP sockets, so the
+flow is two-stage:
+
+1. **Bootstrap page** (static, works before anything is installed): detects OS/CPU from the
+   browser and shows the exact Teledyne artifact names and steps (same logic as `fri-sdk-check`),
+   plus the FLIR Research Interface installer for that platform. It cannot host the FLIR files
+   (EULA §3).
+2. **Local service UI** (after the installer runs): the service exposes `fri-sdk-check`
+   (PySpin importable? which wheel is missing?) and the GVCP discovery/subnet diagnosis from
+   `camera/gvcp.py` through its API. The UI walks the user through: SDK status → adapter/camera
+   subnet check with the copy-paste fix command → camera list → connect. Every step is the
+   already-tested CLI logic, just rendered in the browser.
+
+## 9. Environment facts that shaped this session
 
 * The development Mac is Apple Silicon. The locally installed Spinnaker 3.1.0.79 is an
   Intel-only build with PySpin wheels for Python 3.6–3.8; it cannot be imported here.
