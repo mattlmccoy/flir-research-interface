@@ -33,4 +33,4 @@ the probe output from the real A70 before touching radiometric node names.
 - hatchling: `readme = "../README.md"` rejected (must be inside project dir) -> removed readme field from backend/pyproject.toml.
 
 ## Status
-**Session 4:** Milestone 1 DONE (probe output reviewed, radiometry.md rewritten from evidence). Now Milestone 2: SpinnakerCameraBackend (TDD with hardware tests against the live A70), then Research Studio comparison. Disk still ~2.9 GiB free — must be freed before recording work. Next session: review probe_report.json, then implement camera/spinnaker.py and Milestone 2 validation.
+**Session 4 end:** Milestone 1 DONE. Milestone 2 tooling DONE: SpinnakerCameraBackend (hardware tests pass), analysis/stats.py, `fri-live` validation CLI (149 frames @30.03 fps, 0 lost/dropped). BLOCKED on user: Research Studio side-by-side comparison at >=3 temperatures (docs/validation.md table). Disk ~2.9 GiB free — must be freed before Milestone 4 recording. Next dev: Milestone 3 live view (FastAPI + WebSocket + React) once validation table has at least one row. Next session: review probe_report.json, then implement camera/spinnaker.py and Milestone 2 validation.
