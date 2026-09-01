@@ -362,8 +362,12 @@ def run_hardware_probe(
                     {
                         "name": _read_str(pyspin, tl, "InterfaceDisplayName"),
                         "type": _read_str(pyspin, tl, "InterfaceType"),
-                        "subnet_ip": _read_str(pyspin, tl, "GevInterfaceSubnetIPAddress"),
-                        "subnet_mask": _read_str(pyspin, tl, "GevInterfaceSubnetMask"),
+                        "subnet_ip": _ip_from_int(
+                            _read_str(pyspin, tl, "GevInterfaceSubnetIPAddress")
+                        ),
+                        "subnet_mask": _ip_from_int(
+                            _read_str(pyspin, tl, "GevInterfaceSubnetMask")
+                        ),
                     }
                 )
                 del itf
