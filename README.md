@@ -5,9 +5,9 @@ A50/A70 radiometric thermal cameras (GigE Vision / GenICam via the FLIR Spinnake
 built for RF-heating experiments on polymer powder and intended to replace day-to-day use of
 FLIR Research Studio.
 
-**Status: Milestone 3 (live view) working against the real A70; Milestone 2 validation table
-still open.** `fri-serve` + the React UI show live temperature-linear video at 30 Hz with
-setup diagnostics (SDK check, network discovery, connect). No recording yet. What exists:
+**Status: Milestones 3 (live view) and 4 (recording) implemented; Milestone 2 validation table
+still open.** `fri-serve` + the React UI show live temperature-linear video at 30 Hz with setup
+diagnostics and record lossless Zarr experiments with full frame accounting. What exists:
 
 | Piece | Location | State |
 |---|---|---|
@@ -20,7 +20,8 @@ setup diagnostics (SDK check, network discovery, connect). No recording yet. Wha
 | Spinnaker backend (`SpinnakerCameraBackend`) | `backend/flir_research_interface/camera/spinnaker.py` | **hardware tests pass on the A70** (`pytest --hardware`) |
 | Acquisition service + FastAPI/WebSocket API | `backend/flir_research_interface/acquisition/`, `api/` | tested (TestClient), verified live |
 | Browser UI (setup + live view, palettes client-side) | `frontend/` (Vite + React + TS) | logic tested with `node --test`; verified in browser against the A70 |
-| Docs | `docs/` | architecture, radiometry (from the camera's node map), installation, camera_setup, validation protocol, visible_camera investigation |
+| Recorder (Zarr v2, bounded queue, gaps/drops accounting, disk guard, crash-detectable manifest) | `backend/flir_research_interface/recording/recorder.py` | tested |
+| Docs | `docs/` | architecture, radiometry, installation, camera_setup, validation protocol, data_format, visible_camera |
 
 ## Scientific stance
 

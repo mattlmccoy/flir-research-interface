@@ -92,14 +92,15 @@ timestamp latch (`TimestampLatch`/`TimestampLatchValue` or `GevTimestampControlL
 between camera clock and host clock can be measured. Exact tick semantics on the A70 are
 UNKNOWN until the probe runs; see `docs/radiometry.md` section 6.
 
-## 6. Storage (decision deferred to Milestone 4)
+## 6. Storage (decided in Milestone 4, see docs/data_format.md)
 
-Candidates: Zarr (chunked `uint16[time, y, x]`, cloud/NumPy friendly), HDF5 (MATLAB-native
-via `h5read`), plus JSON metadata, CSV timestamps/events. Requirements that will drive the
-choice: append-safe while recording, crash-recoverable, trivial `numpy`/`zarr`/`h5py` load,
-MATLAB import path. Raw counts + `IRFormat` are the canonical record; temperature is derived
-on load. Whether a second `Radiometric` (signal-linear) stream is worth storing is an open
-question that depends on what the camera exposes (see radiometry doc).
+Zarr v2 group per experiment (`counts[time,y,x]` uint16, lossless zstd, 32-frame chunks written
+atomically; `frame_id`, `device_timestamp_ns`, `host_timestamp_ns` int64), `metadata.json` at
+start, `manifest.json` only on clean finalization. `recording/recorder.py` takes frames from
+the acquisition service through a bounded queue (overflow counted, never silent), flushes at
+least every 0.5 s, detects camera frame-id gaps, guards free disk space, and finalizes on
+disconnect and on service shutdown. A second signal-linear stream is not recorded (the camera
+streams one format at a time; temperature-linear is the chosen one).
 
 ## 7. Network model (Milestone 10)
 

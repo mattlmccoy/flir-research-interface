@@ -10,6 +10,8 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "websockets>=12",
+    "zarr>=2.18,<3",
+    "numcodecs>=0.13,<0.16",
 ]
 
 [project.optional-dependencies]

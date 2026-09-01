@@ -7,6 +7,7 @@ and authentication are Milestone 10 concerns (brief §5).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import platform
 import time
@@ -25,6 +26,7 @@ from flir_research_interface.api.frames import encode_frame_message
 from flir_research_interface.camera import CAMERA_BACKENDS, create_backend
 from flir_research_interface.camera.base import CameraBackend, CameraError, DeviceDescriptor
 from flir_research_interface.camera.simulated import HotspotRampScene
+from flir_research_interface.recording.recorder import Recorder, RecorderState, inspect_experiment
 from flir_research_interface.sdk_install import detect_and_select, pyspin_importable
 
 logger = logging.getLogger(__name__)
@@ -35,6 +37,11 @@ FRONTEND_DIST = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 class ConnectRequest(BaseModel):
     backend: str = "simulated"
     serial: str | None = None
+
+
+class RecordingStartRequest(BaseModel):
+    name: str
+    metadata: dict[str, Any] = {}
 
 
 def _make_backend(name: str, *, sim_fps: float) -> CameraBackend:
@@ -57,13 +64,20 @@ def _make_backend(name: str, *, sim_fps: float) -> CameraBackend:
 
 
 def create_app(
-    *, default_backend: str = "simulated", sim_fps: float = 30.0, viz_fps: float = 15.0
+    *,
+    default_backend: str = "simulated",
+    sim_fps: float = 30.0,
+    viz_fps: float = 15.0,
+    experiments_root: Path | None = None,
+    min_free_gb: float = 2.0,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
         app.state.service = None
         app.state.backend_name = None
+        app.state.recorder = None
         yield
+        await _finalize_recording()
         svc: AcquisitionService | None = app.state.service
         if svc is not None:
             await run_in_threadpool(svc.disconnect)
@@ -72,9 +86,24 @@ def create_app(
     app.state.default_backend = default_backend
     app.state.sim_fps = sim_fps
     app.state.viz_fps = viz_fps
+    app.state.experiments_root = Path(experiments_root) if experiments_root else Path("experiments")
+    app.state.min_free_gb = min_free_gb
 
     def service() -> AcquisitionService | None:
         return app.state.service  # type: ignore[no-any-return]
+
+    def recorder() -> Recorder | None:
+        return app.state.recorder  # type: ignore[no-any-return]
+
+    async def _finalize_recording() -> dict[str, Any] | None:
+        rec = recorder()
+        if rec is None:
+            return None
+        manifest = None
+        if rec.state in (RecorderState.RECORDING, RecorderState.ERROR):
+            manifest = await run_in_threadpool(rec.stop)
+        app.state.recorder = None
+        return manifest
 
     # -- health / setup --------------------------------------------------------------------
 
@@ -186,6 +215,7 @@ def create_app(
 
     @app.post("/api/camera/disconnect")
     async def disconnect() -> dict[str, Any]:
+        await _finalize_recording()  # never lose a recording because the operator disconnected
         svc = service()
         if svc is None:
             return {"state": ServiceState.DISCONNECTED.value}
@@ -210,6 +240,57 @@ def create_app(
         if svc is None:
             raise HTTPException(409, "not connected")
         return await run_in_threadpool(svc.backend.camera_info)
+
+    # -- recording -------------------------------------------------------------------------
+
+    @app.post("/api/recording/start")
+    async def recording_start(req: RecordingStartRequest) -> dict[str, Any]:
+        svc = service()
+        if svc is None or svc.state != ServiceState.ACQUIRING:
+            raise HTTPException(409, "camera is not acquiring")
+        if recorder() is not None and recorder().state == RecorderState.RECORDING:  # type: ignore[union-attr]
+            raise HTTPException(409, "already recording")
+        rec = Recorder(
+            svc, experiments_root=app.state.experiments_root, min_free_gb=app.state.min_free_gb
+        )
+        try:
+            exp_dir = await run_in_threadpool(rec.start, name=req.name, metadata=req.metadata)
+        except RuntimeError as exc:
+            raise HTTPException(507 if "free space" in str(exc) else 400, str(exc)) from exc
+        app.state.recorder = rec
+        return {"state": rec.state.value, "experiment_dir": str(exp_dir)}
+
+    @app.post("/api/recording/stop")
+    async def recording_stop() -> dict[str, Any]:
+        rec = recorder()
+        if rec is None:
+            raise HTTPException(409, "not recording")
+        manifest = await _finalize_recording()
+        return manifest or {"state": RecorderState.IDLE.value}
+
+    @app.get("/api/recording/status")
+    def recording_status() -> dict[str, Any]:
+        rec = recorder()
+        if rec is None:
+            return {
+                "state": RecorderState.IDLE.value,
+                "experiments_root": str(app.state.experiments_root),
+            }
+        return rec.stats()
+
+    @app.get("/api/experiments")
+    def experiments() -> list[dict[str, Any]]:
+        root: Path = app.state.experiments_root
+        if not root.is_dir():
+            return []
+        out = []
+        for d in sorted(p for p in root.iterdir() if p.is_dir()):
+            info = inspect_experiment(d)
+            info["name"] = d.name
+            meta_path = d / "metadata.json"
+            info["metadata"] = json.loads(meta_path.read_text()) if meta_path.is_file() else None
+            out.append(info)
+        return out
 
     # -- live frames -----------------------------------------------------------------------
 

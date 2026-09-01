@@ -46,7 +46,7 @@ the probe output from the real A70 before touching radiometric node names.
   3. frontend/: Vite+React+TS; palette LUTs, counts->C, autoscale in pure TS modules tested with `node --test`; canvas view, hover readout, status bar, setup page
   4. e2e: browser against simulated camera, then real A70
   Decisions: palette applied client-side only; server never sends colorized data; viz drops counted, never silent; recording not in M3.
-- [ ] M4 Recording: storage format decision (Zarr vs HDF5) -> docs/data_format.md; bounded queues, dropped-frame accounting, crash recovery, disk-space guard, metadata + software version.
+- [~] M4 Recording (2026-09-01): Zarr v2 decided (docs/data_format.md); recorder + API + UI panel implemented and unit-tested; TODO: real-camera recording run verified in browser, camera-controls panel (case/object params/NUC/frame rate) with block-while-recording, playback (M5) reads the store.
 - [ ] M5 Playback, M6 ROI/plots, M7 export, M8 experiment metadata/events.
 - [ ] M9 Visible camera recorder (RTSP /avc/ch1 H.264 1280x960 via ffmpeg -c copy; host-clock alignment).
 - [ ] M10 Packaging + mDNS hostname + installer that prompts for the right Teledyne download.

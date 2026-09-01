@@ -6,6 +6,7 @@ import type { Range, ScaleMode } from "./lib/scale.ts";
 import { ThermalView } from "./components/ThermalView.tsx";
 import { ColorBar } from "./components/ColorBar.tsx";
 import { SetupPage } from "./components/SetupPage.tsx";
+import { RecordPanel } from "./components/RecordPanel.tsx";
 
 type Page = "live" | "setup";
 
@@ -122,6 +123,8 @@ export function App() {
             ) : <div className="muted">waiting for frames…</div>}
             {hdr && hdr.kelvin_per_count === null && <div className="errbox">Stream is not temperature-linear; values are raw counts, no temperatures shown.</div>}
             {nearLimit && <div className="warnbox">Max temperature within 10 °C of the selected range limit ({active?.high_c} °C).</div>}
+
+            <RecordPanel acquiring={status.state === "acquiring"} />
 
             <h3>Camera</h3>
             <div className="kv">
