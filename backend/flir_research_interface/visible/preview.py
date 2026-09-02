@@ -7,9 +7,12 @@ low-rate MJPEG (default 640 px wide, 8 fps) is all that is worth relaying to the
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import queue
 import subprocess
-from collections.abc import Callable, Iterator
+import threading
+from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -53,15 +56,61 @@ def mjpeg_command(ffmpeg: str, url: str, *, fps: int = 8, width: int = 640) -> l
 
 
 class MjpegRelay:
-    """Runs one ffmpeg per viewer and yields its stdout; the process dies with the viewer."""
+    """Runs one ffmpeg per viewer and hands its stdout to the viewer as it arrives.
+
+    A reader thread pulls the raw pipe into a small queue; the consumer (sync or async) drains
+    it. If nobody takes a chunk for ``idle_timeout_s`` (the browser aborted the request), the
+    reader thread terminates ffmpeg itself, so a transcode can never outlive its viewer.
+    """
 
     content_type = f"multipart/x-mixed-replace; boundary={BOUNDARY}"
 
-    def __init__(self, *, cmd: list[str], popen: Callable[..., Any] = subprocess.Popen) -> None:
+    def __init__(
+        self,
+        *,
+        cmd: list[str],
+        popen: Callable[..., Any] = subprocess.Popen,
+        idle_timeout_s: float = 5.0,
+    ) -> None:
         self._cmd = cmd
         self._popen = popen
+        self._idle_timeout_s = idle_timeout_s
         self._proc: Any = None
         self._closed = False
+        self._queue: queue.Queue[bytes | None] = queue.Queue(maxsize=8)
+        self._thread: threading.Thread | None = None
+
+    def _pump(self) -> None:
+        out = self._proc.stdout  # raw (unbuffered) pipe: read() returns what is available
+        try:
+            while not self._closed:
+                chunk = out.read(CHUNK)
+                if not chunk:
+                    break
+                try:
+                    self._queue.put(chunk, timeout=self._idle_timeout_s)
+                except queue.Full:
+                    logger.info("visible preview: viewer stopped consuming; stopping ffmpeg")
+                    break
+        except (OSError, ValueError):
+            pass
+        finally:
+            self.close()
+            try:
+                self._queue.put_nowait(None)
+            except queue.Full:
+                pass
+
+    def _start(self) -> None:
+        self._proc = self._popen(
+            self._cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            bufsize=0,  # unbuffered pipe: every JPEG goes out the moment ffmpeg writes it
+        )
+        self._thread = threading.Thread(target=self._pump, name="mjpeg-relay", daemon=True)
+        self._thread.start()
 
     def close(self) -> None:
         """Stop the transcode (idempotent). Called when the viewer disconnects."""
@@ -80,22 +129,38 @@ class MjpegRelay:
             pass
 
     def stream(self) -> Iterator[bytes]:
-        self._proc = self._popen(
-            self._cmd,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            bufsize=0,  # unbuffered pipe: every JPEG goes out the moment ffmpeg writes it
-        )
+        """Synchronous consumer (tests, scripts)."""
+        self._start()
         try:
-            out = self._proc.stdout  # raw (unbuffered) pipe: read() returns what is available
-            while not self._closed:
-                chunk = out.read(CHUNK)
-                if not chunk:
+            while True:
+                chunk = self._queue_get()
+                if chunk is None:
                     break
                 yield chunk
         finally:
             self.close()
+
+    async def aiter(self) -> AsyncIterator[bytes]:
+        """Async consumer for StreamingResponse: cancellation on client disconnect closes ffmpeg."""
+        self._start()
+        loop = asyncio.get_running_loop()
+        try:
+            while True:
+                chunk = await loop.run_in_executor(None, self._queue_get)
+                if chunk is None:
+                    break
+                yield chunk
+        finally:
+            self.close()
+
+    def _queue_get(self) -> bytes | None:
+        """Next chunk, or None once the pump has finished and the queue is drained."""
+        while True:
+            try:
+                return self._queue.get(timeout=0.5)
+            except queue.Empty:
+                if self._closed:
+                    return None
 
 
 def default_preview_factory(dotenv: Path | None = None) -> Callable[[], MjpegRelay] | None:

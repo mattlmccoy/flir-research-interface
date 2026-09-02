@@ -428,7 +428,7 @@ def create_app(
             viewers.discard(relay)
 
         return StreamingResponse(
-            relay.stream(),
+            relay.aiter(),
             media_type=relay.content_type,
             headers={"Cache-Control": "no-store"},
             background=BackgroundTask(_done),

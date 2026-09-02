@@ -165,3 +165,44 @@ def test_live_preview_is_capped_to_a_few_viewers(tmp_path: Path) -> None:
     from flir_research_interface.visible.preview import MAX_VIEWERS
 
     assert 1 <= MAX_VIEWERS <= 4
+
+
+def test_relay_watchdog_stops_ffmpeg_when_nobody_consumes() -> None:
+    """The browser aborting the request must never leave a transcode running: if no consumer
+    takes frames for `idle_timeout_s`, the reader thread terminates the process itself."""
+    import time
+
+    class Endless(FakeStream):
+        def __init__(self) -> None:
+            super().__init__([])
+
+        class _Out:
+            def read(self, n: int) -> bytes:
+                time.sleep(0.01)
+                return b"X" * 100  # never ends
+
+    proc = Endless()
+    proc.stdout = Endless._Out()  # type: ignore[assignment]
+    relay = MjpegRelay(cmd=["x"], popen=lambda *a, **k: proc, idle_timeout_s=0.3)
+    gen = relay.stream()
+    assert next(gen) == b"X" * 100  # one consumer read, then the consumer disappears
+    time.sleep(1.0)
+    assert proc.killed is True
+    gen.close()
+
+
+def test_relay_async_iteration_delivers_chunks_and_closes() -> None:
+    import asyncio
+
+    proc = FakeStream([b"--ffmpeg\r\nJPEG-A", b"--ffmpeg\r\nJPEG-B"])
+    relay = MjpegRelay(cmd=["x"], popen=lambda *a, **k: proc)
+
+    async def run() -> bytes:
+        out = b""
+        async for chunk in relay.aiter():
+            out += chunk
+        return out
+
+    body = asyncio.run(run())
+    assert b"JPEG-A" in body and b"JPEG-B" in body
+    assert proc.killed is True
