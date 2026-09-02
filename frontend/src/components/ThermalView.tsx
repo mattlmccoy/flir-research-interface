@@ -56,10 +56,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale }: Prop
     <div className="view">
       <canvas ref={canvasRef} onMouseMove={onMove} onMouseLeave={() => setHover(null)} />
       {hover && (
-        <div className="readout">
-          x: {hover.x}&nbsp; y: {hover.y}<br />
-          T: {Number.isNaN(hover.t) ? "n/a (not temperature-linear)" : `${hover.t.toFixed(2)} °C`}
-        </div>
+        <div className="readout">{`x ${hover.x}   y ${hover.y}\nT ${Number.isNaN(hover.t) ? "n/a (not temperature-linear)" : `${hover.t.toFixed(2)} °C`}`}</div>
       )}
       {!frame && <div className="readout">no frames</div>}
     </div>

@@ -13,7 +13,6 @@ interface Props {
 export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, manual, setManual, shown }: Props) {
   return (
     <>
-      <h3>Display (visualization only)</h3>
       <div className="row">
         <select value={palette} onChange={(e) => setPalette(e.target.value as PaletteName)}>
           {PALETTE_NAMES.map((p) => <option key={p} value={p}>{p}</option>)}

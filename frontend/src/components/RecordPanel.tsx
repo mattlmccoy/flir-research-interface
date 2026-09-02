@@ -51,7 +51,6 @@ export function RecordPanel({ acquiring }: { acquiring: boolean }) {
 
   return (
     <>
-      <h3>Recording</h3>
       <div className="row">
         {!recording ? (
           <>
@@ -60,7 +59,7 @@ export function RecordPanel({ acquiring }: { acquiring: boolean }) {
             <button className="secondary" onClick={() => setShowForm(!showForm)}>{showForm ? "Hide metadata" : "Metadata"}</button>
           </>
         ) : (
-          <button className="primary" style={{ background: "var(--err)", color: "#fff" }} disabled={busy} onClick={stop}>■ Stop</button>
+          <button className="danger" disabled={busy} onClick={stop}>■ Stop</button>
         )}
       </div>
       {showForm && !recording && (
@@ -74,7 +73,7 @@ export function RecordPanel({ acquiring }: { acquiring: boolean }) {
         </div>
       )}
       <div className="kv">
-        <span>State</span><span className="v">{recording ? "● REC" : status.state}</span>
+        <span>State</span><span className="v">{recording ? <span className="badge rec">● REC</span> : status.state}</span>
         {recording && (<>
           <span>Written</span><span className="v">{status.frames_written ?? 0} / {status.frames_received ?? 0}</span>
           <span>Recorded fps</span><span className="v">{status.recorded_fps ? status.recorded_fps.toFixed(1) : "—"}</span>

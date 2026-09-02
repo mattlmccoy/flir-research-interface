@@ -6,7 +6,7 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) 
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => { api.experiments().then(setItems).catch((e) => setErr(String(e))); }, []);
   return (
-    <div className="setup">
+    <div className="page-body">
       <div className="card">
         <h2>Recorded experiments</h2>
         {err && <div className="errbox">{err}</div>}

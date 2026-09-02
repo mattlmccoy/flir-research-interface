@@ -3,6 +3,9 @@ import { api, type ExperimentInfo, type Timeline } from "../lib/api.ts";
 import { decodeFrameMessage, type FrameMessage } from "../lib/protocol.ts";
 import type { PaletteName } from "../lib/palette.ts";
 import type { Range, ScaleMode } from "../lib/scale.ts";
+import type { LayoutAction, LayoutState } from "../lib/layout.ts";
+import type { RecordingStatus, Status } from "../lib/api.ts";
+import type { Dispatch, ReactNode } from "react";
 import { SPEEDS, clampIndex, nextFrameDelayMs, speedLabel } from "../lib/playback.ts";
 import { ThermalView } from "./ThermalView.tsx";
 import { DisplayControls } from "./DisplayControls.tsx";
@@ -13,9 +16,16 @@ interface Props {
   scaleMode: ScaleMode; setScaleMode: (m: ScaleMode) => void;
   manual: Range; setManual: (r: Range) => void;
   onBack: () => void;
+  layout: LayoutState;
+  dispatch: Dispatch<LayoutAction>;
+  topbar: ReactNode;
+  status: Status;
+  recording: RecordingStatus | null;
 }
 
 export function PlaybackPage(p: Props) {
+  const { layout: _layout, dispatch: _dispatch, topbar: _topbar, status: _status, recording: _recording } = p;
+  void _layout; void _dispatch; void _topbar; void _status; void _recording;
   const [info, setInfo] = useState<ExperimentInfo | null>(null);
   const [tl, setTl] = useState<Timeline | null>(null);
   const [index, setIndex] = useState(0);

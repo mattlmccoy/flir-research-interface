@@ -28,7 +28,7 @@ export function SetupPage({ onConnected }: { onConnected: () => void }) {
   const spin = (disc?.spinnaker_devices as Any[] | undefined) ?? [];
 
   return (
-    <div className="setup">
+    <div className="page-body">
       <div className="card">
         <h2>1. Camera SDK on this machine</h2>
         {!sdk && <div className="muted">checking…</div>}
