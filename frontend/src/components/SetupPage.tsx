@@ -53,7 +53,7 @@ export function SetupPage({ onConnected }: { onConnected: () => void }) {
                 <div><b>{String(sdk.sdk_artifact_hint || sdk.reason)}</b></div>
                 <div className="muted">Local copy: {String(sdk.pyspin_local ?? "not found")} · looked in {(sdk.pyspin_search_dirs as string[] | undefined)?.join(", ")}</div>
                 <ol>{(sdk.steps as string[] | undefined)?.map((s, i) => <li key={i}><code>{s}</code></li>)}</ol>
-                <div className="muted">The FLIR license does not allow this application to ship Spinnaker; download it from Teledyne with a free account.</div>
+                <div className="muted">Easiest fix: re-run the one-line installer from the first-run page; it fetches Spinnaker and PySpin from the project's internal mirror. Otherwise download them from Teledyne (free account).</div>
               </div>
             )}
           </>
