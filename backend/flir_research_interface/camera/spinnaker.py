@@ -110,6 +110,14 @@ STREAM_COUNTER_NODES: dict[str, str] = {
 }
 
 
+def device_temperature_c(raw: dict[str, Any]) -> float | None:
+    """DeviceTemperature (Kelvin on the A70; selector 'Shutter' by default) as °C, or None."""
+    v = raw.get("DeviceTemperature")
+    if isinstance(v, bool) or not isinstance(v, int | float):
+        return None
+    return float(v) - 273.15 if v > 150 else float(v)  # a value below 150 is already °C
+
+
 def build_camera_info(
     raw: dict[str, Any],
     *,
@@ -545,6 +553,7 @@ class SpinnakerCameraBackend(CameraBackend):
         )
         info["enum_options"] = {n: _enum_entries(ps, nm, n) for n in ENUM_NODES}
         info["nuc_count"] = self._nuc_count
+        info["device_temperature_c"] = device_temperature_c(raw)
         return info
 
     # -- controls (brief §30) ------------------------------------------------------------

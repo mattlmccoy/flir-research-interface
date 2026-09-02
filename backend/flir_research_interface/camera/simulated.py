@@ -209,6 +209,7 @@ class SimulatedCameraBackend(CameraBackend):
             "active_case": cases[self._case],
             "object_parameters": dict(self._params),
             "nuc_mode": self._nuc_mode,
+            "device_temperature_c": 34.0,
             "nuc_count": self._nuc_count,
             "enum_options": {k: list(v) for k, v in self.ENUM_OPTIONS.items()},
         }

@@ -85,6 +85,14 @@ def readme_text(reader: ExperimentReader) -> str:
         if "RelativeHumidity" in op:
             parts.append(f"humidity {float(op['RelativeHumidity']) * 100:.0f} %")
         lines.append("  Object parameters: " + ", ".join(parts))
+    if cam.get("device_temperature_c") is not None:
+        stop = next((e for e in reader.events if e.get("type") == "camera_state"), None)
+        t0 = float(cam["device_temperature_c"])
+        t1 = stop.get("device_temperature_c") if stop else None
+        lines.append(
+            f"  Camera internal temperature: {t0:.1f} °C at start"
+            + (f", {float(t1):.1f} °C at stop" if isinstance(t1, int | float) else "")
+        )
     lines.append(
         f"  Pixel data: {cam.get('pixel_format', 'Mono16')} counts, IR format "
         f"{conv.get('ir_format') or cam.get('ir_format') or '?'}"

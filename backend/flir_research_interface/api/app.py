@@ -244,6 +244,20 @@ def create_app(
         if rec is not None:
             exp_dir = rec.experiment_dir
             if rec.state in (RecorderState.RECORDING, RecorderState.ERROR):
+                svc_now = service()
+                if svc_now is not None and rec.state == RecorderState.RECORDING:
+                    try:  # camera housekeeping at stop: FPA/housing temperature explains drift
+                        info_now = await run_in_threadpool(svc_now.backend.camera_info)
+                        rec.note_event(
+                            "camera_state",
+                            {
+                                "when": "stop",
+                                "device_temperature_c": info_now.get("device_temperature_c"),
+                                "nuc_count": info_now.get("nuc_count"),
+                            },
+                        )
+                    except Exception:  # noqa: BLE001 - never delay or endanger the stop
+                        logger.debug("camera_state at stop unavailable", exc_info=True)
                 manifest = await run_in_threadpool(rec.stop)
             app.state.recorder = None
             _nuc_hold_end()

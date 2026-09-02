@@ -75,14 +75,16 @@ experiments/<YYYYMMDD_HHMMSS>_<name>/
                          distance, humidity, lens, calibration constants), the counts→°C rule,
                          software version + git commit + host, the operator's experiment fields,
                          the ROIs in force (`rois`, with names/colours) and the visible↔IR
-                         alignment in force (`visible_alignment`), `nuc_hold` (NUC mode held
+                         alignment in force (`visible_alignment`), `camera.device_temperature_c`
+                         (the A70's shutter/FPA temperature at start), `nuc_hold` (NUC mode held
                          Off during the run, and whether a NUC ran just before it); post-hoc
                          edits append to `edits`
   events.json            recording start/stop, frame gaps, NUCs, `trigger` / `trigger_end` for
                          armed recordings (the condition that fired, the watched value, the
                          frame id, the number of pre-trigger frames), operator marks (RF ON/OFF,
                          custom) each with the frame id it happened at, and `frozen_frames`
-                         runs: the A70 repeats its last image (new frame id and timestamp,
+                         runs (see below), `camera_state` at stop (device temperature, NUC count)
+                         so drift between start and stop can be read off; frozen_frames: the A70 repeats its last image (new frame id and timestamp,
                          identical pixels) for ~2 s while it performs a NUC; those frames are
                          kept but counted (`repeated_frames`, `frozen_runs` in manifest.json
                          and the live status) so a flat stretch in a trace is explained
