@@ -218,3 +218,26 @@ def test_stderr_tail_is_kept_for_diagnosis(tmp_path: Path) -> None:
     time.sleep(0.05)
     info = rec.stop()
     assert any("Connection to tcp://h:554 failed" in ln for ln in info["stderr_tail"])
+
+
+def test_stderr_tail_never_contains_the_password(tmp_path: Path) -> None:
+    import io
+
+    class Leaky(FakeProc):
+        def __init__(self, args: list[str], **kwargs: Any) -> None:
+            super().__init__(args, **kwargs)
+            self.stderr = io.BytesIO(
+                b"Error opening input file rtsp://rtsp:s3cret@192.168.7.2/avc/ch1.\n"
+                b"password was s3cret again\n"
+            )
+
+    rec = VisibleRecorder(
+        ffmpeg="/opt/ffmpeg", url="rtsp://rtsp:s3cret@192.168.7.2/avc/ch1", popen=Leaky
+    )
+    rec.start(tmp_path)
+    time.sleep(0.05)
+    assert "s3cret" not in json.dumps(rec.stats())
+    info = rec.stop()
+    assert "s3cret" not in json.dumps(info)
+    assert "s3cret" not in (tmp_path / "visible.json").read_text()
+    assert any("rtsp://rtsp:***@192.168.7.2/avc/ch1" in ln for ln in info["stderr_tail"])

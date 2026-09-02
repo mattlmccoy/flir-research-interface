@@ -14,6 +14,7 @@ import enum
 import hashlib
 import json
 import logging
+import re
 import subprocess
 import threading
 import time
@@ -39,6 +40,23 @@ SYNC_NOTE = "host clock; ffmpeg -use_wallclock_as_timestamps 1"
 SOCKET_TIMEOUT_US = 5_000_000  # fail fast when the camera is unreachable
 STDERR_TAIL_LINES = 30
 FFMPEG_CANDIDATES = tuple(c.replace("ffprobe", "ffmpeg") for c in FFPROBE_CANDIDATES)
+
+
+_URL_CREDS = re.compile(r"(rtsp://[^:@/\s]+:)[^@\s]+@")
+
+
+def _redactor(url: str) -> Callable[[str], str]:
+    """Scrubs the password (and any rtsp://user:pass@ pattern) from ffmpeg's chatter."""
+    m = _URL_CREDS.search(url)
+    password = m.group(0)[len(m.group(1)) : -1] if m else None
+
+    def redact(line: str) -> str:
+        line = _URL_CREDS.sub(r"\1***@", line)
+        if password:
+            line = line.replace(password, "***")
+        return line
+
+    return redact
 
 
 class VisibleState(str, enum.Enum):
@@ -96,11 +114,12 @@ class VisibleRecorder:
         self._cmd: list[str] = []
         self._stderr: deque[str] = deque(maxlen=STDERR_TAIL_LINES)
         self._stderr_thread: threading.Thread | None = None
+        self._redact = _redactor(url)
 
     def _pump_stderr(self, stream: Any) -> None:
         try:
             for raw in iter(stream.readline, b""):
-                self._stderr.append(raw.decode("utf-8", "replace").rstrip())
+                self._stderr.append(self._redact(raw.decode("utf-8", "replace").rstrip()))
         except (OSError, ValueError):
             pass
 
