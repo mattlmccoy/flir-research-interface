@@ -220,6 +220,7 @@ def generate_previews(exp_dir: Path) -> dict[str, Any]:
             "sha256": _sha256(keyframes_png),
         },
     }
+    _atomic_write(exp_dir / "previews.json", json.dumps(out, indent=2).encode())
     man_path = exp_dir / "manifest.json"
     if man_path.is_file():
         man = json.loads(man_path.read_text())

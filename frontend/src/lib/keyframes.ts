@@ -13,8 +13,11 @@ export function keyframeBackgroundPosition(k: number, count: number): string {
 }
 
 export function formatSeconds(t: number): string {
-  if (t < 60) return `${t.toFixed(2)} s`;
-  const m = Math.floor(t / 60);
-  const s = t - m * 60;
+  // Round to the precision each branch displays before deciding which branch applies,
+  // so a value like 59.996 (which rounds to "60.0") reports as "1:00.0" instead of "60.00 s".
+  if (Math.round(t * 100) / 100 < 60) return `${t.toFixed(2)} s`;
+  const rounded = Math.round(t * 10) / 10;
+  const m = Math.floor(rounded / 60);
+  const s = rounded - m * 60;
   return `${m}:${s.toFixed(1).padStart(4, "0")}`;
 }

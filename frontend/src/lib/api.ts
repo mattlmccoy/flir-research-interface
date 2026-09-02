@@ -3,7 +3,19 @@ export interface Status { state: string; backend?: string | null; device?: Devic
 
 async function j<T>(r: Promise<Response>): Promise<T> {
   const res = await r;
-  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+  if (!res.ok) {
+    const text = await res.text();
+    let detail = text;
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (parsed && typeof parsed === "object" && typeof (parsed as { detail?: unknown }).detail === "string") {
+        detail = (parsed as { detail: string }).detail;
+      }
+    } catch {
+      // not JSON: fall back to the raw text
+    }
+    throw new Error(`${res.status} ${detail}`);
+  }
   return (await res.json()) as T;
 }
 export interface RecordingStatus { state: string; experiment_dir?: string | null; frames_received?: number; frames_written?: number; queue_depth?: number; queue_dropped?: number; frame_id_gaps?: number; duration_s?: number; recorded_fps?: number | null; free_space_gb?: number | null; min_free_gb?: number; error?: string | null; experiments_root?: string; }
@@ -19,7 +31,7 @@ export interface Experiment {
   path: string;
   complete: boolean;
   frames_on_disk: number;
-  has_metadata: boolean;
+  has_metadata?: boolean;
   manifest: Record<string, unknown> | null;
   metadata: Record<string, unknown> | null;
   previews?: Previews | null;
@@ -27,6 +39,8 @@ export interface Experiment {
   duration_s?: number;
   n_frames?: number;
   experiment?: Record<string, unknown> | null;
+  error?: string;
+  started_utc?: string | null;
 }
 
 export interface ExperimentInfo { name: string; path: string; n_frames: number; width: number; height: number; duration_s: number; complete: boolean; ir_format: string | null; conversion: Record<string, unknown> | null; experiment: Record<string, unknown> | null; camera: Record<string, unknown> | null; software: Record<string, unknown> | null; started_utc: string | null; events?: Record<string, unknown>[]; manifest: Record<string, unknown> | null; }

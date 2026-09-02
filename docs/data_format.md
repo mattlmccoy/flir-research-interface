@@ -32,6 +32,12 @@ experiments/
     manifest.json        written ONLY on clean stop: frames_received/written, queue_dropped,
                          frame_id_gaps + gap_events, duration, error, complete flag, sha256 of
                          metadata.json and events.json
+    preview.png          derived, regenerable: mid-capture frame, iron palette (fri-thumbs)
+    keyframes.png        derived, regenerable: 12-frame horizontal strip for hover-scrub
+    previews.json        derived, regenerable: sidecar copy of the previews dict (units,
+                         preview{}, keyframes{}), written by generate_previews() so an
+                         experiment without manifest.json (crash/incomplete) still exposes
+                         previews; manifest.json["previews"] takes precedence when both exist
 ```
 
 An experiment directory **without** `manifest.json` is incomplete (crash or power loss). It is

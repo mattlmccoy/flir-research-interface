@@ -20,15 +20,24 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) 
     if (!items) return [];
     const f = q.trim().toLowerCase();
     const list = items.filter((e) => !f || e.name.toLowerCase().includes(f) || JSON.stringify(e.experiment ?? {}).toLowerCase().includes(f));
-    return [...list].sort((a, b) =>
-      sort === "name" ? a.name.localeCompare(b.name) : sort === "duration" ? (b.duration_s ?? 0) - (a.duration_s ?? 0) : b.name.localeCompare(a.name),
-    );
+    return [...list].sort((a, b) => {
+      if (sort === "name") return a.name.localeCompare(b.name);
+      if (sort === "duration") return (b.duration_s ?? 0) - (a.duration_s ?? 0);
+      // newest: by started_utc descending, falling back to name (which sorts newest-first
+      // for this project's timestamp-prefixed names) when either side lacks started_utc.
+      if (a.started_utc && b.started_utc) {
+        const byStart = b.started_utc.localeCompare(a.started_utc);
+        if (byStart !== 0) return byStart;
+      }
+      return b.name.localeCompare(a.name);
+    });
   }, [items, sort, q]);
+  const filtering = q.trim().length > 0;
 
   return (
     <div className="page-body">
       <div className="exp-head">
-        <span>{items ? `${items.length} experiments` : "loading…"}</span>
+        <span>{items ? (filtering ? `${shown.length} / ${items.length} experiments` : `${items.length} experiments`) : "loading…"}</span>
         <span className="right">
           <input type="text" placeholder="filter" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 160 }} />
           <select value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
@@ -36,13 +45,24 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) 
             <option value="name">name</option>
             <option value="duration">duration</option>
           </select>
-          <button className="secondary" onClick={() => void api.revealRoot().catch((e) => setErr(String(e)))}>
+          <button
+            className="secondary"
+            onClick={() =>
+              api
+                .revealRoot()
+                .then((r) => {
+                  if (!r.ok) setErr(`${r.error ?? "reveal failed"} — ${r.path}`);
+                })
+                .catch((e) => setErr(String(e)))
+            }
+          >
             open folder
           </button>
         </span>
       </div>
       {err && <div className="errbox">{err}</div>}
       {items && items.length === 0 && <div className="muted">No experiments yet. Record one from the live view.</div>}
+      {items && items.length > 0 && shown.length === 0 && <div className="muted">No experiments match the filter.</div>}
       <div className="exp-grid">
         {shown.map((e) => (
           <ExperimentCard key={e.name} exp={e} onOpen={() => onOpen(e.name)} onChanged={load} />

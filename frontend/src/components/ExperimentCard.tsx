@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, type Experiment } from "../lib/api.ts";
+import { api, type Experiment, type Previews } from "../lib/api.ts";
 import { formatSeconds, keyframeBackgroundPosition, keyframeIndex } from "../lib/keyframes.ts";
 
 interface Props { exp: Experiment; onOpen: () => void; onChanged: () => void; }
@@ -8,13 +8,18 @@ export function ExperimentCard({ exp, onOpen, onChanged }: Props) {
   const [k, setK] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
-  const kf = exp.previews?.keyframes;
+  // The regenerate response is authoritative the instant it comes back — don't wait on the
+  // parent's refetch (onChanged) to see the new preview, in case it's slow or the parent's
+  // list is stale for another reason.
+  const [local, setLocal] = useState<Previews | null>(null);
+  const previews = exp.previews ?? local;
+  const kf = previews?.keyframes;
   const count = kf?.count ?? 0;
   const n = exp.n_frames ?? exp.frames_on_disk;
   const meta = exp.experiment ?? {};
   // content-addressed cache key: regenerated previews change the sha, so the URL changes
-  const v = exp.previews ? `${exp.previews.preview.sha256.slice(0, 12)}` : "";
-  const kv = exp.previews ? `${exp.previews.keyframes.sha256.slice(0, 12)}` : "";
+  const v = previews ? `${previews.preview.sha256.slice(0, 12)}` : "";
+  const kv = previews ? `${previews.keyframes.sha256.slice(0, 12)}` : "";
   const dropped = (exp.manifest as { queue_dropped?: number } | null)?.queue_dropped ?? 0;
 
   function onMove(e: React.MouseEvent<HTMLDivElement>) {
@@ -40,7 +45,7 @@ export function ExperimentCard({ exp, onOpen, onChanged }: Props) {
     setBusy(true);
     setNote(null);
     try {
-      await api.regeneratePreviews(exp.name);
+      setLocal(await api.regeneratePreviews(exp.name));
       onChanged();
     } catch (err) {
       setNote(String(err));
@@ -49,17 +54,21 @@ export function ExperimentCard({ exp, onOpen, onChanged }: Props) {
     }
   }
 
-  const unitLabel = exp.previews?.units === "counts" ? " (raw counts)" : "";
+  const unitLabel = previews?.units === "counts" ? " (raw counts)" : "";
   return (
     <div className="exp-card">
       <div className="thumb" onMouseMove={onMove} onMouseLeave={() => setK(null)} onClick={onOpen} title="open">
-        {exp.previews ? (
+        {previews ? (
           <>
             <img src={`${api.previewUrl(exp.name)}?v=${v}`} alt="" />
             {k !== null && kf && (
               <div
                 className="kf"
-                style={{ backgroundImage: `url(${api.keyframesUrl(exp.name)}?v=${kv})`, backgroundPosition: keyframeBackgroundPosition(k, count) }}
+                style={{
+                  backgroundImage: `url(${api.keyframesUrl(exp.name)}?v=${kv})`,
+                  backgroundPosition: keyframeBackgroundPosition(k, count),
+                  backgroundSize: `${count * 100}% 100%`,
+                }}
               />
             )}
             <span className="t">
@@ -88,7 +97,7 @@ export function ExperimentCard({ exp, onOpen, onChanged }: Props) {
         </span>
         <span>{exp.complete ? <span className="badge ok">complete</span> : <span className="badge bad">INCOMPLETE{dropped ? ` · ${dropped} dropped` : ""}</span>}</span>
         <div className="actions">
-          <button className="primary" disabled={!n} onClick={onOpen}>
+          <button className="primary" disabled={!n || !!exp.error} onClick={onOpen}>
             open
           </button>
           <button className="secondary" disabled={busy} onClick={reveal} title="Show in Finder / Explorer">
@@ -98,6 +107,7 @@ export function ExperimentCard({ exp, onOpen, onChanged }: Props) {
             export
           </button>
         </div>
+        {exp.error && <div className="errbox">{exp.error}</div>}
         {note && <div className="errbox">{note}</div>}
       </div>
     </div>

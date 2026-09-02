@@ -34,6 +34,10 @@ class ExperimentReader:
         self.events: list[dict[str, Any]] = (
             json.loads(ev_path.read_text()) if ev_path.is_file() else []
         )
+        pv_path = self.path / "previews.json"
+        self._previews_sidecar: dict[str, Any] | None = (
+            json.loads(pv_path.read_text()) if pv_path.is_file() else None
+        )
         self._group = zarr.open_group(str(self.path / STORE_NAME), mode="r")
         self._counts = self._group["counts"]
         self._frame_id = np.asarray(self._group["frame_id"][:], dtype=np.int64)
@@ -70,7 +74,7 @@ class ExperimentReader:
             "duration_s": float(self._t_s[-1]) if self.n_frames else 0.0,
             "complete": insp["complete"],
             "manifest": self.manifest,
-            "previews": (self.manifest or {}).get("previews"),
+            "previews": (self.manifest or {}).get("previews") or self._previews_sidecar,
             "ir_format": self.ir_format,
             "pixel_format": self.pixel_format,
             "conversion": self.metadata.get("conversion"),

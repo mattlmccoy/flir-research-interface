@@ -18,6 +18,7 @@ from flir_research_interface.analysis.preview import (
     render_preview,
 )
 from flir_research_interface.camera.base import Frame
+from flir_research_interface.playback.reader import ExperimentReader
 from flir_research_interface.recording.recorder import Recorder
 
 W, H = 32, 24
@@ -170,3 +171,14 @@ def test_generate_previews_on_zero_frame_experiment_raises(tmp_path: Path) -> No
     rec.stop()
     with pytest.raises(ValueError, match="no frames"):
         generate_previews(d)
+
+
+def test_generate_previews_writes_sidecar_readable_without_manifest(tmp_path: Path) -> None:
+    """An incomplete experiment (no stop(), so no manifest.json) still exposes previews via
+    a previews.json sidecar that ExperimentReader.info() picks up."""
+    d = _exp(tmp_path, n=5, finalize=False)
+    generate_previews(d)
+    assert (d / "previews.json").is_file()
+    assert not (d / "manifest.json").exists()
+    info = ExperimentReader(d).info()
+    assert info["previews"]["preview"]["file"] == "preview.png"
