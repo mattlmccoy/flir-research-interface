@@ -52,6 +52,7 @@ the probe output from the real A70 before touching radiometric node names.
 - [ ] M6 ROI/plots (+ camera-controls panel), M7 export, M8 experiment metadata/events.
 - [x] M9 Visible camera recorder (2026-09-02): RTSP /avc/ch1 stream copy, live MJPEG preview, side/overlay placement, homography alignment (10-pair fit verified on the A70), alignment + ROIs stamped into metadata.json, roi_series.csv auto-export.
 - [x] M9b Thermal preview video (2026-09-02): exports/thermal_preview.mp4 rendered in the background after every stop (iron palette, fixed run-wide °C scale, colour bar, time label); `POST …/export/thermal-video` re-renders; playback → export shows MP4 link + render button.
+- [x] M9c Per-run README.txt + exports/roi_plot.png at stop; recorder counts/logs frozen frames (A70 repeats its image ~2 s during a NUC — seen in the dress rehearsal: 70 identical frames 3.0–5.4 s) (2026-09-02).
 - [ ] M10 Packaging + mDNS hostname + installer that prompts for the right Teledyne download.
 - [ ] M11 Armed recording with triggers (user request 2026-09-02). Design, to be TDD'd as a pure
   state machine in backend `recording/trigger.py` and evaluated on the acquisition thread's frames:
@@ -77,7 +78,7 @@ the probe output from the real A70 before touching radiometric node names.
 
 ### Open technical unknowns (docs/radiometry.md s10)
 - [ ] Out-of-range/saturation encoding in temperature-linear counts.
-- [ ] Temperature-linear stream behaviour during NUC and range switch (gaps? stale frames?).
+- [~] Temperature-linear stream behaviour during NUC: the camera keeps streaming with fresh frame ids/timestamps but identical pixels for ~2.4 s (dress rehearsal 2026-09-02). Now counted as `repeated_frames`. Range switch still unknown.
 - [ ] Content of the 3 extra sensor rows (HeightMax 483 vs 480); whether Focus nodes act on this lens.
 
 ## Status
