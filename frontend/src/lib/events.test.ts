@@ -44,3 +44,13 @@ test("annotation events with a frame_id are placed exactly at that frame and lab
   ], TL, START);
   assert.deepEqual(m, [{ t: 0.3, label: "RF ON" }, { t: 0.1, label: "late but exact" }]);
 });
+
+test("long frozen runs (the camera's NUC) become NUC markers; single repeated frames are noise", () => {
+  const m = eventsToMarkers([
+    { t_utc: "2026-09-02T10:00:00.300+00:00", type: "frozen_frames", first_frame_id: 102, last_frame_id: 171, repeats: 70 },
+    { t_utc: "2026-09-02T10:00:00.400+00:00", type: "frozen_frames", first_frame_id: 103, last_frame_id: 103, repeats: 1 },
+  ], TL, START);
+  assert.equal(m.length, 1);
+  assert.equal(m[0].label, "NUC (70 fr)");
+  assert.equal(m[0].t, 0.2, "first frame with id >= 102 is 103 at t=0.2");
+});

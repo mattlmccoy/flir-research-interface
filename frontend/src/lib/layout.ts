@@ -2,7 +2,7 @@ import { DEFAULT_ISOTHERM, parseIsotherm, type Isotherm } from "./isotherm.ts";
 /** Studio layout state (spec §3): which panels are open, which rail sections, which tool, image zoom. */
 import { isZoom, type Zoom } from "./zoom.ts";
 export const TOOLS = ["select", "spot", "rect", "circle", "line", "polygon"] as const;
-export const SECTIONS = ["measurements", "camera", "experiment", "recording", "display", "export", "visible"] as const;
+export const SECTIONS = ["measurements", "profile", "camera", "experiment", "recording", "display", "export", "visible"] as const;
 export type Tool = (typeof TOOLS)[number];
 export type Panel = "strip" | "rail" | "dock";
 export type Section = (typeof SECTIONS)[number];
@@ -60,7 +60,7 @@ export const DEFAULT_LAYOUT: LayoutState = {
   extremes: true,
   isotherm: DEFAULT_ISOTHERM,
   overlay: DEFAULT_OVERLAY,
-  sections: { measurements: true, camera: true, experiment: true, recording: true, display: true, export: true, visible: true },
+  sections: { measurements: true, profile: false, camera: true, experiment: true, recording: true, display: true, export: true, visible: true },
 };
 Object.freeze(DEFAULT_LAYOUT.sections);
 Object.freeze(DEFAULT_LAYOUT);

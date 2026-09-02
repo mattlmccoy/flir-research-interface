@@ -1,3 +1,4 @@
+import { ProfilePanel, type FieldSnapshot } from "./components/ProfilePanel.tsx";
 import { radiometryFromCamera } from "./lib/emissivity.ts";
 import { useCallback, useEffect, useReducer, useRef, useState, useMemo } from "react";
 import { api, operatorBase, type RecordingStatus, type Status } from "./lib/api.ts";
@@ -93,6 +94,7 @@ export function App() {
   }, []);
 
   const refreshInfo = useCallback(() => { api.info().then(setInfo).catch(() => undefined); }, []);
+  const [field, setField] = useState<FieldSnapshot | null>(null);
   const rad = useMemo(() => radiometryFromCamera(info), [info]);
   const refresh = useCallback(async () => {
     try { setStatus(await api.status()); } catch { setStatus({ state: "unreachable" }); }
@@ -190,7 +192,7 @@ export function App() {
       center={
         <div className={`center-split ${(layout.visibleMode === "side" || calibrating) && visibleAvailable ? "on" : ""}`}>
           <ThermalView frame={frame} palette={palette} scaleMode={scaleMode} manual={manual} onScale={setShown}
-            rois={rois.rois} selected={rois.selected} tool={layout.tool} zoom={layout.zoom} onRoi={roiDispatch} onStats={onStats} rad={rad} extremes={layout.extremes} isotherm={layout.isotherm}
+            rois={rois.rois} selected={rois.selected} tool={layout.tool} zoom={layout.zoom} onRoi={roiDispatch} onStats={onStats} rad={rad} extremes={layout.extremes} isotherm={layout.isotherm} onField={setField}
             overlay={layout.visibleMode === "overlay" && !calibrating && visibleAvailable ? <VisibleLive plain /> : undefined} overlayStyle={layout.overlay} overlayH={align.H}
             topLayer={calibrating ? <PickLayer label="IR" color="var(--live)" points={align.pairs.map((p) => p.ir)} pending={align.pending?.ir} onPick={(p) => alignDispatch({ type: "pick", side: "ir", p })} /> : undefined} />
           {(layout.visibleMode === "side" || calibrating) && visibleAvailable && (
@@ -225,6 +227,9 @@ export function App() {
             {nearLimit && <div className="warnbox">Max within 10 °C of the range limit ({active?.high_c} °C).</div>}
             <RoiRows rois={rois.rois} stats={liveStats} selected={rois.selected} extremes={layout.extremes} onExtremes={(on) => dispatch({ type: "setExtremes", on })}
               dispatch={roiDispatch} />
+          </RailSection>
+          <RailSection title="profile & histogram" open={layout.sections.profile} onToggle={() => dispatch({ type: "toggleSection", section: "profile" })} tag="current frame">
+            <ProfilePanel field={field} rois={rois.rois} selected={rois.selected} shown={shown} />
           </RailSection>
           <RailSection title="camera" open={layout.sections.camera} onToggle={() => dispatch({ type: "toggleSection", section: "camera" })} tag={isRecording ? "locked during recording" : "writes camera nodes"}>
             <CameraControls info={info} locked={isRecording} onApplied={refreshInfo} />

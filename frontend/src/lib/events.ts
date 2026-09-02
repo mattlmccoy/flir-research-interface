@@ -3,6 +3,8 @@ import type { ExperimentEvent, Timeline } from "./api.ts";
 import type { Marker } from "../components/TimePlot.tsx";
 
 const BOOKKEEPING = new Set(["recording_started", "recording_stopped"]);
+/** Frozen runs at least this long are shown as a NUC marker. */
+export const NUC_MIN_REPEATS = 10;
 
 /** Index of the sample time closest to `t` (0 for an empty timeline). */
 export function nearestIndex(tS: ArrayLike<number>, t: number): number {
@@ -32,6 +34,15 @@ export function eventsToMarkers(events: ExperimentEvent[], tl: Timeline, started
     const type = typeof ev.type === "string" ? ev.type : "event";
     if (BOOKKEEPING.has(type)) continue;
     const label = typeof ev.name === "string" ? ev.name : type;
+    if (type === "frozen_frames") {
+      // The A70 repeats its last image for ~2 s (60-70 frames) during a NUC; isolated repeats
+      // (1-2 frames) happen ~1 % of the time and are not worth a marker.
+      const repeats = typeof ev.repeats === "number" ? ev.repeats : 0;
+      if (repeats < NUC_MIN_REPEATS || typeof ev.first_frame_id !== "number") continue;
+      const i = tl.frame_id.findIndex((id) => id >= (ev.first_frame_id as number));
+      if (i >= 0) out.push({ t: tl.t_s[i], label: `NUC (${repeats} fr)` });
+      continue;
+    }
     if (type === "frame_gap" && typeof ev.after_frame_id === "number") {
       const i = tl.frame_id.findIndex((id) => id > (ev.after_frame_id as number));
       if (i >= 0) out.push({ t: tl.t_s[i], label: `gap ${typeof ev.missing === "number" ? ev.missing : "?"}` });

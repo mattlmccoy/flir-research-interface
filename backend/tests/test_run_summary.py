@@ -57,6 +57,9 @@ def _exp(root: Path, n: int = 10, rois: list | None = ROIS) -> ExperimentReader:
         )
         if i == 4:
             rec.note_event("annotation", {"name": "RF ON", "note": "go"})
+        if i == 6:  # a fake NUC-length freeze so the plot marks it
+            frozen = {"first_frame_id": 6, "last_frame_id": 8, "repeats": 12}
+            rec.note_event("frozen_frames", frozen)
     rec.stop()
     return ExperimentReader(d)
 
@@ -86,6 +89,9 @@ def test_readme_is_plain_prose_with_the_facts_a_reader_needs(tmp_path: Path) -> 
 
 def test_roi_plot_is_a_png_with_one_trace_per_roi_and_the_marks(tmp_path: Path) -> None:
     r = _exp(tmp_path)
+    from flir_research_interface.analysis.run_summary import plot_marks
+
+    assert [m[1] for m in plot_marks(r)] == ["RF ON", "NUC (12 fr)"]
     png = roi_plot_png(r, r.metadata["rois"])
     img = Image.open(io.BytesIO(png))
     assert img.format == "PNG" and img.width >= 800 and img.height >= 300

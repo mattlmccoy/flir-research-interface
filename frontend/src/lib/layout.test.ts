@@ -11,12 +11,14 @@ function memStorage(): Storage {
   } as Storage;
 }
 
-test("defaults: strip and rail open, dock open, all rail sections open, tool select", () => {
+test("defaults: strip and rail open, dock open, all rail sections open except profile, tool select", () => {
   assert.equal(DEFAULT_LAYOUT.strip, true);
   assert.equal(DEFAULT_LAYOUT.rail, true);
   assert.equal(DEFAULT_LAYOUT.dock, true);
   assert.equal(DEFAULT_LAYOUT.tool, "select");
-  assert.deepEqual(Object.values(DEFAULT_LAYOUT.sections).every(Boolean), true);
+  const { profile, ...rest } = DEFAULT_LAYOUT.sections;
+  assert.equal(profile, false, "profile & histogram starts collapsed to keep the rail short");
+  assert.deepEqual(Object.values(rest).every(Boolean), true);
 });
 
 test("toggle actions flip one flag and leave the rest", () => {

@@ -147,6 +147,21 @@ def _nice_ticks(lo: float, hi: float, n: int = 6) -> list[float]:
     return [first + i * step for i in range(int((hi - first) / step) + 1)]
 
 
+NUC_MIN_REPEATS = 10
+"""Frozen runs at least this long are marked as a NUC (mirrors lib/events.ts)."""
+
+
+def plot_marks(reader: ExperimentReader) -> list[tuple[int, str]]:
+    """(frame_id, label) for operator marks and NUC-length frozen runs, in event order."""
+    out: list[tuple[int, str]] = []
+    for e in reader.events:
+        if e.get("type") == "annotation" and e.get("frame_id") is not None:
+            out.append((int(e["frame_id"]), str(e.get("name", ""))))
+        elif e.get("type") == "frozen_frames" and int(e.get("repeats", 0)) >= NUC_MIN_REPEATS:
+            out.append((int(e["first_frame_id"]), f"NUC ({int(e['repeats'])} fr)"))
+    return out
+
+
 def roi_plot_png(reader: ExperimentReader, rois: list[dict[str, Any]]) -> bytes:
     """Traces of every ROI (value, or mean with min–max band) vs time, with operator marks."""
     series = roi_series(reader, rois)
@@ -205,15 +220,16 @@ def roi_plot_png(reader: ExperimentReader, rois: list[dict[str, Any]]) -> bytes:
     d.text((x0, y1 + 24), "time (s)", fill=(200, 200, 200), font=font)
     units = "°C" if (reader.ir_format or "").startswith("TemperatureLinear") else "counts"
     d.text((6, y0 - 22), units, fill=(200, 200, 200), font=font)
-    for e in reader.events:
-        if e.get("type") != "annotation" or e.get("frame_id") is None:
-            continue
-        idx = np.searchsorted(np.asarray(series["frame_id"]), e["frame_id"])
+    for frame_id, label in plot_marks(reader):
+        idx = np.searchsorted(np.asarray(series["frame_id"]), frame_id)
         if idx >= t.size:
             continue
         x = px(float(t[idx]))
-        d.line([(x, y0), (x, y1)], fill=(255, 255, 255, 120), width=1)
-        d.text((x + 3, y0 + 2), str(e.get("name", "")), fill=(230, 230, 230), font=font)
+        nuc = label.startswith("NUC")
+        d.line(
+            [(x, y0), (x, y1)], fill=(255, 200, 80, 150) if nuc else (255, 255, 255, 120), width=1
+        )
+        d.text((x + 3, y0 + 2), label, fill=(255, 210, 120) if nuc else (230, 230, 230), font=font)
     for i, (r, main, mn, mx) in enumerate(traces):
         col = r.get("color") or DEFAULT_COLORS[i % len(DEFAULT_COLORS)]
         rgb = tuple(int(col.lstrip("#")[j : j + 2], 16) for j in (0, 2, 4))
@@ -258,4 +274,4 @@ def write_run_summary(reader: ExperimentReader) -> dict[str, str | None]:
     return {"readme": str(readme), "roi_plot": str(plot) if plot else None}
 
 
-__all__ = ["readme_text", "roi_plot_png", "write_run_summary"]
+__all__ = ["plot_marks", "readme_text", "roi_plot_png", "write_run_summary"]

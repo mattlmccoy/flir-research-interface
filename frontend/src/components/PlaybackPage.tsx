@@ -1,3 +1,4 @@
+import { ProfilePanel, type FieldSnapshot } from "../components/ProfilePanel.tsx";
 import { radiometryFromCamera } from "../lib/emissivity.ts";
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import type { Dispatch, ReactNode } from "react";
@@ -126,6 +127,7 @@ export function PlaybackPage(p: Props) {
   const hdr = frame?.header;
   const exp = (info?.experiment ?? {}) as Record<string, unknown>;
   const cam = (info?.camera ?? {}) as Record<string, unknown>;
+  const [field, setField] = useState<FieldSnapshot | null>(null);
   const rad = useMemo(() => radiometryFromCamera(info?.camera), [info]);
   const active = cam.active_case as { low_c?: number; high_c?: number } | undefined;
   const markers = info && tl ? eventsToMarkers(info.events ?? [], tl, info.started_utc) : [];
@@ -158,7 +160,7 @@ export function PlaybackPage(p: Props) {
       center={
         <div className={`center-split ${p.layout.visibleMode === "side" && hasVideo ? "on" : ""}`}>
           <ThermalView frame={frame} palette={p.palette} scaleMode={p.scaleMode} manual={p.manual} onScale={setShown}
-            rois={p.rois.rois} selected={p.rois.selected} tool={p.layout.tool} zoom={p.layout.zoom} onRoi={p.roiDispatch} onStats={onStats} rad={rad} extremes={p.layout.extremes} isotherm={p.layout.isotherm}
+            rois={p.rois.rois} selected={p.rois.selected} tool={p.layout.tool} zoom={p.layout.zoom} onRoi={p.roiDispatch} onStats={onStats} rad={rad} extremes={p.layout.extremes} isotherm={p.layout.isotherm} onField={setField}
             overlay={p.layout.visibleMode === "overlay" && hasVideo ? <VisibleVideo plain name={p.name} t={t} playing={playing} speed={speed} /> : undefined} overlayStyle={p.layout.overlay} overlayH={overlayH} />
           {p.layout.visibleMode === "side" && hasVideo && <VisibleVideo big name={p.name} t={t} playing={playing} speed={speed} measuredFps={info?.visible?.measured_fps} />}
         </div>
@@ -172,6 +174,9 @@ export function PlaybackPage(p: Props) {
       }
       rail={
         <Rail>
+          <RailSection title="profile & histogram" open={p.layout.sections.profile} onToggle={() => p.dispatch({ type: "toggleSection", section: "profile" })} tag="current frame">
+            <ProfilePanel field={field} rois={p.rois.rois} selected={p.rois.selected} shown={shown} />
+          </RailSection>
           <RailSection title="experiment" open={p.layout.sections.experiment} onToggle={() => p.dispatch({ type: "toggleSection", section: "experiment" })}>
             <div className="kv">
               <span>name</span><span className="v plain" style={{ fontSize: 11 }}>{p.name}</span>
