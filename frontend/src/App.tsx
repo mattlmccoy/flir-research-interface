@@ -1,3 +1,4 @@
+import { saveSnapshot, snapshotFilename, snapshotFooter } from "./lib/snapshot.ts";
 import { DeltaPicker } from "./components/DeltaPicker.tsx";
 import { deltaTrace } from "./lib/delta.ts";
 import { ProfilePanel, type FieldSnapshot } from "./components/ProfilePanel.tsx";
@@ -248,7 +249,7 @@ export function App() {
             <RecordPanel acquiring={status.state === "acquiring"} rois={rois.rois} />
           </RailSection>
           <RailSection id="display" title="display" open={layout.sections.display} onToggle={() => dispatch({ type: "toggleSection", section: "display" })} tag="visualization only">
-            <DisplayControls palette={palette} setPalette={setPalette} scaleMode={scaleMode} setScaleMode={setScaleMode} manual={manual} setManual={setManual} shown={shown} isotherm={layout.isotherm} setIsotherm={(isotherm) => dispatch({ type: "setIsotherm", isotherm })} hasReference={!!reference} onSetReference={() => { if (field) setReference(new Float32Array(field.c)); }} onClearReference={() => setReference(null)} />
+            <DisplayControls palette={palette} setPalette={setPalette} scaleMode={scaleMode} setScaleMode={setScaleMode} manual={manual} setManual={setManual} shown={shown} isotherm={layout.isotherm} setIsotherm={(isotherm) => dispatch({ type: "setIsotherm", isotherm })} hasReference={!!reference} onSetReference={() => { if (field) setReference(new Float32Array(field.c)); }} onClearReference={() => setReference(null)} onSnapshot={() => { const v = document.querySelector<HTMLElement>(".view"); if (v) saveSnapshot(v, snapshotFilename("live", null, null), snapshotFooter({ name: "live", tS: null, index: null, range: shown, palette: palette, rois: rois.rois.length, reference: !!reference })); }} />
           </RailSection>
           <RailSection id="visible" title="visible camera" open={layout.sections.visible} onToggle={() => dispatch({ type: "toggleSection", section: "visible" })} tag="preview only">
             <VisiblePanel mode="live" available={visibleAvailable} reason={recording?.visible?.reason} visibleMode={layout.visibleMode} overlay={layout.overlay} dispatch={dispatch} aligned={!!align.H} />

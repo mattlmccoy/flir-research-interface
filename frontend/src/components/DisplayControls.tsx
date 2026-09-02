@@ -12,10 +12,12 @@ interface Props {
   isotherm?: Isotherm; setIsotherm?: (iso: Isotherm) => void;
   /** Reference-frame subtraction: capture the current frame, show frame − reference. */
   hasReference?: boolean; onSetReference?: () => void; onClearReference?: () => void;
+  /** Save the image with its ROI overlay as a PNG (Research Studio "save image"). */
+  onSnapshot?: () => void;
 }
 
 /** Palette + display-range controls shared by live view and playback. Visualization only. */
-export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, manual, setManual, shown, isotherm, setIsotherm, hasReference, onSetReference, onClearReference }: Props) {
+export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, manual, setManual, shown, isotherm, setIsotherm, hasReference, onSetReference, onClearReference, onSnapshot }: Props) {
   const iso = isotherm ?? DEFAULT_ISOTHERM;
   const upd = (patch: Partial<Isotherm>) => setIsotherm?.({ ...iso, ...patch });
   const isoRow = setIsotherm && (
@@ -39,6 +41,11 @@ export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, 
   );
   return (
     <>
+      {onSnapshot && (
+        <div className="row">
+          <button className="secondary" onClick={onSnapshot} title="Download the thermal image with its ROIs, palette and a caption line as a PNG at native resolution">⤓ save image</button>
+        </div>
+      )}
       {refRow}
       {isoRow}
       <div className="row">

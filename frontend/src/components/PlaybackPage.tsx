@@ -1,3 +1,4 @@
+import { saveSnapshot, snapshotFilename, snapshotFooter } from "../lib/snapshot.ts";
 import { DeltaPicker } from "../components/DeltaPicker.tsx";
 import { deltaTrace } from "../lib/delta.ts";
 import { ProfilePanel, type FieldSnapshot } from "../components/ProfilePanel.tsx";
@@ -222,7 +223,7 @@ export function PlaybackPage(p: Props) {
             {err && <div className="errbox">{err}</div>}
           </RailSection>
           <RailSection id="display" title="display" open={p.layout.sections.display} onToggle={() => p.dispatch({ type: "toggleSection", section: "display" })} tag="visualization only">
-            <DisplayControls palette={p.palette} setPalette={p.setPalette} scaleMode={p.scaleMode} setScaleMode={p.setScaleMode} manual={p.manual} setManual={p.setManual} shown={shown} isotherm={p.layout.isotherm} setIsotherm={(isotherm) => p.dispatch({ type: "setIsotherm", isotherm })} hasReference={!!reference} onSetReference={() => { if (field) setReference(new Float32Array(field.c)); }} onClearReference={() => setReference(null)} />
+            <DisplayControls palette={p.palette} setPalette={p.setPalette} scaleMode={p.scaleMode} setScaleMode={p.setScaleMode} manual={p.manual} setManual={p.setManual} shown={shown} isotherm={p.layout.isotherm} setIsotherm={(isotherm) => p.dispatch({ type: "setIsotherm", isotherm })} hasReference={!!reference} onSetReference={() => { if (field) setReference(new Float32Array(field.c)); }} onClearReference={() => setReference(null)} onSnapshot={() => { const v = document.querySelector<HTMLElement>(".view"); if (v) saveSnapshot(v, snapshotFilename(p.name, index, t), snapshotFooter({ name: p.name, tS: t, index: index, range: shown, palette: p.palette, rois: p.rois.rois.length, reference: !!reference })); }} />
           </RailSection>
           <RailSection id="visible" title="visible camera" open={p.layout.sections.visible} onToggle={() => p.dispatch({ type: "toggleSection", section: "visible" })} tag="recorded video">
             <VisiblePanel mode="playback" name={p.name} hasVideo={hasVideo} t={t} playing={playing} speed={speed} measuredFps={info?.visible?.measured_fps} visibleMode={p.layout.visibleMode} overlay={p.layout.overlay} dispatch={p.dispatch} aligned={!!overlayH} />
