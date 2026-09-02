@@ -17,6 +17,7 @@ import logging
 import subprocess
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
@@ -35,6 +36,8 @@ logger = logging.getLogger(__name__)
 FILE_NAME = "visible.mp4"
 SIDECAR_NAME = "visible.json"
 SYNC_NOTE = "host clock; ffmpeg -use_wallclock_as_timestamps 1"
+SOCKET_TIMEOUT_US = 5_000_000  # fail fast when the camera is unreachable
+STDERR_TAIL_LINES = 30
 FFMPEG_CANDIDATES = tuple(c.replace("ffprobe", "ffmpeg") for c in FFPROBE_CANDIDATES)
 
 
@@ -65,6 +68,7 @@ def ffmpeg_command(ffmpeg: str, url: str, out: Path) -> list[str]:
         "-loglevel", "warning",
         "-y",  # stdin stays open on purpose: 'q' is the graceful stop that finalises the MP4
         "-rtsp_transport", "tcp",
+        "-timeout", str(SOCKET_TIMEOUT_US),
         "-use_wallclock_as_timestamps", "1",
         "-i", url,
         "-map", "0:v:0",
@@ -90,6 +94,15 @@ class VisibleRecorder:
         self._out: Path | None = None
         self._started_ns: int | None = None
         self._cmd: list[str] = []
+        self._stderr: deque[str] = deque(maxlen=STDERR_TAIL_LINES)
+        self._stderr_thread: threading.Thread | None = None
+
+    def _pump_stderr(self, stream: Any) -> None:
+        try:
+            for raw in iter(stream.readline, b""):
+                self._stderr.append(raw.decode("utf-8", "replace").rstrip())
+        except (OSError, ValueError):
+            pass
 
     @property
     def state(self) -> VisibleState:
@@ -114,12 +127,19 @@ class VisibleRecorder:
             out = Path(exp_dir) / FILE_NAME
             self._cmd = ffmpeg_command(self._ffmpeg, self._url, out)
             self._started_ns = time.time_ns()
+            self._stderr.clear()
             self._proc = self._popen(
                 self._cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
             )
+            stderr = getattr(self._proc, "stderr", None)
+            if stderr is not None:
+                self._stderr_thread = threading.Thread(
+                    target=self._pump_stderr, args=(stderr,), name="ffmpeg-stderr", daemon=True
+                )
+                self._stderr_thread.start()
             self._out = out
             self._state = VisibleState.RECORDING
             self._error = None
@@ -150,11 +170,26 @@ class VisibleRecorder:
                         p.kill()
                         rc = p.wait(timeout=5.0)
             stopped_ns = time.time_ns()
+            t = self._stderr_thread
+            if t is not None:
+                t.join(timeout=2.0)
             size = out.stat().st_size if out.is_file() else 0
-            digest = hashlib.sha256(out.read_bytes()).hexdigest() if out.is_file() else None
+            error = self._error if rc not in (0, None) else None
+            if rc not in (0, None) and error is None:
+                error = f"ffmpeg exited with code {rc}"
+            if size == 0:
+                error = error or "no video data was written (camera unreachable or stream refused)"
+                if out.exists():
+                    out.unlink()  # an empty MP4 would look like a recording that never happened
+                digest = None
+            else:
+                digest = hashlib.sha256(out.read_bytes()).hexdigest()
+            if error:
+                self._error = error
+                logger.error("visible recorder: %s", error)
             info = {
-                "file": FILE_NAME,
-                "path": str(out),
+                "file": FILE_NAME if size > 0 else None,
+                "path": str(out) if size > 0 else None,
                 "url": redact_url(self._url),
                 "command": [redact_url(a) if a.startswith("rtsp://") else a for a in self._cmd],
                 "started_host_ns": self._started_ns,
@@ -163,11 +198,12 @@ class VisibleRecorder:
                 "size_bytes": size,
                 "sha256": digest,
                 "sync": SYNC_NOTE,
-                "error": self._error if rc not in (0, None) else None,
+                "error": error,
+                "stderr_tail": list(self._stderr),
             }
             (out.parent / SIDECAR_NAME).write_text(json.dumps(info, indent=2))
             self._proc = None
-            self._state = VisibleState.IDLE
+            self._state = VisibleState.ERROR if error else VisibleState.IDLE
             logger.info("visible recorder stopped: rc=%s size=%d", rc, size)
             return info
 
@@ -180,6 +216,7 @@ class VisibleRecorder:
                 "started_host_ns": self._started_ns,
                 "url": redact_url(self._url),
                 "error": self._error,
+                "stderr_tail": list(self._stderr),
             }
 
 

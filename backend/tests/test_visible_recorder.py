@@ -75,6 +75,8 @@ def test_ffmpeg_command_is_a_tcp_stream_copy_with_wallclock_timestamps(tmp_path:
     assert "-use_wallclock_as_timestamps" in cmd
     assert "-f" in cmd and cmd[cmd.index("-f") + 1] == "mp4"
     assert "-an" in cmd  # the ONVIF metadata track is dropped; video only
+    # an unreachable camera must fail fast instead of "recording" nothing
+    assert "-timeout" in cmd and cmd.index("-timeout") < cmd.index("-i")
 
 
 def test_recorder_start_stop_writes_mp4_and_sidecar(tmp_path: Path) -> None:
@@ -183,3 +185,36 @@ def test_default_factory_builds_the_ch1_url_from_env(monkeypatch: pytest.MonkeyP
     assert rec.stats()["url"] == "rtsp://rtsp:***@192.168.7.2/avc/ch1"
     monkeypatch.delenv("FRI_RTSP_USER")
     assert mod.default_visible_factory(None) is None
+
+
+def test_zero_byte_output_is_an_error_not_a_recording(tmp_path: Path) -> None:
+    class Empty(FakeProc):
+        def wait(self, timeout: float | None = None) -> int:
+            if self.returncode is None:
+                self.out.write_bytes(b"")
+                self.returncode = 0
+            return self.returncode
+
+    rec = VisibleRecorder(ffmpeg="/opt/ffmpeg", url="rtsp://rtsp:pw@h/avc/ch1", popen=Empty)
+    rec.start(tmp_path)
+    info = rec.stop()
+    assert info["error"] and "no video data" in info["error"]
+    assert info["file"] is None and info["size_bytes"] == 0
+    assert not (tmp_path / "visible.mp4").exists()  # an empty MP4 is worse than none
+    side = json.loads((tmp_path / "visible.json").read_text())
+    assert side["error"] == info["error"]
+
+
+def test_stderr_tail_is_kept_for_diagnosis(tmp_path: Path) -> None:
+    import io
+
+    class Chatty(FakeProc):
+        def __init__(self, args: list[str], **kwargs: Any) -> None:
+            super().__init__(args, **kwargs)
+            self.stderr = io.BytesIO(b"[rtsp @ 0x1] Connection to tcp://h:554 failed: timeout\n")
+
+    rec = VisibleRecorder(ffmpeg="/opt/ffmpeg", url="rtsp://rtsp:pw@h/avc/ch1", popen=Chatty)
+    rec.start(tmp_path)
+    time.sleep(0.05)
+    info = rec.stop()
+    assert any("Connection to tcp://h:554 failed" in ln for ln in info["stderr_tail"])

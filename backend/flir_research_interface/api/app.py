@@ -126,24 +126,24 @@ def create_app(
         return {"state": "idle"}
 
     async def _finalize_recording() -> dict[str, Any] | None:
+        # Thermal data first (the science record), then the visible video; the visible stop may
+        # wait on ffmpeg and must never delay or endanger the manifest.
         rec = recorder()
+        manifest = None
+        if rec is not None:
+            if rec.state in (RecorderState.RECORDING, RecorderState.ERROR):
+                manifest = await run_in_threadpool(rec.stop)
+            app.state.recorder = None
         vis = app.state.visible
-        visible_info: dict[str, Any] | None = None
         if vis is not None:
+            app.state.visible = None
             try:
                 visible_info = await run_in_threadpool(vis.stop)
-            except Exception as exc:  # noqa: BLE001 - never lose the thermal finalize
+            except Exception as exc:  # noqa: BLE001 - report, never raise past the thermal finalize
                 logger.exception("visible recorder stop failed")
                 visible_info = {"state": "error", "error": str(exc)}
-            app.state.visible = None
-        if rec is None:
-            return None
-        manifest = None
-        if rec.state in (RecorderState.RECORDING, RecorderState.ERROR):
-            manifest = await run_in_threadpool(rec.stop)
-        if manifest is not None and visible_info is not None:
-            manifest["visible"] = visible_info
-        app.state.recorder = None
+            if manifest is not None:
+                manifest["visible"] = visible_info
         return manifest
 
     # -- health / setup --------------------------------------------------------------------
