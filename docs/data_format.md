@@ -112,7 +112,7 @@ All exports are derived from the read-only reader; the Zarr store is never modif
 
 | Export | Where | Content |
 |---|---|---|
-| ROI series CSV | `GET /api/experiments/{name}/export/series.csv?rois=…` (playback rail → export) | `t_s, frame_id, S<n>_value, R<n>_mean/min/max` per frame; `#` header lines list units, the ROI geometry and any per-ROI optics (`[emissivity=…, reflected_c=…]`, see docs/radiometry.md) |
+| ROI series CSV | `GET /api/experiments/{name}/export/series.csv?rois=…` (playback rail → export) | `t_s, frame_id, S<n>_value, R<n>_mean/min/max/std` per frame (std = population standard deviation); `#` header lines list units, the ROI geometry and any per-ROI optics (`[emissivity=…, reflected_c=…]`, see docs/radiometry.md) |
 | Frame CSV | `GET …/frames/{i}/export?format=csv` | °C grid (rows = y, top first); raw counts if the run is not temperature-linear |
 | Frame TIFF | `format=tiff` | 32-bit float °C (uint16 counts if not temperature-linear) |
 | Frame PNG | `format=png` | 16-bit raw counts |

@@ -1,3 +1,4 @@
+import { DEFAULT_ISOTHERM, parseIsotherm, type Isotherm } from "./isotherm.ts";
 /** Studio layout state (spec §3): which panels are open, which rail sections, which tool, image zoom. */
 import { isZoom, type Zoom } from "./zoom.ts";
 export const TOOLS = ["select", "spot", "rect", "circle", "line", "polygon"] as const;
@@ -16,6 +17,8 @@ export interface LayoutState {
   visibleMode: VisibleMode;
   /** Draw ▲ hottest / ▽ coldest pixel markers inside area ROIs. */
   extremes: boolean;
+  /** Isotherm painting over the palette (live + playback). */
+  isotherm: Isotherm;
   /** Overlay registration: opacity 0–1, scale 0.5–2 and offsets in % of the image (visible lens ≠ IR lens). */
   overlay: Overlay;
   sections: Record<Section, boolean>;
@@ -55,6 +58,7 @@ export const DEFAULT_LAYOUT: LayoutState = {
   zoom: "fit",
   visibleMode: "rail",
   extremes: true,
+  isotherm: DEFAULT_ISOTHERM,
   overlay: DEFAULT_OVERLAY,
   sections: { measurements: true, camera: true, experiment: true, recording: true, display: true, export: true, visible: true },
 };
@@ -68,6 +72,7 @@ export type LayoutAction =
   | { type: "setTool"; tool: Tool }
   | { type: "setZoom"; zoom: Zoom }
   | { type: "setExtremes"; on: boolean }
+  | { type: "setIsotherm"; isotherm: Isotherm }
   | { type: "setVisibleMode"; mode: VisibleMode }
   | { type: "setOverlay"; patch: Partial<Overlay> }
   | { type: "collapseAll" }
@@ -83,6 +88,7 @@ export function layoutReducer(s: LayoutState, a: LayoutAction): LayoutState {
     case "setZoom": return { ...s, zoom: a.zoom };
     case "setVisibleMode": return { ...s, visibleMode: a.mode };
     case "setExtremes": return { ...s, extremes: a.on };
+    case "setIsotherm": return { ...s, isotherm: parseIsotherm(a.isotherm) };
     case "setOverlay": return { ...s, overlay: clampOverlay({ ...s.overlay, ...a.patch }) };
     case "collapseAll": return { ...s, strip: false, rail: false, dock: false };
     case "restoreAll": return { ...s, strip: true, rail: true, dock: true };
@@ -125,6 +131,7 @@ export function loadLayout(storage: Storage | null): LayoutState {
       zoom: isZoom(parsed.zoom) ? parsed.zoom : DEFAULT_LAYOUT.zoom,
       visibleMode: isVisibleMode(parsed.visibleMode) ? parsed.visibleMode : parsed.visibleSide === true ? "side" : DEFAULT_LAYOUT.visibleMode,
       extremes: typeof parsed.extremes === "boolean" ? parsed.extremes : DEFAULT_LAYOUT.extremes,
+      isotherm: parseIsotherm(parsed.isotherm),
       overlay: clampOverlay({
         opacity: num(ov.opacity, DEFAULT_OVERLAY.opacity),
         scale: num(ov.scale, DEFAULT_OVERLAY.scale),

@@ -93,7 +93,7 @@ def series_csv(reader: ExperimentReader, rois: list[dict[str, Any]]) -> str:
             header.append(f"S{r['id']}_value")
             cols.append(s["value"])
         else:
-            for k in ("mean", "min", "max"):
+            for k in ("mean", "min", "max", "std"):
                 header.append(f"{prefix}{r['id']}_{k}")
                 cols.append(s[k])
     w = csv.writer(buf, lineterminator="\n")

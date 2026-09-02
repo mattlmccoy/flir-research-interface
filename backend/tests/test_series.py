@@ -149,3 +149,14 @@ def test_roi_series_circle_line_polyline_match_pixel_enumeration(tmp_path: Path)
     assert s3["min"][1] == pytest.approx(25.0, abs=1e-3)
     sq = roi_series(r, [{"id": 4, "kind": "polygon", "points": [[2, 1], [3, 1], [3, 2], [2, 2]]}])
     assert sq["series"]["4"]["min"][0] == pytest.approx(26.0, abs=1e-3)  # exactly the 2x2 hot block
+
+
+def test_series_includes_std_for_area_rois(tmp_path: Path) -> None:
+    from flir_research_interface.analysis.series import roi_series
+    from flir_research_interface.playback.reader import ExperimentReader
+
+    r = ExperimentReader(_make_experiment(tmp_path))
+    rect = {"id": 1, "kind": "rect", "x0": 0, "y0": 0, "x1": 4, "y1": 3}
+    s = roi_series(r, [rect])["series"]["1"]
+    assert "std" in s and len(s["std"]) == r.n_frames
+    assert s["std"][0] is not None and s["std"][0] >= 0

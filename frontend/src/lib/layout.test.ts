@@ -151,3 +151,13 @@ test("hot/cold markers default on, toggle, and survive a reload", () => {
   saveLayout(storage, s1);
   assert.equal(loadLayout(storage).extremes, false);
 });
+
+test("isotherm settings live in the layout and persist", () => {
+  assert.equal(DEFAULT_LAYOUT.isotherm.mode, "off");
+  const s1 = layoutReducer(DEFAULT_LAYOUT, { type: "setIsotherm", isotherm: { mode: "above", lo: 50, hi: 60, color: "#00ff88" } });
+  assert.equal(s1.isotherm.mode, "above");
+  const store = new Map<string, string>();
+  const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); } } as unknown as Storage;
+  saveLayout(storage, s1);
+  assert.deepEqual(loadLayout(storage).isotherm, s1.isotherm);
+});

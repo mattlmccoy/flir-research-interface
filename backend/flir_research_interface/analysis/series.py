@@ -207,7 +207,7 @@ def roi_series(
     cam = reader.metadata.get("camera")
     acc: dict[int, dict[str, np.ndarray]] = {}
     for r in rois:
-        keys = ("value",) if r["kind"] == "spot" else ("min", "max", "mean")
+        keys = ("value",) if r["kind"] == "spot" else ("min", "max", "mean", "std")
         acc[r["id"]] = {k: np.full(n, np.nan) for k in keys}
     for start in range(0, n, max(1, batch)):
         stop = min(n, start + batch)
@@ -236,6 +236,7 @@ def roi_series(
                 dst["min"][start:stop] = np.nanmin(sub, axis=1)
                 dst["max"][start:stop] = np.nanmax(sub, axis=1)
                 dst["mean"][start:stop] = np.nanmean(sub, axis=1)
+                dst["std"][start:stop] = np.nanstd(sub, axis=1)  # population, as the browser
     tl = reader.timeline()
     return {
         "units": "celsius" if fmt is not None else "counts",

@@ -253,3 +253,11 @@ test("roiStats reports where the hottest and coldest pixels are (image coordinat
   const empty = roiStats(f, 4, 3, { id: 3, kind: "rect", x0: 10, y0: 10, x1: 12, y1: 12 });
   assert.equal(empty.maxAt, undefined);
 });
+
+test("roiStats reports the population standard deviation for area ROIs", () => {
+  const f = new Float32Array([2, 4, 4, 4, 5, 5, 7, 9]);
+  const s = roiStats(f, 8, 1, { id: 1, kind: "rect", x0: 0, y0: 0, x1: 8, y1: 1 });
+  assert.ok(Math.abs((s.std ?? NaN) - 2) < 1e-6);
+  const one = roiStats(f, 8, 1, { id: 2, kind: "spot", x: 0, y: 0 });
+  assert.equal(one.std, undefined);
+});

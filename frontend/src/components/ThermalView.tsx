@@ -1,3 +1,4 @@
+import { applyIsotherm, type Isotherm } from "../lib/isotherm.ts";
 import type { Radiometry } from "../lib/emissivity.ts";
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as RKeyboardEvent, PointerEvent as RPointerEvent, ReactNode } from "react";
@@ -42,6 +43,8 @@ interface Props {
   rad?: Radiometry | null;
   /** Hot/cold pixel markers inside area ROIs (default on). */
   extremes?: boolean;
+  /** Isotherm painted over the palette. */
+  isotherm?: Isotherm | null;
 }
 
 /** The shape a drag from `a` to `b` produces for the active tool (null when degenerate). */
@@ -61,7 +64,7 @@ export function dragShape(tool: Tool, a: Pt, b: Pt, w: number, h: number): RoiIn
 }
 
 /** Renders raw counts -> °C -> palette on a canvas, with an ROI overlay layer. Data arrays are never mutated. */
-export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois = NO_ROIS, selected = null, tool = "select", zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true }: Props) {
+export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois = NO_ROIS, selected = null, tool = "select", zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null }: Props) {
   const viewRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const celsiusRef = useRef<Float32Array | null>(null);
@@ -111,8 +114,9 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
     if (!ctx) return;
     const img = ctx.createImageData(header.width, header.height);
     mapToRgba(c, range.min, range.max, lutRef.current, img.data);
+    if (isotherm) applyIsotherm(c, img.data, isotherm);
     ctx.putImageData(img, 0, 0);
-  }, [frame, palette, scaleMode, manual.min, manual.max]);
+  }, [frame, palette, scaleMode, manual.min, manual.max, isotherm]);
 
   useEffect(() => {
     const c = celsiusRef.current;

@@ -19,7 +19,7 @@ function Values({ r, s }: { r: Roi; s: RoiStats | undefined }) {
   return (
     <span className="vals">
       {s.mean.toFixed(2)} °C
-      <small>min {(s.min as number).toFixed(2)} · max {(s.max as number).toFixed(2)} · {s.n} px</small>
+      <small>min {(s.min as number).toFixed(2)} · max {(s.max as number).toFixed(2)}{s.std !== undefined ? ` · σ ${s.std.toFixed(2)}` : ""} · {s.n} px</small>
     </span>
   );
 }
