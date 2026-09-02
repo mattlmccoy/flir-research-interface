@@ -83,3 +83,13 @@ def test_render_thermal_video_writes_a_playable_mp4_next_to_the_store(tmp_path: 
     )["streams"][0]
     assert meta["codec_name"] == "h264" and int(meta["nb_read_frames"]) == 12
     assert meta["width"] % 2 == 0 and meta["height"] % 2 == 0  # yuv420p needs even dimensions
+
+
+def test_label_font_has_the_degree_and_dash_glyphs() -> None:
+    from PIL import ImageFont
+
+    from flir_research_interface.analysis.thermal_video import label_font
+
+    f = label_font()
+    assert isinstance(f, ImageFont.FreeTypeFont)  # the bitmap default lacks ° and – (draws boxes)
+    assert f.getlength("15.0 – 25.3 °C") > f.getlength("15.0")
