@@ -160,10 +160,10 @@ export function App() {
 
   return (
     <StudioFrame layout={layout} topbar={topbar} statusbar={statusbar}
-      strip={<ToolStrip tool={layout.tool} onCollapseAll={() => dispatch({ type: "collapseAll" })}
+      strip={<ToolStrip tool={layout.tool} onCollapseAll={() => dispatch({ type: "collapseAll" })} zoom={layout.zoom} onZoom={(z) => dispatch({ type: "setZoom", zoom: z })}
         onTool={(t) => dispatch({ type: "setTool", tool: t })} />}
       center={<ThermalView frame={frame} palette={palette} scaleMode={scaleMode} manual={manual} onScale={setShown}
-        rois={rois.rois} selected={rois.selected} tool={layout.tool} onRoi={roiDispatch} onStats={onStats} />}
+        rois={rois.rois} selected={rois.selected} tool={layout.tool} zoom={layout.zoom} onRoi={roiDispatch} onStats={onStats} />}
       dock={
         <PlotDock onCollapse={() => dispatch({ type: "toggle", panel: "dock" })}
           controls={

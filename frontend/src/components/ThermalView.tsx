@@ -8,6 +8,7 @@ import { normalizeRect, roiStats, type Roi, type RoiAction, type RoiInput, type 
 import { clientToImage, hitTest, type Box } from "../lib/overlay.ts";
 import type { Tool } from "../lib/layout.ts";
 import { RoiOverlay, type Draft } from "./RoiOverlay.tsx";
+import { displaySize, type Zoom } from "../lib/zoom.ts";
 
 export type StatsMap = Map<number, RoiStats>;
 const HIT_TOL_PX = 6;
@@ -23,6 +24,8 @@ interface Props {
   rois?: Roi[];
   selected?: number | null;
   tool?: Tool;
+  /** "fit" scales the image to the cell (up or down); 1 / 2 are exact pixel factors (scrollable). */
+  zoom?: Zoom;
   onRoi?: (a: RoiAction) => void;
   /** Called with per-ROI statistics every time a frame or the ROI set changes. */
   onStats?: (stats: StatsMap, frame: FrameMessage) => void;
@@ -45,7 +48,7 @@ export function dragShape(tool: Tool, a: Pt, b: Pt, w: number, h: number): RoiIn
 }
 
 /** Renders raw counts -> °C -> palette on a canvas, with an ROI overlay layer. Data arrays are never mutated. */
-export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois = NO_ROIS, selected = null, tool = "select", onRoi, onStats }: Props) {
+export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois = NO_ROIS, selected = null, tool = "select", zoom = "fit", onRoi, onStats }: Props) {
   const viewRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const celsiusRef = useRef<Float32Array | null>(null);
@@ -53,6 +56,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
   const dragStart = useRef<Pt | null>(null);
   const [hover, setHover] = useState<{ x: number; y: number; t: number } | null>(null);
   const [box, setBox] = useState<Box | null>(null);
+  const [cell, setCell] = useState({ w: 0, h: 0 });
   const [draft, setDraft] = useState<Draft | null>(null);
   const [vertices, setVertices] = useState<[number, number][]>([]); // polygon in progress
   const moving = useRef<{ id: number; last: Pt } | null>(null);
@@ -68,7 +72,8 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
     if (!view || !canvas || typeof ResizeObserver === "undefined") return;
     const measure = () => {
       const v = view.getBoundingClientRect(), c = canvas.getBoundingClientRect();
-      setBox({ left: c.left - v.left, top: c.top - v.top, width: c.width, height: c.height });
+      setCell({ w: view.clientWidth, h: view.clientHeight });
+      setBox({ left: c.left - v.left + view.scrollLeft, top: c.top - v.top + view.scrollTop, width: c.width, height: c.height });
     };
     measure();
     const ro = new ResizeObserver(measure);
@@ -173,11 +178,12 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
     else if (e.key === "Escape") onRoi({ type: "select", id: null });
   }
 
+  const size = hdr ? displaySize(hdr.width, hdr.height, cell.w, cell.h, zoom) : null;
   const drawing = tool !== "select";
   const help = tool === "polygon" && vertices.length ? `${vertices.length} point${vertices.length > 1 ? "s" : ""} · double-click or Enter closes the polygon · Esc cancels` : null;
   return (
-    <div className="view" ref={viewRef}>
-      <canvas ref={canvasRef} />
+    <div className={`view ${zoom === "fit" ? "" : "scroll"}`} ref={viewRef}>
+      <canvas ref={canvasRef} style={size ? { width: size.width, height: size.height } : undefined} />
       {hdr && box && (
         <RoiOverlay box={box} width={hdr.width} height={hdr.height} rois={rois} selected={selected} stats={stats} draft={draft} cursor={drawing ? "crosshair" : selected !== null ? "move" : "default"}
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => { setHover(null); moving.current = null; }} onKeyDown={onKey}

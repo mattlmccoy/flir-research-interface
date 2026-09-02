@@ -106,3 +106,14 @@ test("openSection opens a closed section and shows the rail; it never closes any
   const again = layoutReducer(s, { type: "openSection", section: "camera" });
   assert.equal(again.sections.camera, true);
 });
+
+test("layout carries a zoom (fit by default), setZoom changes it, loadLayout rejects junk zooms", () => {
+  assert.equal(DEFAULT_LAYOUT.zoom, "fit");
+  assert.equal(layoutReducer(DEFAULT_LAYOUT, { type: "setZoom", zoom: 2 }).zoom, 2);
+  const st = new Map<string, string>();
+  const storage = { getItem: (k: string) => st.get(k) ?? null, setItem: (k: string, v: string) => { st.set(k, v); } } as unknown as Storage;
+  st.set("fri.layout.v1", JSON.stringify({ zoom: 7 }));
+  assert.equal(loadLayout(storage).zoom, "fit");
+  st.set("fri.layout.v1", JSON.stringify({ zoom: 1 }));
+  assert.equal(loadLayout(storage).zoom, 1);
+});

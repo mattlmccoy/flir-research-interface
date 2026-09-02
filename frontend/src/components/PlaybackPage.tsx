@@ -146,10 +146,10 @@ export function PlaybackPage(p: Props) {
 
   return (
     <StudioFrame layout={p.layout} topbar={p.topbar}
-      strip={<ToolStrip tool={p.layout.tool} onTool={(tool) => p.dispatch({ type: "setTool", tool })} onCollapseAll={() => p.dispatch({ type: "collapseAll" })}
+      strip={<ToolStrip tool={p.layout.tool} onTool={(tool) => p.dispatch({ type: "setTool", tool })} onCollapseAll={() => p.dispatch({ type: "collapseAll" })} zoom={p.layout.zoom} onZoom={(z) => p.dispatch({ type: "setZoom", zoom: z })}
         leading={<button title="Back to experiments" aria-label="Back to experiments" onClick={p.onBack}>←</button>} />}
       center={<ThermalView frame={frame} palette={p.palette} scaleMode={p.scaleMode} manual={p.manual} onScale={setShown}
-        rois={p.rois.rois} selected={p.rois.selected} tool={p.layout.tool} onRoi={p.roiDispatch} onStats={onStats} />}
+        rois={p.rois.rois} selected={p.rois.selected} tool={p.layout.tool} zoom={p.layout.zoom} onRoi={p.roiDispatch} onStats={onStats} />}
       dock={
         <PlotDock title="temperature vs time (whole recording)" onCollapse={() => p.dispatch({ type: "toggle", panel: "dock" })}>
           <TimePlot traces={traces} markers={markers} window={{ t0: 0, t1: Math.max(info?.duration_s ?? 0, 0.001) }} cursorT={t}

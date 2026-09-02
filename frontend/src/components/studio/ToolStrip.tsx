@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { TOOLS, type Tool } from "../../lib/layout.ts";
+import { nextZoom, zoomLabel, type Zoom } from "../../lib/zoom.ts";
 
 /** Presentation for each tool id (ids come from TOOLS in lib/layout.ts). */
 const TOOL_META: Record<Tool, { glyph: string; title: string; enabled: boolean }> = {
@@ -19,13 +20,15 @@ interface Props {
   leading?: ReactNode;
   /** Tools that make no sense in this context (e.g. camera controls during playback). */
   disabledTools?: readonly Tool[];
+  zoom?: Zoom;
+  onZoom?: (z: Zoom) => void;
 }
 
 /**
  * Left icon strip (spec §3). Disabled tools stay visible so the layout never shifts between
  * releases; they use aria-disabled (not the disabled attribute) so their tooltip still shows.
  */
-export function ToolStrip({ tool, onTool, onCollapseAll, leading, disabledTools = [] }: Props) {
+export function ToolStrip({ tool, onTool, onCollapseAll, leading, disabledTools = [], zoom = "fit", onZoom }: Props) {
   return (
     <nav className="strip" aria-label="tools">
       {leading}
@@ -47,6 +50,11 @@ export function ToolStrip({ tool, onTool, onCollapseAll, leading, disabledTools 
         );
       })}
       <span className="spacer" />
+      {onZoom && (
+        <button className={`zoom ${zoom === "fit" ? "active" : ""}`} aria-label={`Image zoom: ${zoomLabel(zoom)} (click to cycle fit, 1:1, 2×)`} title={`Zoom ${zoomLabel(zoom)} · click: ${zoomLabel(nextZoom(zoom))}`} onClick={() => onZoom(nextZoom(zoom))}>
+          {zoom === "fit" ? "⤢" : zoomLabel(zoom)}
+        </button>
+      )}
       <button aria-label="Hide panels (image only)" title="Hide panels (image only)" onClick={onCollapseAll}>⛶</button>
     </nav>
   );

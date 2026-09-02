@@ -1,4 +1,5 @@
-/** Studio layout state (spec §3): which panels are open, which rail sections, which tool. */
+/** Studio layout state (spec §3): which panels are open, which rail sections, which tool, image zoom. */
+import { isZoom, type Zoom } from "./zoom.ts";
 export const TOOLS = ["select", "spot", "rect", "circle", "line", "polygon"] as const;
 export const SECTIONS = ["measurements", "camera", "experiment", "recording", "display", "export", "visible"] as const;
 export type Tool = (typeof TOOLS)[number];
@@ -10,6 +11,7 @@ export interface LayoutState {
   rail: boolean;
   dock: boolean;
   tool: Tool;
+  zoom: Zoom;
   sections: Record<Section, boolean>;
 }
 
@@ -36,6 +38,7 @@ export const DEFAULT_LAYOUT: LayoutState = {
   rail: true,
   dock: true,
   tool: "select",
+  zoom: "fit",
   sections: { measurements: true, camera: true, experiment: true, recording: true, display: true, export: true, visible: true },
 };
 Object.freeze(DEFAULT_LAYOUT.sections);
@@ -46,6 +49,7 @@ export type LayoutAction =
   | { type: "toggleSection"; section: Section }
   | { type: "openSection"; section: Section }
   | { type: "setTool"; tool: Tool }
+  | { type: "setZoom"; zoom: Zoom }
   | { type: "collapseAll" }
   | { type: "restoreAll" };
 
@@ -56,6 +60,7 @@ export function layoutReducer(s: LayoutState, a: LayoutAction): LayoutState {
     case "toggleSection": return { ...s, sections: { ...s.sections, [a.section]: !s.sections[a.section] } };
     case "openSection": return { ...s, rail: true, sections: { ...s.sections, [a.section]: true } };
     case "setTool": return { ...s, tool: a.tool };
+    case "setZoom": return { ...s, zoom: a.zoom };
     case "collapseAll": return { ...s, strip: false, rail: false, dock: false };
     case "restoreAll": return { ...s, strip: true, rail: true, dock: true };
   }
@@ -87,6 +92,7 @@ export function loadLayout(storage: Storage | null): LayoutState {
       rail: bool(parsed.rail, DEFAULT_LAYOUT.rail),
       dock: bool(parsed.dock, DEFAULT_LAYOUT.dock),
       tool: isTool(parsed.tool) ? parsed.tool : DEFAULT_LAYOUT.tool,
+      zoom: isZoom(parsed.zoom) ? parsed.zoom : DEFAULT_LAYOUT.zoom,
       sections: Object.fromEntries(
         SECTIONS.map((k) => [k, bool(sec[k], DEFAULT_LAYOUT.sections[k])]),
       ) as Record<Section, boolean>,
