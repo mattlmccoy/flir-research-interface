@@ -33,6 +33,13 @@ def mjpeg_command(ffmpeg: str, url: str, *, fps: int = 8, width: int = 640) -> l
     return [
         ffmpeg,
         "-hide_banner", "-loglevel", "error", "-nostdin",
+        # low latency: no stream probing delay, no input/decoder buffering, no reordering
+        "-fflags", "nobuffer",
+        "-flags", "low_delay",
+        "-probesize", "32",
+        "-analyzeduration", "0",
+        "-max_delay", "0",
+        "-reorder_queue_size", "0",
         "-rtsp_transport", "tcp",
         "-timeout", str(SOCKET_TIMEOUT_US),
         "-i", url,
@@ -74,11 +81,16 @@ class MjpegRelay:
 
     def stream(self) -> Iterator[bytes]:
         self._proc = self._popen(
-            self._cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+            self._cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            bufsize=0,  # unbuffered pipe: every JPEG goes out the moment ffmpeg writes it
         )
         try:
+            out = self._proc.stdout  # raw (unbuffered) pipe: read() returns what is available
             while not self._closed:
-                chunk = self._proc.stdout.read(CHUNK)
+                chunk = out.read(CHUNK)
                 if not chunk:
                     break
                 yield chunk

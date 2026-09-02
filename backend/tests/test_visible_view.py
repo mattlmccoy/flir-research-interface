@@ -53,6 +53,39 @@ def test_mjpeg_command_transcodes_to_a_small_multipart_stream() -> None:
     assert "-rtsp_transport" in cmd and "-timeout" in cmd
     assert cmd[cmd.index("-f") + 1] == "mpjpeg"
     assert "scale=640:-2" in " ".join(cmd) and cmd[cmd.index("-r") + 1] == "8"
+    # low-latency input handling: no probing delay, no reorder/decoder buffering
+    joined = " ".join(cmd)
+    low_latency = ("-fflags nobuffer", "-flags low_delay", "-probesize 32", "-analyzeduration 0")
+    for flag in (*low_latency, "-max_delay 0"):
+        assert flag in joined, flag
+    assert cmd.index("-fflags") < cmd.index("-i")
+
+
+def test_relay_forwards_each_read_as_soon_as_it_arrives() -> None:
+    """A buffered 64 KB read would hold a ~30 KB JPEG back. The relay opens the pipe unbuffered
+    (bufsize=0), where read(n) returns whatever is available, and yields each read at once.
+    (A raw pipe has no read1 — an earlier version called it and died on the first read.)"""
+
+    class RawPipe:  # io.FileIO-like: read() is a single partial read, no read1 attribute
+        def __init__(self, pieces: list[bytes]) -> None:
+            self.pieces = pieces
+
+        def read(self, n: int) -> bytes:
+            return self.pieces.pop(0) if self.pieces else b""
+
+    proc = FakeStream([])
+    proc.stdout = RawPipe([b"A" * 10, b"B" * 20])  # type: ignore[assignment]
+    assert not hasattr(proc.stdout, "read1")
+    captured: dict[str, Any] = {}
+
+    def popen(*a: Any, **k: Any) -> Any:
+        captured.update(k)
+        return proc
+
+    relay = MjpegRelay(cmd=["x"], popen=popen)
+    chunks = list(relay.stream())
+    assert chunks == [b"A" * 10, b"B" * 20]
+    assert captured.get("bufsize") == 0  # unbuffered pipe
 
 
 class FakeStream:
