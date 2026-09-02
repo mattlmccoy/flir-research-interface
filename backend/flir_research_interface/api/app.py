@@ -403,6 +403,26 @@ def create_app(
             rec.note_event("nuc", {"source": "operator"})
         return {"ok": True}
 
+    @app.get("/api/calibration/visible")
+    def get_visible_alignment() -> dict[str, Any]:
+        from flir_research_interface.analysis.calibration import load_alignment
+
+        doc = load_alignment(app.state.experiments_root)
+        if doc is None:
+            raise HTTPException(404, "no visible alignment stored yet")
+        return doc
+
+    @app.put("/api/calibration/visible")
+    async def put_visible_alignment(request: Request) -> dict[str, Any]:
+        """Store the browser-fitted visible→IR homography for every client and future recordings."""
+        from flir_research_interface.analysis.calibration import save_alignment
+
+        try:
+            body = await request.json()
+            return await run_in_threadpool(save_alignment, app.state.experiments_root, body)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
     @app.get("/api/visible/live.mjpeg")
     def visible_live() -> Response:
         """Low-rate MJPEG of the visible camera; one ffmpeg per viewer, killed on disconnect."""
@@ -446,8 +466,16 @@ def create_app(
         rec = Recorder(
             svc, experiments_root=app.state.experiments_root, min_free_gb=app.state.min_free_gb
         )
+        from flir_research_interface.analysis.calibration import load_alignment
+
+        alignment = load_alignment(app.state.experiments_root)
         try:
-            exp_dir = await run_in_threadpool(rec.start, name=req.name, metadata=req.metadata)
+            exp_dir = await run_in_threadpool(
+                rec.start,
+                name=req.name,
+                metadata=req.metadata,
+                extra={"visible_alignment": alignment} if alignment else None,
+            )
         except RuntimeError as exc:
             raise HTTPException(507 if "free space" in str(exc) else 400, str(exc)) from exc
         app.state.recorder = rec

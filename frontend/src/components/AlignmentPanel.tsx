@@ -1,0 +1,64 @@
+import { useState } from "react";
+import type { AlignmentAction, AlignmentState } from "../lib/alignment.ts";
+import { Disclosure } from "./Disclosure.tsx";
+
+interface Props {
+  state: AlignmentState;
+  dispatch: (a: AlignmentAction) => void;
+  calibrating: boolean;
+  onCalibrating: (on: boolean) => void;
+  irSize: [number, number] | null;
+  onSave: () => Promise<string>;
+}
+
+/** Visible↔IR alignment: pick the same features on both images, fit a homography, apply. */
+export function AlignmentPanel({ state, dispatch, calibrating, onCalibrating, irSize, onSave }: Props) {
+  const [msg, setMsg] = useState<string | null>(null);
+  const n = state.pairs.length;
+  return (
+    <>
+      <div className="row">
+        <button className={calibrating ? "danger" : "secondary"} onClick={() => onCalibrating(!calibrating)}>{calibrating ? "finish aligning" : "align cameras…"}</button>
+        <span className="hint">{state.H ? `aligned · ${n} pairs · RMS ${state.rmsPx?.toFixed(1)} px` : n ? `${n} pair${n > 1 ? "s" : ""} picked, not solved` : "not aligned (scale/shift only)"}</span>
+      </div>
+      {calibrating && (
+        <>
+          <ul className="help">
+            <li>The images show side by side. Click a feature in the IR image, then the same feature in the visible image; that makes one pair.</li>
+            <li>Use features on the sample surface at its working distance (the alignment is for that plane). Spread them over the field: corners of the crucible, electrode edges, fiducials.</li>
+            <li>4 pairs is the minimum; 6 to 8 spread out gives a better fit. Solve, read the RMS, then finish.</li>
+          </ul>
+          <div className="kv">
+            {state.pairs.map((p, i) => [
+              <span key={`k${i}`}>pair {i + 1}</span>,
+              <span key={`v${i}`} className="v plain" style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
+                <small>IR ({p.ir[0].toFixed(3)}, {p.ir[1].toFixed(3)}) · vis ({p.visible[0].toFixed(3)}, {p.visible[1].toFixed(3)})</small>
+                <button className="secondary" aria-label={`remove pair ${i + 1}`} onClick={() => dispatch({ type: "removePair", index: i })}>×</button>
+              </span>,
+            ])}
+          </div>
+          <div className="row">
+            <button className="primary" disabled={n < 4 || !irSize} onClick={() => { if (irSize) dispatch({ type: "solve", irSize }); }}>solve ({n}/4)</button>
+            <button className="secondary" disabled={n === 0 && !state.pending} onClick={() => dispatch({ type: "clear" })}>clear pairs</button>
+            <button className="secondary" disabled={!state.H} onClick={() => { onSave().then(setMsg).catch((e) => setMsg(String(e))); }}>save to operator</button>
+          </div>
+          <div className="row">
+            <input type="text" value={state.note} placeholder="note, e.g. sample plane at 0.45 m" style={{ flex: 1, minWidth: 120 }} onChange={(e) => dispatch({ type: "note", note: e.target.value })} />
+          </div>
+          {state.H && state.rmsPx !== null && state.rmsPx > 5 && <div className="warnbox">RMS {state.rmsPx.toFixed(1)} px is large: a pair is probably mismatched, or the features are not on one plane.</div>}
+          {msg && <div className="hint">{msg}</div>}
+        </>
+      )}
+      {!calibrating && (
+        <Disclosure label="Why a homography, and its limits" icon="info">
+          <ul className="help">
+            <li>The visible camera sits beside the IR camera, so the two views differ by perspective, not just size and position.</li>
+            <li>A homography maps one plane exactly: pick features on the sample surface, and the overlay lines up there.</li>
+            <li>Objects nearer or farther than that plane still show parallax. Re-align if the working distance changes.</li>
+            <li>The alignment in force is written into each recording's metadata.</li>
+          </ul>
+        </Disclosure>
+      )}
+    </>
+  );
+}

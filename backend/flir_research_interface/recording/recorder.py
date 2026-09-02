@@ -207,8 +207,16 @@ class Recorder:
             }
 
     def start(
-        self, *, name: str, metadata: dict[str, Any], camera_info: dict[str, Any] | None = None
+        self,
+        *,
+        name: str,
+        metadata: dict[str, Any],
+        camera_info: dict[str, Any] | None = None,
+        extra: dict[str, Any] | None = None,
     ) -> Path:
+        """Create the experiment directory and start the writer.
+
+        ``extra`` adds top-level blocks to ``metadata.json`` (e.g. ``visible_alignment``)."""
         if self._state == RecorderState.RECORDING:
             raise RuntimeError("already recording")
         self._root.mkdir(parents=True, exist_ok=True)
@@ -273,6 +281,8 @@ class Recorder:
                 },
             },
         }
+        if extra:
+            meta.update(extra)
         (exp_dir / "metadata.json").write_text(json.dumps(meta, indent=2, default=str))
 
         self._group = zarr.open_group(str(exp_dir / STORE_NAME), mode="w")

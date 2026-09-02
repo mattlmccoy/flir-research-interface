@@ -16,6 +16,9 @@ import { RecordPanel } from "./components/RecordPanel.tsx";
 import { RoiRows } from "./components/RoiRows.tsx";
 import { CameraControls } from "./components/CameraControls.tsx";
 import { VisibleLive, VisiblePanel } from "./components/VisiblePanel.tsx";
+import { AlignmentPanel } from "./components/AlignmentPanel.tsx";
+import { PickLayer } from "./components/PickLayer.tsx";
+import { EMPTY_ALIGNMENT, alignmentReducer, loadAlignment, parseAlignment, saveAlignment, serializeAlignment } from "./lib/alignment.ts";
 import { TimePlot, type Trace } from "./components/TimePlot.tsx";
 import { ExperimentsPage } from "./components/ExperimentsPage.tsx";
 import { PlaybackPage } from "./components/PlaybackPage.tsx";
@@ -40,6 +43,18 @@ export function App() {
   useEffect(() => { saveLayout(storage, layout); }, [layout]);
   const [rois, roiDispatch] = useReducer(roiReducer, EMPTY_ROIS, () => loadRois(storage));
   useEffect(() => { saveRois(storage, rois); }, [rois]);
+  const [align, alignDispatch] = useReducer(alignmentReducer, EMPTY_ALIGNMENT, () => loadAlignment(storage));
+  useEffect(() => { saveAlignment(storage, align); }, [align]);
+  const [calibrating, setCalibrating] = useState(false);
+  // adopt the operator's stored alignment when this browser has none
+  useEffect(() => {
+    if (align.H) return;
+    api.getAlignment().then((doc) => { const a = parseAlignment(doc); if (a.H) alignDispatch({ type: "adopt", state: a }); }).catch(() => undefined);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  async function saveAlignmentToOperator(): Promise<string> {
+    await api.putAlignment(serializeAlignment(align));
+    return "saved on the operator; future recordings carry it";
+  }
 
   const [status, setStatus] = useState<Status>({ state: "disconnected" });
   const [recording, setRecording] = useState<RecordingStatus | null>(null);
@@ -164,11 +179,14 @@ export function App() {
       strip={<ToolStrip tool={layout.tool} onCollapseAll={() => dispatch({ type: "collapseAll" })} zoom={layout.zoom} onZoom={(z) => dispatch({ type: "setZoom", zoom: z })}
         onTool={(t) => dispatch({ type: "setTool", tool: t })} />}
       center={
-        <div className={`center-split ${layout.visibleMode === "side" && visibleAvailable ? "on" : ""}`}>
+        <div className={`center-split ${(layout.visibleMode === "side" || calibrating) && visibleAvailable ? "on" : ""}`}>
           <ThermalView frame={frame} palette={palette} scaleMode={scaleMode} manual={manual} onScale={setShown}
             rois={rois.rois} selected={rois.selected} tool={layout.tool} zoom={layout.zoom} onRoi={roiDispatch} onStats={onStats}
-            overlay={layout.visibleMode === "overlay" && visibleAvailable ? <VisibleLive plain /> : undefined} overlayStyle={layout.overlay} />
-          {layout.visibleMode === "side" && visibleAvailable && <VisibleLive big />}
+            overlay={layout.visibleMode === "overlay" && !calibrating && visibleAvailable ? <VisibleLive plain /> : undefined} overlayStyle={layout.overlay} overlayH={align.H}
+            topLayer={calibrating ? <PickLayer label="IR" color="var(--live)" points={align.pairs.map((p) => p.ir)} pending={align.pending?.ir} onPick={(p) => alignDispatch({ type: "pick", side: "ir", p })} /> : undefined} />
+          {(layout.visibleMode === "side" || calibrating) && visibleAvailable && (
+            <VisibleLive big topLayer={calibrating ? <PickLayer label="visible" color="var(--accent)" points={align.pairs.map((p) => p.visible)} pending={align.pending?.visible} onPick={(p) => alignDispatch({ type: "pick", side: "visible", p })} /> : undefined} />
+          )}
         </div>
       }
       dock={
@@ -209,7 +227,8 @@ export function App() {
             <DisplayControls palette={palette} setPalette={setPalette} scaleMode={scaleMode} setScaleMode={setScaleMode} manual={manual} setManual={setManual} shown={shown} />
           </RailSection>
           <RailSection title="visible camera" open={layout.sections.visible} onToggle={() => dispatch({ type: "toggleSection", section: "visible" })} tag="preview only">
-            <VisiblePanel mode="live" available={visibleAvailable} reason={recording?.visible?.reason} visibleMode={layout.visibleMode} overlay={layout.overlay} dispatch={dispatch} />
+            <VisiblePanel mode="live" available={visibleAvailable} reason={recording?.visible?.reason} visibleMode={layout.visibleMode} overlay={layout.overlay} dispatch={dispatch} aligned={!!align.H} />
+            {visibleAvailable && <AlignmentPanel state={align} dispatch={alignDispatch} calibrating={calibrating} onCalibrating={setCalibrating} irSize={hdr ? [hdr.width, hdr.height] : null} onSave={saveAlignmentToOperator} />}
           </RailSection>
         </Rail>
       }

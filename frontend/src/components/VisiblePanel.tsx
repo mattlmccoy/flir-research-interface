@@ -1,12 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { api } from "../lib/api.ts";
 import { streamMjpeg } from "../lib/mjpeg.ts";
 import { DEFAULT_OVERLAY, VISIBLE_MODES, type LayoutAction, type Overlay, type VisibleMode } from "../lib/layout.ts";
 
 /** Live MJPEG view: fetches the stream itself so unmounting aborts it (the operator's transcode ends at once).
  *  `plain` renders only the image (for the overlay). */
-export function VisibleLive({ big = false, plain = false }: { big?: boolean; plain?: boolean }) {
+export function VisibleLive({ big = false, plain = false, topLayer }: { big?: boolean; plain?: boolean; topLayer?: ReactNode }) {
   const img = useRef<HTMLImageElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const layerBox = useMediaBox(boxRef, img);
   const [err, setErr] = useState<string | null>(null);
   const [fps, setFps] = useState<number | null>(null);
   useEffect(() => {
@@ -27,19 +30,40 @@ export function VisibleLive({ big = false, plain = false }: { big?: boolean; pla
   }, []);
   if (plain) return <img ref={img} alt="visible camera overlay" className="fill" />;
   return (
-    <div className={`visible-box ${big ? "big" : ""}`}>
+    <div className={`visible-box ${big ? "big" : ""}`} ref={boxRef}>
       <img ref={img} alt="visible camera" />
       <span className="tag">visible · {fps ? `${fps.toFixed(1)} fps` : "connecting…"} · ~1 s behind thermal</span>
+      {topLayer && layerBox && <div className="top-layer" style={layerBox}>{topLayer}</div>}
       {err && <div className="errbox">{err}</div>}
     </div>
   );
 }
 
-interface VideoProps { name: string; t: number; playing: boolean; speed: number; measuredFps?: number | null; big?: boolean; plain?: boolean; }
+/** Where the media element sits inside its box (contain-fitted media leaves letterbox bands). */
+function useMediaBox(box: React.RefObject<HTMLElement | null>, media: React.RefObject<HTMLElement | null>) {
+  const [b, setB] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  useEffect(() => {
+    const host = box.current, el = media.current;
+    if (!host || !el || typeof ResizeObserver === "undefined") return;
+    const measure = () => {
+      const h = host.getBoundingClientRect(), m = el.getBoundingClientRect();
+      setB({ left: m.left - h.left, top: m.top - h.top, width: m.width, height: m.height });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(host); ro.observe(el);
+    return () => ro.disconnect();
+  }, [box, media]);
+  return b;
+}
+
+interface VideoProps { name: string; t: number; playing: boolean; speed: number; measuredFps?: number | null; big?: boolean; plain?: boolean; topLayer?: ReactNode; }
 
 /** Recorded visible.mp4 kept in step with the thermal cursor (host-clock alignment, not frame-exact). */
-export function VisibleVideo({ name, t, playing, speed, measuredFps, big = false, plain = false }: VideoProps) {
+export function VisibleVideo({ name, t, playing, speed, measuredFps, big = false, plain = false, topLayer }: VideoProps) {
   const video = useRef<HTMLVideoElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const layerBox = useMediaBox(boxRef, video);
   useEffect(() => {
     const v = video.current;
     if (!v) return;
@@ -54,14 +78,15 @@ export function VisibleVideo({ name, t, playing, speed, measuredFps, big = false
   }, [t, playing, speed]);
   if (plain) return <video ref={video} src={api.visibleVideoUrl(name)} muted playsInline preload="auto" className="fill" />;
   return (
-    <div className={`visible-box ${big ? "big" : ""}`}>
+    <div className={`visible-box ${big ? "big" : ""}`} ref={boxRef}>
       <video ref={video} src={api.visibleVideoUrl(name)} muted playsInline preload="auto" />
       <span className="tag">recorded visible{measuredFps ? ` · ${measuredFps.toFixed(1)} fps` : ""} · host-clock aligned</span>
+      {topLayer && layerBox && <div className="top-layer" style={layerBox}>{topLayer}</div>}
     </div>
   );
 }
 
-interface Placement { visibleMode: VisibleMode; overlay: Overlay; dispatch: (a: LayoutAction) => void; }
+interface Placement { visibleMode: VisibleMode; overlay: Overlay; dispatch: (a: LayoutAction) => void; aligned?: boolean; }
 type PanelProps = Placement & (
   | { mode: "live"; available: boolean; reason?: string }
   | { mode: "playback"; name: string; hasVideo: boolean; t: number; playing: boolean; speed: number; measuredFps?: number | null });
@@ -92,7 +117,11 @@ export function VisiblePanel(p: PanelProps) {
       ))}
     </div>
   );
-  const registration = mode === "overlay" && (
+  const registration = mode === "overlay" && (p.aligned ? (
+    <div className="kv">
+      <Slider label="opacity" value={p.overlay.opacity} min={0} max={1} step={0.05} onChange={(v) => p.dispatch({ type: "setOverlay", patch: { opacity: v } })} />
+    </div>
+  ) : (
     <>
       <div className="kv">
         <Slider label="opacity" value={p.overlay.opacity} min={0} max={1} step={0.05} onChange={(v) => p.dispatch({ type: "setOverlay", patch: { opacity: v } })} />
@@ -102,10 +131,10 @@ export function VisiblePanel(p: PanelProps) {
       </div>
       <div className="row">
         <button className="secondary" onClick={() => p.dispatch({ type: "setOverlay", patch: DEFAULT_OVERLAY })}>reset alignment</button>
-        <span className="hint">The visible lens sees a wider field than the IR lens; scale and shift until edges line up. Alignment is remembered.</span>
+        <span className="hint">Rough manual placement. For a true fit use "align cameras…" below.</span>
       </div>
     </>
-  );
+  ));
   if (p.mode === "live") {
     if (!p.available) return <div className="hint">Visible camera preview unavailable: {p.reason ?? "ffmpeg or RTSP credentials not configured"}.</div>;
     return (

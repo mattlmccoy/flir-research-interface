@@ -9,6 +9,7 @@ import { clientToImage, hitTest, type Box } from "../lib/overlay.ts";
 import type { Tool } from "../lib/layout.ts";
 import { RoiOverlay, type Draft } from "./RoiOverlay.tsx";
 import { displaySize, type Zoom } from "../lib/zoom.ts";
+import { toCssMatrix3d, type H3 } from "../lib/homography.ts";
 
 export type StatsMap = Map<number, RoiStats>;
 const HIT_TOL_PX = 6;
@@ -30,6 +31,10 @@ interface Props {
   /** Visible-camera element blended over the image (positioned to the image box, below the ROI layer). */
   overlay?: ReactNode;
   overlayStyle?: { opacity: number; scale: number; dx: number; dy: number };
+  /** When set, the overlay is warped by this visible→IR homography (normalised coords) instead of scale/shift. */
+  overlayH?: H3 | null;
+  /** Interactive layer above everything (calibration point picking). */
+  topLayer?: ReactNode;
   /** Called with per-ROI statistics every time a frame or the ROI set changes. */
   onStats?: (stats: StatsMap, frame: FrameMessage) => void;
 }
@@ -51,7 +56,7 @@ export function dragShape(tool: Tool, a: Pt, b: Pt, w: number, h: number): RoiIn
 }
 
 /** Renders raw counts -> °C -> palette on a canvas, with an ROI overlay layer. Data arrays are never mutated. */
-export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois = NO_ROIS, selected = null, tool = "select", zoom = "fit", onRoi, overlay, overlayStyle, onStats }: Props) {
+export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois = NO_ROIS, selected = null, tool = "select", zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats }: Props) {
   const viewRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const celsiusRef = useRef<Float32Array | null>(null);
@@ -189,7 +194,9 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
       <canvas ref={canvasRef} style={size ? { width: size.width, height: size.height } : undefined} />
       {overlay && box && (
         <div className="visible-overlay" style={{ left: box.left, top: box.top, width: box.width, height: box.height, opacity: overlayStyle?.opacity ?? 0.5 }}>
-          <div className="visible-overlay-inner" style={{ transform: `translate(${overlayStyle?.dx ?? 0}%, ${overlayStyle?.dy ?? 0}%) scale(${overlayStyle?.scale ?? 1})` }}>{overlay}</div>
+          <div className="visible-overlay-inner" style={overlayH
+            ? { transform: toCssMatrix3d(overlayH, box.width, box.height), transformOrigin: "0 0" }
+            : { transform: `translate(${overlayStyle?.dx ?? 0}%, ${overlayStyle?.dy ?? 0}%) scale(${overlayStyle?.scale ?? 1})` }}>{overlay}</div>
         </div>
       )}
       {hdr && box && (
@@ -197,6 +204,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => { setHover(null); moving.current = null; }} onKeyDown={onKey}
           onDoubleClick={() => { if (tool === "polygon") finishPolygon(vertices); }} />
       )}
+      {topLayer && box && <div className="top-layer" style={{ left: box.left, top: box.top, width: box.width, height: box.height }}>{topLayer}</div>}
       {hover && (
         <div className="readout">{`x ${hover.x}   y ${hover.y}\nT ${Number.isNaN(hover.t) ? "n/a (not temperature-linear)" : `${hover.t.toFixed(2)} °C`}${help ? `\n${help}` : ""}`}</div>
       )}
