@@ -91,5 +91,5 @@ def test_label_font_has_the_degree_and_dash_glyphs() -> None:
     from flir_research_interface.analysis.thermal_video import label_font
 
     f = label_font()
-    assert isinstance(f, ImageFont.FreeTypeFont)  # the bitmap default lacks ° and – (draws boxes)
-    assert f.getlength("15.0 – 25.3 °C") > f.getlength("15.0")
+    assert isinstance(f, ImageFont.FreeTypeFont)  # the bitmap default lacks ° (draws a box)
+    assert f.getlength("15.0 to 25.3 °C") > f.getlength("15.0")

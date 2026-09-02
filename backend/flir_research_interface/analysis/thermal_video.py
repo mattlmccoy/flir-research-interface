@@ -56,7 +56,7 @@ def run_range(reader: ExperimentReader) -> tuple[float, float, str]:
 
 
 def label_font(size: int = 14) -> ImageFont.FreeTypeFont:
-    """Pillow's bundled TrueType face: has ° and – (the bitmap default draws boxes for them)."""
+    """Pillow's bundled TrueType face: has ° (the bitmap default draws a box; it lacks – too)."""
     font = ImageFont.load_default(size=size)
     if not isinstance(font, ImageFont.FreeTypeFont):  # pragma: no cover - Pillow < 10.1
         raise RuntimeError("Pillow >= 10.1 is required for the bundled TrueType font")
@@ -76,7 +76,7 @@ def thermal_frame_rgb(
     d = ImageDraw.Draw(pil)
     font = label_font(max(10, min(16, h // 30)))
     d.text((4, 2), f"{t_s:.2f} s", fill=(255, 255, 255), font=font)
-    d.text((4, h - font.size - 4), f"{vmin:.1f} – {vmax:.1f} °C", fill=(255, 255, 255), font=font)
+    d.text((4, h - font.size - 4), f"{vmin:.1f} to {vmax:.1f} °C", fill=(255, 255, 255), font=font)
     return np.asarray(pil, dtype=np.uint8)
 
 
