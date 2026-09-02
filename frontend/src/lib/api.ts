@@ -18,7 +18,8 @@ async function j<T>(r: Promise<Response>): Promise<T> {
   }
   return (await res.json()) as T;
 }
-export interface RecordingStatus { state: string; experiment_dir?: string | null; frames_received?: number; frames_written?: number; queue_depth?: number; queue_dropped?: number; frame_id_gaps?: number; duration_s?: number; recorded_fps?: number | null; free_space_gb?: number | null; min_free_gb?: number; error?: string | null; experiments_root?: string; }
+export interface VisibleStatus { state: string; file?: string | null; started_host_ns?: number | null; url?: string; error?: string | null; reason?: string; }
+export interface RecordingStatus { state: string; visible?: VisibleStatus; experiment_dir?: string | null; frames_received?: number; frames_written?: number; queue_depth?: number; queue_dropped?: number; frame_id_gaps?: number; duration_s?: number; recorded_fps?: number | null; free_space_gb?: number | null; min_free_gb?: number; error?: string | null; experiments_root?: string; }
 export interface Previews {
   units: "celsius" | "counts";
   preview: { file: string; frame_index: number; t_s: number; size?: [number, number]; units?: string; sha256: string };
@@ -71,8 +72,8 @@ export const api = {
     if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
     return res.arrayBuffer();
   },
-  recordingStart: (name: string, metadata: Record<string, unknown>) =>
-    j<{ state: string; experiment_dir: string }>(fetch("/api/recording/start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, metadata }) })),
+  recordingStart: (name: string, metadata: Record<string, unknown>, visible = false) =>
+    j<{ state: string; experiment_dir: string; visible?: VisibleStatus }>(fetch("/api/recording/start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, metadata, visible }) })),
   recordingStop: () => j<Record<string, unknown>>(fetch("/api/recording/stop", { method: "POST" })),
   recordingStatus: () => j<RecordingStatus>(fetch("/api/recording/status")),
   recordingEvent: (name: string, note?: string) =>

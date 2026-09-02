@@ -12,6 +12,7 @@ import logging
 import platform
 import shutil
 import time
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,7 @@ class ConnectRequest(BaseModel):
 class RecordingStartRequest(BaseModel):
     name: str
     metadata: dict[str, Any] = {}
+    visible: bool = False
 
 
 class ParametersRequest(BaseModel):
@@ -87,12 +89,14 @@ def create_app(
     experiments_root: Path | None = None,
     min_free_gb: float = 2.0,
     reveal_runner: Runner | None = None,
+    visible_factory: Callable[[], Any] | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
         app.state.service = None
         app.state.backend_name = None
         app.state.recorder = None
+        app.state.visible = None
         yield
         await _finalize_recording()
         svc: AcquisitionService | None = app.state.service
@@ -113,13 +117,32 @@ def create_app(
     def recorder() -> Recorder | None:
         return app.state.recorder  # type: ignore[no-any-return]
 
+    def _visible_status() -> dict[str, Any]:
+        vis = app.state.visible
+        if vis is not None:
+            return vis.stats()  # type: ignore[no-any-return]
+        if visible_factory is None:
+            return {"state": "unavailable", "reason": "ffmpeg or RTSP credentials not configured"}
+        return {"state": "idle"}
+
     async def _finalize_recording() -> dict[str, Any] | None:
         rec = recorder()
+        vis = app.state.visible
+        visible_info: dict[str, Any] | None = None
+        if vis is not None:
+            try:
+                visible_info = await run_in_threadpool(vis.stop)
+            except Exception as exc:  # noqa: BLE001 - never lose the thermal finalize
+                logger.exception("visible recorder stop failed")
+                visible_info = {"state": "error", "error": str(exc)}
+            app.state.visible = None
         if rec is None:
             return None
         manifest = None
         if rec.state in (RecorderState.RECORDING, RecorderState.ERROR):
             manifest = await run_in_threadpool(rec.stop)
+        if manifest is not None and visible_info is not None:
+            manifest["visible"] = visible_info
         app.state.recorder = None
         return manifest
 
@@ -310,7 +333,20 @@ def create_app(
         except RuntimeError as exc:
             raise HTTPException(507 if "free space" in str(exc) else 400, str(exc)) from exc
         app.state.recorder = rec
-        return {"state": rec.state.value, "experiment_dir": str(exp_dir)}
+        visible: dict[str, Any] = {"state": "idle"}
+        if req.visible:
+            if visible_factory is None:
+                visible = _visible_status()
+            else:
+                vis = visible_factory()
+                try:
+                    visible = await run_in_threadpool(vis.start, exp_dir)
+                    app.state.visible = vis
+                except Exception as exc:  # noqa: BLE001 - the thermal recording must proceed
+                    logger.exception("visible recorder failed to start")
+                    visible = {"state": "error", "error": str(exc)}
+                    rec.note_event("visible_error", {"error": str(exc)})
+        return {"state": rec.state.value, "experiment_dir": str(exp_dir), "visible": visible}
 
     @app.post("/api/recording/stop")
     async def recording_stop() -> dict[str, Any]:
@@ -346,8 +382,11 @@ def create_app(
                 "experiments_root": str(root),
                 "free_space_gb": free,
                 "min_free_gb": app.state.min_free_gb,
+                "visible": _visible_status(),
             }
-        return rec.stats()
+        st = rec.stats()
+        st["visible"] = _visible_status()
+        return st
 
     @app.get("/api/experiments")
     def experiments() -> list[dict[str, Any]]:

@@ -20,6 +20,7 @@ export function RecordPanel({ acquiring }: { acquiring: boolean }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [withVisible, setWithVisible] = useState(true);
 
   useEffect(() => {
     const tick = async () => { try { setStatus(await api.recordingStatus()); } catch { /* keep last */ } };
@@ -29,6 +30,8 @@ export function RecordPanel({ acquiring }: { acquiring: boolean }) {
   }, []);
 
   const recording = status.state === "recording";
+  const vis = status.visible;
+  const visibleAvailable = !!vis && vis.state !== "unavailable";
 
   async function start() {
     setBusy(true); setErr(null);
@@ -38,7 +41,7 @@ export function RecordPanel({ acquiring }: { acquiring: boolean }) {
         const v = meta[f.key];
         if (v !== undefined && v !== "") m[f.key] = f.type === "number" ? Number(v) : v;
       }
-      await api.recordingStart(name, m);
+      await api.recordingStart(name, m, withVisible && visibleAvailable);
       setStatus(await api.recordingStatus());
     } catch (e) { setErr(String(e)); } finally { setBusy(false); }
   }
@@ -71,6 +74,9 @@ export function RecordPanel({ acquiring }: { acquiring: boolean }) {
             <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="experiment name" style={{ width: 140 }} />
             <button className="primary" disabled={!acquiring || busy} onClick={start} title={acquiring ? "" : "connect a camera first"}>● Record</button>
             <button className="secondary" onClick={() => setShowForm(!showForm)}>{showForm ? "Hide metadata" : "Metadata"}</button>
+            <label className="hint" title={visibleAvailable ? "Also record the visible camera (RTSP /avc/ch1, H.264 stream copy) as visible.mp4" : `visible camera unavailable: ${vis?.reason ?? "no status yet"}`}>
+              <input type="checkbox" checked={withVisible && visibleAvailable} disabled={!visibleAvailable} onChange={(e) => setWithVisible(e.target.checked)} /> visible video
+            </label>
           </>
         ) : (
           <button className="danger" disabled={busy} onClick={stop}>■ Stop</button>
@@ -108,6 +114,9 @@ export function RecordPanel({ acquiring }: { acquiring: boolean }) {
           <span>Recorded fps</span><span className="v">{status.recorded_fps ? status.recorded_fps.toFixed(1) : "—"}</span>
           <span>Duration</span><span className="v">{(status.duration_s ?? 0).toFixed(1)} s</span>
           <span>Queue</span><span className="v">{status.queue_depth ?? 0}</span>
+        </>)}
+        {vis && vis.state !== "unavailable" && vis.state !== "idle" && (<>
+          <span>Visible</span><span className="v" style={{ color: vis.state === "error" ? "var(--err)" : undefined }}>{vis.state}{vis.error ? ` · ${vis.error}` : ""}</span>
         </>)}
         <span>Rec. dropped</span><span className="v" style={{ color: (status.queue_dropped ?? 0) > 0 ? "var(--err)" : undefined }}>{status.queue_dropped ?? 0}</span>
         <span>Camera gaps</span><span className="v" style={{ color: (status.frame_id_gaps ?? 0) > 0 ? "var(--warn)" : undefined }}>{status.frame_id_gaps ?? 0}</span>

@@ -81,4 +81,12 @@ from events.json as markers. Camera-controls rail section follows as its own ste
 - [x] 2 PATCH /api/experiments/{name}/metadata merges `experiment` keys atomically, keeps an edit log — TDD
 - [x] 3 eventsToMarkers uses frame_id when present (exact placement) — TDD
 - [x] 4 UI: RECORDING section "mark event" (RF ON / RF OFF / custom + note); playback experiment section editable
-- [ ] 5 Gate + browser check + commit
+- [x] 5 Gate + browser check + commit (244dbf7)
+
+## M9 visible camera (core DONE 2026-09-02, hardware verification pending)
+- [x] visible/recorder.py: ffmpeg stream copy of /avc/ch1 with wall-clock timestamps, graceful 'q' stop, visible.json sidecar; tested with a fake process
+- [x] POST /api/recording/start {visible: true}; status/manifest/experiment info carry `visible`; RECORDING section checkbox
+- [ ] On the A70: record 30 s with visible video, confirm visible.mp4 plays, duration matches, compare visible.json start time vs first thermal host timestamp
+- [ ] Playback: show visible.mp4 beside/overlaid on the thermal image (needs FOV registration)
+
+## Next: deployment (spec §6) — GitHub Pages site + operator packaging + PWA offline; blocked on the GitHub repo existing (gh repo create refused by the sandbox; user runs it)

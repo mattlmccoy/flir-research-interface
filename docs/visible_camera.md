@@ -1,7 +1,19 @@
 # Visible camera, RTSP, and Wi-Fi: investigation (Milestone 9 groundwork)
 
 Evidence gathered 2026-09-01 on the FLIR A70 (fw 42.0.0) with the user manual T810579 and
-direct experiments. Nothing here is implemented yet; the thermal pipeline stays untouched.
+direct experiments. The thermal pipeline stays untouched.
+
+**Implemented 2026-09-02 (Milestone 9 core, untested on hardware):**
+`backend/flir_research_interface/visible/recorder.py` runs
+`ffmpeg -rtsp_transport tcp -use_wallclock_as_timestamps 1 -i rtsp://…/avc/ch1 -map 0:v:0 -an -c copy -f mp4 visible.mp4`
+next to the thermal store when the recording is started with `visible: true` (the "visible
+video" checkbox in the RECORDING section). A `visible.json` sidecar holds the start/stop host
+times, the redacted URL, the command and the file hash; `GET /api/experiments/{name}` exposes it
+as `visible`. ffmpeg is stopped with `q` so the MP4 is finalised; if ffmpeg dies the thermal
+recording continues and the status shows `visible: error`. Credentials come from `backend/.env`
+(`FRI_CAMERA_HOST`, `FRI_RTSP_USER`, `FRI_RTSP_PASSWORD`); without them, or without ffmpeg, the
+option reports `unavailable`. Still to do: verify on the A70 (file plays, duration matches,
+host-clock offset vs thermal frames), playback of the visible video beside the thermal image.
 
 ## 1. What the camera offers
 

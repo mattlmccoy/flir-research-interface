@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import argparse
 import logging
+from pathlib import Path
 
 import uvicorn
 
 from flir_research_interface.api.app import create_app
+from flir_research_interface.visible.recorder import default_visible_factory
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -30,7 +32,13 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    app = create_app(default_backend=args.backend, sim_fps=args.sim_fps, viz_fps=args.viz_fps)
+    dotenv = Path(__file__).resolve().parents[2] / ".env"  # backend/.env (git-ignored)
+    app = create_app(
+        default_backend=args.backend,
+        sim_fps=args.sim_fps,
+        viz_fps=args.viz_fps,
+        visible_factory=default_visible_factory(dotenv),
+    )
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     return 0
 

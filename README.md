@@ -5,12 +5,13 @@ A50/A70 radiometric thermal cameras (GigE Vision / GenICam via the FLIR Spinnake
 built for RF-heating experiments on polymer powder and intended to replace day-to-day use of
 FLIR Research Studio.
 
-**Status: Milestones 3–7 implemented (2026-09-02) — live view, recording, playback, ROIs and
-temperature-vs-time plots, camera controls, exports; Milestone 2 validation table still open.**
-`fri-serve` + the React UI show live temperature-linear video at 30 Hz, record lossless Zarr
-experiments with full frame accounting, replay them without the camera, measure spots and
-rectangles live and in playback, write real camera nodes (locked while recording), and export
-CSV/TIFF/PNG/NPY/HDF5. What exists:
+**Status: Milestones 3–8 implemented and the Milestone 9 core written (2026-09-02) — live view,
+recording, playback, ROIs and temperature-vs-time plots, camera controls, exports, event marks
+and metadata edits, visible-video recorder (fake-tested, not yet run on the A70); Milestone 2
+validation table still open.** `fri-serve` + the React UI show live temperature-linear video at
+30 Hz, record lossless Zarr experiments with full frame accounting, replay them without the
+camera, measure spots and rectangles live and in playback, write real camera nodes (locked while
+recording), and export CSV/TIFF/PNG/NPY/HDF5. What exists:
 
 | Piece | Location | State |
 |---|---|---|
@@ -30,6 +31,8 @@ CSV/TIFF/PNG/NPY/HDF5. What exists:
 | ROIs (spot / rectangle), live traces, whole-recording series + event markers (M6) | `frontend/src/lib/roi.ts`, `plot.ts`, `components/ThermalView.tsx`, `TimePlot.tsx`, `backend/.../analysis/series.py` | tested; verified in browser |
 | Camera controls (case, object parameters, NUC mode, frame rate, NUC now; locked while recording) | `backend/.../camera/controls.py`, `frontend/src/components/CameraControls.tsx` | tested on the simulated camera; Spinnaker writes untested on hardware |
 | Exports: ROI series CSV, frame CSV/TIFF/PNG/NPY, whole-run HDF5 (M7) | `backend/.../analysis/export.py`, `frontend/src/components/ExportSection.tsx` | tested |
+| Event marks during recording + post-hoc metadata edits (M8) | `backend/.../recording/metadata.py`, `frontend/src/components/MetadataEditor.tsx` | tested; verified in browser |
+| Visible-camera recorder: ffmpeg stream copy of RTSP `/avc/ch1` beside the thermal store (M9 core) | `backend/.../visible/recorder.py` | tested with a fake ffmpeg; **not yet run against the A70** |
 | Docs | `docs/` | architecture, radiometry, installation, camera_setup, validation protocol, data_format, visible_camera |
 
 ## Scientific stance
@@ -67,10 +70,10 @@ step (radiometric node selection, live view) is deliberately blocked on that fil
 
 ```
 backend/   Python package `flir_research_interface` + tests (uv-managed)
-docs/      architecture.md, radiometry.md, installation.md, development.md
+docs/      architecture, radiometry, installation, camera_setup, validation, data_format, visible_camera, development
 scripts/   camera_probe.py wrapper
-frontend/  (empty; React/TypeScript UI starts at Milestone 3)
-examples/  (empty; dataset-loading examples arrive with the storage format)
+frontend/  Vite + React + TypeScript UI (built into frontend/dist and served by fri-serve)
+examples/  (dataset-loading examples; see docs/data_format.md)
 plan/      task plan + research notes for this project (reference downloads are git-ignored)
 ```
 

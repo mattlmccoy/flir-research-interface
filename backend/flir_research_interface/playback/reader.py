@@ -35,6 +35,10 @@ class ExperimentReader:
         self.events: list[dict[str, Any]] = (
             json.loads(ev_path.read_text()) if ev_path.is_file() else []
         )
+        vis_path = self.path / "visible.json"
+        self.visible: dict[str, Any] | None = (
+            json.loads(vis_path.read_text()) if vis_path.is_file() else None
+        )
         pv_path = self.path / "previews.json"
         self._previews_sidecar: dict[str, Any] | None = (
             json.loads(pv_path.read_text()) if pv_path.is_file() else None
@@ -84,6 +88,7 @@ class ExperimentReader:
             "software": self.metadata.get("software"),
             "started_utc": self.metadata.get("started_utc"),
             "n_events": len(self.events),
+            "visible": self.visible,
         }
 
     def timeline(self) -> dict[str, list[Any]]:
