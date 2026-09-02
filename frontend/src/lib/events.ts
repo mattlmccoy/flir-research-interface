@@ -60,3 +60,11 @@ export function eventsToMarkers(events: ExperimentEvent[], tl: Timeline, started
   }
   return out;
 }
+
+/** Time of the next (dir = 1) or previous (dir = -1) marker strictly beyond `t`, or null. */
+export function nextMarkerTime(markers: Marker[], t: number, dir: 1 | -1): number | null {
+  const eps = 1e-6;
+  const cands = markers.map((m) => m.t).filter((mt) => (dir === 1 ? mt > t + eps : mt < t - eps));
+  if (cands.length === 0) return null;
+  return dir === 1 ? Math.min(...cands) : Math.max(...cands);
+}

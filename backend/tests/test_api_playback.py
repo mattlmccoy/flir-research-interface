@@ -52,3 +52,17 @@ def test_experiment_info_timeline_and_frames(tmp_path: Path) -> None:
         assert c.get(f"/api/experiments/{name}/frames/6").status_code == 404
         assert c.get("/api/experiments/does-not-exist").status_code == 404
         assert c.get("/api/experiments/../etc").status_code in (400, 404)
+
+
+def test_experiment_listing_reports_size_on_disk_and_the_total(tmp_path: Path) -> None:
+    name = _exp(tmp_path)
+    app = create_app(experiments_root=tmp_path)
+    with TestClient(app) as c:
+        items = c.get("/api/experiments").json()
+        row = next(e for e in items if e["name"] == name)
+        assert row["size_bytes"] > 1000
+        info = c.get(f"/api/experiments/{name}").json()
+        assert info["size_bytes"] == row["size_bytes"]
+        tot = c.get("/api/experiments/summary").json()
+        assert tot["count"] >= 1 and tot["size_bytes"] >= row["size_bytes"]
+        assert isinstance(tot["free_space_gb"], float)

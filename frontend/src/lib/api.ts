@@ -52,6 +52,7 @@ export interface ThermalVideoExport { path: string; frames: number; fps: number;
 export interface Experiment {
   name: string;
   path: string;
+  size_bytes?: number;
   complete: boolean;
   frames_on_disk: number;
   has_metadata?: boolean;
@@ -66,7 +67,7 @@ export interface Experiment {
   started_utc?: string | null;
 }
 
-export interface ExperimentInfo { name: string; path: string; n_frames: number; width: number; height: number; duration_s: number; complete: boolean; ir_format: string | null; conversion: Record<string, unknown> | null; experiment: Record<string, unknown> | null; camera: Record<string, unknown> | null; software: Record<string, unknown> | null; started_utc: string | null; events?: Record<string, unknown>[]; manifest: Record<string, unknown> | null; visible?: { file?: string | null; measured_fps?: number | null; error?: string | null } | null; visible_alignment?: Record<string, unknown> | null; rois?: Record<string, unknown>[] | null; thermal_preview?: { path: string; bytes: number } | null; }
+export interface ExperimentInfo { name: string; path: string; n_frames: number; size_bytes?: number; width: number; height: number; duration_s: number; complete: boolean; ir_format: string | null; conversion: Record<string, unknown> | null; experiment: Record<string, unknown> | null; camera: Record<string, unknown> | null; software: Record<string, unknown> | null; started_utc: string | null; events?: Record<string, unknown>[]; manifest: Record<string, unknown> | null; visible?: { file?: string | null; measured_fps?: number | null; error?: string | null } | null; visible_alignment?: Record<string, unknown> | null; rois?: Record<string, unknown>[] | null; thermal_preview?: { path: string; bytes: number } | null; }
 export interface Timeline { t_s: number[]; frame_id: number[]; }
 export interface ExperimentEvent { t_s?: number; type?: string; name?: string; [k: string]: unknown; }
 export interface RoiSeries {
@@ -118,6 +119,7 @@ export const api = {
   keyframesUrl: (name: string) => u(`/api/experiments/${encodeURIComponent(name)}/keyframes.png`),
   regeneratePreviews: (name: string) => j<Previews>(req(`/api/experiments/${encodeURIComponent(name)}/previews`, { method: "POST" })),
   reveal: (name: string) => j<RevealResult>(req(`/api/experiments/${encodeURIComponent(name)}/reveal`, { method: "POST" })),
+  experimentsSummary: () => j<{ count: number; size_bytes: number; free_space_gb: number }>(req("/api/experiments/summary")),
   deleteExperiment: (name: string) =>
     j<{ deleted: string }>(req(`/api/experiments/${encodeURIComponent(name)}`, { method: "DELETE" })),
   revealRoot: () => j<RevealResult>(req("/api/experiments/reveal-root", { method: "POST" })),

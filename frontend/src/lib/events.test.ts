@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { eventsToMarkers, nearestIndex } from "./events.ts";
+import { eventsToMarkers, nearestIndex, nextMarkerTime } from "./events.ts";
 
 const TL = { t_s: [0, 0.1, 0.2, 0.3, 0.4], frame_id: [100, 101, 103, 104, 105] };
 const START = "2026-09-02T10:00:00.000+00:00";
@@ -53,4 +53,15 @@ test("long frozen runs (the camera's NUC) become NUC markers; single repeated fr
   assert.equal(m.length, 1);
   assert.equal(m[0].label, "NUC (70 fr)");
   assert.equal(m[0].t, 0.2, "first frame with id >= 102 is 103 at t=0.2");
+});
+
+test("nextMarkerTime jumps to the next / previous marker strictly beyond the current time", () => {
+  const ms = [{ t: 1, label: "a" }, { t: 3, label: "b" }, { t: 5, label: "c" }];
+  assert.equal(nextMarkerTime(ms, 0, 1), 1);
+  assert.equal(nextMarkerTime(ms, 1, 1), 3);
+  assert.equal(nextMarkerTime(ms, 3.0001, 1), 5);
+  assert.equal(nextMarkerTime(ms, 5, 1), null);
+  assert.equal(nextMarkerTime(ms, 5, -1), 3);
+  assert.equal(nextMarkerTime(ms, 1, -1), null);
+  assert.equal(nextMarkerTime([], 2, 1), null);
 });

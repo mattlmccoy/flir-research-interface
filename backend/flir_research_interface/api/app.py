@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import platform
 import shutil
 import time
@@ -827,9 +828,37 @@ def create_app(
         st["visible"] = _visible_status()
         return st
 
+    def _dir_size(path: Path) -> int:
+        total = 0
+        for root_dir, _dirs, files in os.walk(path):
+            for f in files:
+                try:
+                    total += (Path(root_dir) / f).stat().st_size
+                except OSError:
+                    pass
+        return total
+
     @app.get("/api/experiments")
     def experiments() -> list[dict[str, Any]]:
-        return list_experiments(app.state.experiments_root)
+        root: Path = app.state.experiments_root
+        items = list_experiments(root)
+        for it in items:
+            it["size_bytes"] = _dir_size(root / str(it.get("name", "")))
+        return items
+
+    @app.get("/api/experiments/summary")
+    def experiments_summary() -> dict[str, Any]:
+        """Runs on disk and how much of the disk they use (for the experiments page header)."""
+        root: Path = app.state.experiments_root
+        dirs = [p for p in root.iterdir() if p.is_dir()] if root.is_dir() else []
+        probe = root if root.exists() else root.parent
+        free = shutil.disk_usage(probe).free / 1e9 if probe.exists() else 0.0
+        return {
+            "count": len(dirs),
+            "size_bytes": sum(_dir_size(d) for d in dirs),
+            "free_space_gb": float(free),
+            "experiments_root": str(root),
+        }
 
     def _exp_dir(name: str) -> Path:
         root: Path = app.state.experiments_root
@@ -875,6 +904,7 @@ def create_app(
     def experiment_info(name: str) -> dict[str, Any]:
         r = _open(name)
         info = r.info()
+        info["size_bytes"] = _dir_size(r.path)
         info["events"] = r.events
         return info
 

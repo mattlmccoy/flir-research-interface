@@ -6,6 +6,7 @@ type Sort = "newest" | "name" | "duration";
 
 export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) {
   const [items, setItems] = useState<Experiment[] | null>(null);
+  const totalBytes = items ? items.reduce((a, e) => a + (e.size_bytes ?? 0), 0) : 0;
   const [err, setErr] = useState<string | null>(null);
   const [sort, setSort] = useState<Sort>("newest");
   const [q, setQ] = useState("");
@@ -37,7 +38,7 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) 
   return (
     <div className="page-body">
       <div className="exp-head">
-        <span>{items ? (filtering ? `${shown.length} / ${items.length} experiments` : `${items.length} experiments`) : "loading…"}</span>
+        <span>{items ? (filtering ? `${shown.length} / ${items.length} experiments` : `${items.length} experiments`) : "loading…"}{items && totalBytes > 0 ? ` · ${(totalBytes / 1e9).toFixed(2)} GB on disk` : ""}</span>
         <span className="right">
           <input type="text" placeholder="filter" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 160 }} />
           <select value={sort} onChange={(e) => setSort(e.target.value as Sort)}>

@@ -111,6 +111,7 @@ export function ExperimentCard({ exp, onOpen, onChanged }: Props) {
         <span className="meta">
           {exp.duration_s != null && <span>{formatSeconds(exp.duration_s)}</span>}
           <span>{n} fr</span>
+          {exp.size_bytes != null && <span title="size on disk (all files in the run folder)">{exp.size_bytes >= 1e9 ? `${(exp.size_bytes / 1e9).toFixed(2)} GB` : `${(exp.size_bytes / 1e6).toFixed(0)} MB`}</span>}
           {exp.ir_format && <span>{exp.ir_format.replace("TemperatureLinear", "TL ")}</span>}
           {meta.material != null && <span>{String(meta.material)}</span>}
           {meta.rf_forward_power_w != null && <span>{String(meta.rf_forward_power_w)} W</span>}
