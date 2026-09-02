@@ -9,12 +9,16 @@ interface Props {
   onCalibrating: (on: boolean) => void;
   irSize: [number, number] | null;
   onSave: () => Promise<string>;
+  /** Leave calibration and switch the visible camera to overlay mode so the result is seen at once. */
+  onFinishOverlay: () => void;
 }
 
 /** Visible↔IR alignment: pick the same features on both images, fit a homography, apply. */
-export function AlignmentPanel({ state, dispatch, calibrating, onCalibrating, irSize, onSave }: Props) {
+export function AlignmentPanel({ state, dispatch, calibrating, onCalibrating, irSize, onSave, onFinishOverlay }: Props) {
   const [msg, setMsg] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
   const n = state.pairs.length;
+  const solved = state.H !== null && state.rmsPx !== null;
   return (
     <>
       <div className="row">
@@ -38,15 +42,25 @@ export function AlignmentPanel({ state, dispatch, calibrating, onCalibrating, ir
             ])}
           </div>
           <div className="row">
-            <button className="primary" disabled={n < 4 || !irSize} onClick={() => { if (irSize) dispatch({ type: "solve", irSize }); }}>solve ({n}/4)</button>
+            <button className="primary" disabled={n < 4 || !irSize} onClick={() => { if (irSize) { dispatch({ type: "solve", irSize }); setSaveState("idle"); setMsg(null); } }}>{solved ? "re-solve" : `solve (${n}/4)`}</button>
             <button className="secondary" disabled={n === 0 && !state.pending} onClick={() => dispatch({ type: "clear" })}>clear pairs</button>
-            <button className="secondary" disabled={!state.H} onClick={() => { onSave().then(setMsg).catch((e) => setMsg(String(e))); }}>save to operator</button>
           </div>
+          {solved && (
+            <div className={state.rmsPx! > 5 ? "warnbox" : "okbox"} role="status">
+              <b>Solved.</b> {n} pairs, RMS error {state.rmsPx!.toFixed(2)} px on the IR image.
+              {state.rmsPx! <= 5 ? " The overlay now uses this alignment." : " That is large: check for a mismatched pair or off-plane features."}
+              <div className="row" style={{ marginTop: 6 }}>
+                <button className="primary" onClick={onFinishOverlay}>finish &amp; show overlay</button>
+                <button className="secondary" disabled={saveState === "saving" || saveState === "saved"} onClick={() => { setSaveState("saving"); onSave().then((m) => { setSaveState("saved"); setMsg(m); }).catch((e) => { setSaveState("failed"); setMsg(String(e)); }); }}>
+                  {saveState === "saved" ? "saved on operator ✓" : saveState === "saving" ? "saving…" : "save to operator"}
+                </button>
+              </div>
+            </div>
+          )}
           <div className="row">
             <input type="text" value={state.note} placeholder="note, e.g. sample plane at 0.45 m" style={{ flex: 1, minWidth: 120 }} onChange={(e) => dispatch({ type: "note", note: e.target.value })} />
           </div>
-          {state.H && state.rmsPx !== null && state.rmsPx > 5 && <div className="warnbox">RMS {state.rmsPx.toFixed(1)} px is large: a pair is probably mismatched, or the features are not on one plane.</div>}
-          {msg && <div className="hint">{msg}</div>}
+          {msg && <div className={saveState === "failed" ? "errbox" : "hint"}>{msg}</div>}
         </>
       )}
       {!calibrating && (

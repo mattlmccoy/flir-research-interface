@@ -23,12 +23,13 @@ export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, 
           else setScaleMode("auto");
         }}>{scaleMode === "auto" ? "Lock range" : "Auto range"}</button>
       </div>
-      {scaleMode === "manual" && (
-        <div className="row">
-          <label>min <input type="number" value={manual.min} onChange={(e) => setManual({ ...manual, min: Number(e.target.value) })} /></label>
-          <label>max <input type="number" value={manual.max} onChange={(e) => setManual({ ...manual, max: Number(e.target.value) })} /></label>
-        </div>
-      )}
+      <div className="row">
+        <label>min <input type="number" step={0.5} aria-label="range minimum °C" value={scaleMode === "manual" ? manual.min : Math.round(shown.min * 10) / 10}
+          onChange={(e) => { const base = scaleMode === "manual" ? manual : { min: shown.min, max: Math.round(shown.max * 10) / 10 }; setManual({ ...base, min: Number(e.target.value) }); setScaleMode("manual"); }} /> °C</label>
+        <label>max <input type="number" step={0.5} aria-label="range maximum °C" value={scaleMode === "manual" ? manual.max : Math.round(shown.max * 10) / 10}
+          onChange={(e) => { const base = scaleMode === "manual" ? manual : { min: Math.round(shown.min * 10) / 10, max: shown.max }; setManual({ ...base, max: Number(e.target.value) }); setScaleMode("manual"); }} /> °C</label>
+      </div>
+      <div className="hint">{scaleMode === "auto" ? "Auto: the range follows each frame's min and max. Type a limit to lock it." : "Locked: colours stay fixed at these limits; values outside clip. \"Auto range\" returns to per-frame scaling."}</div>
       <ColorBar palette={palette} range={shown} />
     </>
   );

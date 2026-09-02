@@ -119,5 +119,5 @@ from events.json as markers. Camera-controls rail section follows as its own ste
 
 ## 2026-09-02 (late): visible camera placement
 - [x] live preview (MJPEG relay, low latency, watchdog), recorded video in playback, side by side, overlay with registration sliders
-- [ ] served bundle (frontend/dist) is BEHIND source since the overlay commit: rebuild with `npm run build` after the user's experiment (the operator serves dist statically; the running operator does not need a restart for frontend changes)
+- [x] served bundle rebuilt 2026-09-02 evening (overlay + calibration + range inputs); page reload picks it up, operator untouched
 - [ ] the rest: operator installers, SDK install job, Research Studio comparison, disk space

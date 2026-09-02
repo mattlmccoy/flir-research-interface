@@ -181,3 +181,5 @@ ul.help li { line-height: 1.35; }
 .pick-mark { position: absolute; width: 18px; height: 18px; margin: -9px 0 0 -9px; border: 2px solid; border-radius: 50%; background: var(--scrim); font: 600 10px var(--font-mono); display: grid; place-items: center; pointer-events: none; }
 .pick-mark.pending { border-style: dashed; }
 .pick-hint { position: absolute; right: 8px; bottom: 8px; background: var(--scrim); color: var(--fg-strong); padding: 2px 6px; font-family: var(--font-mono); font-size: 11px; pointer-events: none; }
+
+.okbox { border-left: 3px solid var(--live); padding: 6px 10px; background: var(--live-bg); font-size: 12px; }
