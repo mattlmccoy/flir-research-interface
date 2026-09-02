@@ -137,3 +137,7 @@ pre { background: var(--bg-deep); border: 1px solid var(--line); padding: 8px; b
 .plot { position: relative; width: 100%; height: 100%; min-height: 0; }
 .plot canvas { display: block; }
 .plot-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-family: var(--font-mono); font-size: 12px; pointer-events: none; }
+
+/* ---- Export links ------------------------------------------------------------------ */
+.dl { color: var(--accent); text-decoration: none; border-bottom: 1px dotted var(--accent); font-family: var(--font-mono); font-size: 12px; }
+.dl:hover { color: var(--fg-strong); border-bottom-style: solid; }

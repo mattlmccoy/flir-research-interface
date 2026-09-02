@@ -5,10 +5,12 @@ A50/A70 radiometric thermal cameras (GigE Vision / GenICam via the FLIR Spinnake
 built for RF-heating experiments on polymer powder and intended to replace day-to-day use of
 FLIR Research Studio.
 
-**Status: Milestones 3–5 implemented and restyled to the approved Studio UI (2026-09-02);
-Milestone 2 validation table still open.** `fri-serve` + the React UI show live temperature-linear video at
-30 Hz, record lossless Zarr experiments with full frame accounting, and replay them without the
-camera. What exists:
+**Status: Milestones 3–7 implemented (2026-09-02) — live view, recording, playback, ROIs and
+temperature-vs-time plots, camera controls, exports; Milestone 2 validation table still open.**
+`fri-serve` + the React UI show live temperature-linear video at 30 Hz, record lossless Zarr
+experiments with full frame accounting, replay them without the camera, measure spots and
+rectangles live and in playback, write real camera nodes (locked while recording), and export
+CSV/TIFF/PNG/NPY/HDF5. What exists:
 
 | Piece | Location | State |
 |---|---|---|
@@ -25,6 +27,9 @@ camera. What exists:
 | Playback (read-only ExperimentReader, experiment/timeline/frame endpoints, scrub/play/step/speed UI) | `backend/flir_research_interface/playback/`, `frontend/src/components/PlaybackPage.tsx` | tested; store verified unchanged after playback |
 | UI system + Studio layout (tokens, tool strip, rail, dock, status bar) | `frontend/src/theme.css`, `frontend/src/components/studio/` | logic tested; verified in browser |
 | Experiment previews + hover-scrub cards + reveal in file manager | `backend/.../analysis/preview.py`, `api/reveal.py`, `frontend/src/components/ExperimentCard.tsx` | tested; verified in browser |
+| ROIs (spot / rectangle), live traces, whole-recording series + event markers (M6) | `frontend/src/lib/roi.ts`, `plot.ts`, `components/ThermalView.tsx`, `TimePlot.tsx`, `backend/.../analysis/series.py` | tested; verified in browser |
+| Camera controls (case, object parameters, NUC mode, frame rate, NUC now; locked while recording) | `backend/.../camera/controls.py`, `frontend/src/components/CameraControls.tsx` | tested on the simulated camera; Spinnaker writes untested on hardware |
+| Exports: ROI series CSV, frame CSV/TIFF/PNG/NPY, whole-run HDF5 (M7) | `backend/.../analysis/export.py`, `frontend/src/components/ExportSection.tsx` | tested |
 | Docs | `docs/` | architecture, radiometry, installation, camera_setup, validation protocol, data_format, visible_camera |
 
 ## Scientific stance

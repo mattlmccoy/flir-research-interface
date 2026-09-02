@@ -25,6 +25,7 @@ export interface Previews {
   keyframes: { file: string; count: number; indices: number[]; t_s: number[]; tile?: [number, number]; vmin: number; vmax: number; units?: string; sha256: string };
 }
 export interface RevealResult { ok: boolean; path: string; error?: string; }
+export interface Hdf5Export { path: string; size_bytes: number; sha256: string; n_frames: number; }
 
 export interface Experiment {
   name: string;
@@ -59,6 +60,12 @@ export const api = {
   timeline: (name: string) => j<Timeline>(fetch(`/api/experiments/${encodeURIComponent(name)}/timeline`)),
   series: (name: string, rois: unknown[]) =>
     j<RoiSeries>(fetch(`/api/experiments/${encodeURIComponent(name)}/series?rois=${encodeURIComponent(JSON.stringify(rois))}`)),
+  seriesCsvUrl: (name: string, rois: unknown[]) =>
+    `/api/experiments/${encodeURIComponent(name)}/export/series.csv?rois=${encodeURIComponent(JSON.stringify(rois))}`,
+  frameExportUrl: (name: string, index: number, format: "csv" | "tiff" | "png" | "npy") =>
+    `/api/experiments/${encodeURIComponent(name)}/frames/${index}/export?format=${format}`,
+  exportHdf5: (name: string) =>
+    j<Hdf5Export>(fetch(`/api/experiments/${encodeURIComponent(name)}/export/hdf5`, { method: "POST" })),
   frameBuffer: async (name: string, index: number): Promise<ArrayBuffer> => {
     const res = await fetch(`/api/experiments/${encodeURIComponent(name)}/frames/${index}`);
     if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);

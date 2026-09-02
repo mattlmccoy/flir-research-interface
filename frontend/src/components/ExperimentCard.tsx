@@ -40,6 +40,19 @@ export function ExperimentCard({ exp, onOpen, onChanged }: Props) {
       setBusy(false);
     }
   }
+  async function exportH5(e: React.MouseEvent) {
+    e.stopPropagation();
+    setBusy(true);
+    setNote(null);
+    try {
+      const r = await api.exportHdf5(exp.name);
+      setNote(`HDF5 written (${(r.size_bytes / 1e6).toFixed(1)} MB): ${r.path}`);
+    } catch (err) {
+      setNote(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
   async function regen(e: React.MouseEvent) {
     e.stopPropagation();
     setBusy(true);
@@ -103,12 +116,12 @@ export function ExperimentCard({ exp, onOpen, onChanged }: Props) {
           <button className="secondary" disabled={busy} onClick={reveal} title="Show in Finder / Explorer">
             reveal
           </button>
-          <button className="secondary" disabled title="Milestone 7">
+          <button className="secondary" disabled={busy || !n || !!exp.error} onClick={exportH5} title="Export the whole recording to HDF5 (in the experiment's exports folder)">
             export
           </button>
         </div>
         {exp.error && <div className="errbox">{exp.error}</div>}
-        {note && <div className="errbox">{note}</div>}
+        {note && <div className={note.startsWith("HDF5 written") ? "hint" : "errbox"} style={{ wordBreak: "break-all" }}>{note}</div>}
       </div>
     </div>
   );

@@ -62,7 +62,29 @@ t_s = (g["device_timestamp_ns"][:] - g["device_timestamp_ns"][0]) / 1e9
 ```
 
 MATLAB (R2025a+): `counts = zarrread("…/thermal.zarr/counts");` then apply the same rule. For older
-MATLAB use the HDF5 export (Milestone 7).
+MATLAB use the HDF5 export below.
+
+## Exports (Milestone 7)
+
+All exports are derived from the read-only reader; the Zarr store is never modified.
+
+| Export | Where | Content |
+|---|---|---|
+| ROI series CSV | `GET /api/experiments/{name}/export/series.csv?rois=…` (playback rail → export) | `t_s, frame_id, S<n>_value, R<n>_mean/min/max` per frame; `#` header lines list units and the ROI geometry |
+| Frame CSV | `GET …/frames/{i}/export?format=csv` | °C grid (rows = y, top first); raw counts if the run is not temperature-linear |
+| Frame TIFF | `format=tiff` | 32-bit float °C (uint16 counts if not temperature-linear) |
+| Frame PNG | `format=png` | 16-bit raw counts |
+| Frame NPY | `format=npy` | uint16 raw counts |
+| Whole run HDF5 | `POST …/export/hdf5` → `<experiment>/exports/<name>.h5` | `counts` (uint16, gzip, chunked by 32 frames), `t_s`, `frame_id`, `device_timestamp_ns`, `host_timestamp_ns`; attrs `ir_format`, `kelvin_per_count`, `kelvin_offset`, `conversion`, `metadata_json`, `events_json` |
+
+MATLAB:
+
+```matlab
+counts = h5read("exports/run.h5", "/counts");        % [x, y, time] in MATLAB's column-major order
+k   = h5readatt("exports/run.h5", "/", "kelvin_per_count");
+off = h5readatt("exports/run.h5", "/", "kelvin_offset");
+t_c = double(counts) * k - off;
+```
 
 ## Future channels (brief §43)
 
