@@ -73,6 +73,7 @@ const divergingLut = buildLut("diverging");
 
 export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois = NO_ROIS, selected = null, tool = "select", zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null }: Props) {
   const viewRef = useRef<HTMLDivElement>(null);
+  const panning = useRef<{ cx: number; cy: number; sl: number; st: number } | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const celsiusRef = useRef<Float32Array | null>(null);
   const lutRef = useRef(buildLut(palette));
@@ -168,8 +169,20 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
     const hit = hitTest(visibleRois(rois), p.x, p.y, HIT_TOL_PX);
     onRoi({ type: "select", id: hit });
     if (hit !== null) { moving.current = { id: hit, last: p }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ } }
+    else if (zoom !== "fit" && viewRef.current) {
+      // empty spot while zoomed in: drag pans the image
+      const v = viewRef.current;
+      panning.current = { cx: e.clientX, cy: e.clientY, sl: v.scrollLeft, st: v.scrollTop };
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    }
   }
   function onMove(e: RPointerEvent<HTMLCanvasElement>) {
+    const pan = panning.current;
+    if (pan && viewRef.current) {
+      viewRef.current.scrollLeft = pan.sl - (e.clientX - pan.cx);
+      viewRef.current.scrollTop = pan.st - (e.clientY - pan.cy);
+      return;
+    }
     const p = pix(e);
     const c = celsiusRef.current;
     if (!p || !hdr) return setHover(null);
@@ -185,6 +198,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
     else if (tool === "polygon" && vertices.length >= 1) setDraft({ kind: "polygon", points: [...vertices, [p.x, p.y]] });
   }
   function onUp(e: RPointerEvent<HTMLCanvasElement>) {
+    if (panning.current) { panning.current = null; return; }
     if (moving.current) { moving.current = null; return; }
     const s = dragStart.current;
     if (!s || !hdr) return;
@@ -219,8 +233,8 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
         </div>
       )}
       {hdr && box && (
-        <RoiOverlay box={box} width={hdr.width} height={hdr.height} rois={rois} selected={selected} stats={stats} draft={draft} extremes={extremes} cursor={drawing ? "crosshair" : selected !== null ? "move" : "default"}
-          onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => { setHover(null); moving.current = null; }} onKeyDown={onKey}
+        <RoiOverlay box={box} width={hdr.width} height={hdr.height} rois={rois} selected={selected} stats={stats} draft={draft} extremes={extremes} cursor={drawing ? "crosshair" : selected !== null ? "move" : zoom !== "fit" ? "grab" : "default"}
+          onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => { setHover(null); moving.current = null; panning.current = null; }} onKeyDown={onKey}
           onDoubleClick={() => { if (tool === "polygon") finishPolygon(vertices); }} />
       )}
       {topLayer && box && <div className="top-layer" style={{ left: box.left, top: box.top, width: box.width, height: box.height }}>{topLayer}</div>}

@@ -163,7 +163,7 @@ export function PlaybackPage(p: Props) {
   );
 
   return (
-    <StudioFrame layout={p.layout} topbar={p.topbar} dispatch={p.dispatch}
+    <StudioFrame layout={p.layout} topbar={p.topbar} dispatch={p.dispatch} dockFoot={transport}
       strip={<ToolStrip tool={p.layout.tool} onTool={(tool) => p.dispatch({ type: "setTool", tool })} onCollapseAll={() => p.dispatch({ type: "collapseAll" })} zoom={p.layout.zoom} onZoom={(z) => p.dispatch({ type: "setZoom", zoom: z })}
         leading={<button title="Back to experiments" aria-label="Back to experiments" onClick={p.onBack}>←</button>} />}
       center={

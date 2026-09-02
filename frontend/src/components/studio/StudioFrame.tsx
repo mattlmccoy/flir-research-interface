@@ -20,10 +20,12 @@ interface Props {
   statusbar: ReactNode;
   /** Layout dispatch: enables section pop-out and the collapsed-dock restore bar. */
   dispatch?: (a: LayoutAction) => void;
+  /** Shown in the collapsed-dock bar too (playback transport must survive collapsing the plot). */
+  dockFoot?: ReactNode;
 }
 
 /** The Studio grid (spec §3). Panels collapse via layout flags; grid areas are fixed. */
-export function StudioFrame({ layout, page = false, topbar, strip, center, dock, rail, statusbar, dispatch }: Props) {
+export function StudioFrame({ layout, page = false, topbar, strip, center, dock, rail, statusbar, dispatch, dockFoot }: Props) {
   const { className, showStrip, showRail, showDock } = studioClasses(layout, {
     page,
     hasStrip: !!strip,
@@ -39,7 +41,8 @@ export function StudioFrame({ layout, page = false, topbar, strip, center, dock,
         {showDock && dock}
         {!showDock && dock && dispatch && (
           <div className="dock-collapsed">
-            <button type="button" className="secondary" onClick={() => dispatch({ type: "toggle", panel: "dock" })} title="Show the temperature plot">▴ temperature vs time</button>
+            <button type="button" className="secondary" onClick={() => dispatch({ type: "toggle", panel: "dock" })} title="Show the temperature plot">▴ plot</button>
+            {dockFoot}
           </div>
         )}
       </div>

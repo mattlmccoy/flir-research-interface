@@ -15,7 +15,7 @@ button, select, input { font: inherit; }
 .studio > .topbar { grid-area: top; }
 .studio > .strip { grid-area: strip; }
 .studio > .center { grid-area: center; display: grid; grid-template-rows: minmax(0, 1fr) var(--dock-h); min-width: 0; min-height: 0; overflow: hidden; }
-.studio.no-dock > .center { grid-template-rows: minmax(0, 1fr) 24px; }
+.studio.no-dock > .center { grid-template-rows: minmax(0, 1fr) auto; }
 .studio > .rail { grid-area: rail; }
 .studio > .statusbar { grid-area: status; }
 .studio.page > .center { grid-template-rows: minmax(0, 1fr); }   /* non-image pages: no dock */
@@ -198,7 +198,9 @@ ul.help li { line-height: 1.35; }
 .float-panel .float-head button { margin-left: auto; padding: 0 8px; height: 20px; line-height: 18px; letter-spacing: 0; text-transform: none; }
 .float-panel .float-body { flex: 1; overflow: auto; padding: 8px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
 /* ---- Collapsed dock + transport foot -------------------------------------------------- */
-.dock-collapsed { display: flex; align-items: center; justify-content: center; background: var(--bg-deep); border-top: 1px solid var(--line); height: 24px; }
+.dock-collapsed { display: flex; align-items: center; gap: 8px; padding: 3px 10px; background: var(--bg-deep); border-top: 1px solid var(--line); min-height: 24px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+.dock-collapsed > span { flex: 1 1 auto; min-width: 0; }
+.dock-collapsed select { height: 22px; padding: 0 4px; }
 .dock-collapsed button { height: 20px; line-height: 18px; padding: 0 10px; font-size: 11px; }
 .dock .dock-foot { display: flex; align-items: center; gap: 8px; padding: 4px 10px; border-top: 1px solid var(--line); background: var(--bg-deep); font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
 .dock .dock-foot > span { flex: 1 1 auto; min-width: 0; }
