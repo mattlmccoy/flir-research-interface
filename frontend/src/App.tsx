@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { radiometryFromCamera } from "./lib/emissivity.ts";
+import { useCallback, useEffect, useReducer, useRef, useState, useMemo } from "react";
 import { api, operatorBase, type RecordingStatus, type Status } from "./lib/api.ts";
 import { wsUrl } from "./lib/operator.ts";
 import { decodeFrameMessage, type FrameMessage } from "./lib/protocol.ts";
@@ -92,6 +93,7 @@ export function App() {
   }, []);
 
   const refreshInfo = useCallback(() => { api.info().then(setInfo).catch(() => undefined); }, []);
+  const rad = useMemo(() => radiometryFromCamera(info), [info]);
   const refresh = useCallback(async () => {
     try { setStatus(await api.status()); } catch { setStatus({ state: "unreachable" }); }
     try { setRecording(await api.recordingStatus()); } catch { /* keep last */ }
@@ -188,7 +190,7 @@ export function App() {
       center={
         <div className={`center-split ${(layout.visibleMode === "side" || calibrating) && visibleAvailable ? "on" : ""}`}>
           <ThermalView frame={frame} palette={palette} scaleMode={scaleMode} manual={manual} onScale={setShown}
-            rois={rois.rois} selected={rois.selected} tool={layout.tool} zoom={layout.zoom} onRoi={roiDispatch} onStats={onStats}
+            rois={rois.rois} selected={rois.selected} tool={layout.tool} zoom={layout.zoom} onRoi={roiDispatch} onStats={onStats} rad={rad}
             overlay={layout.visibleMode === "overlay" && !calibrating && visibleAvailable ? <VisibleLive plain /> : undefined} overlayStyle={layout.overlay} overlayH={align.H}
             topLayer={calibrating ? <PickLayer label="IR" color="var(--live)" points={align.pairs.map((p) => p.ir)} pending={align.pending?.ir} onPick={(p) => alignDispatch({ type: "pick", side: "ir", p })} /> : undefined} />
           {(layout.visibleMode === "side" || calibrating) && visibleAvailable && (

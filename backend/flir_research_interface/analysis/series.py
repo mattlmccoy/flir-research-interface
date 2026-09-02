@@ -15,6 +15,7 @@ from typing import Any
 import numpy as np
 
 from flir_research_interface.playback.reader import ExperimentReader
+from flir_research_interface.radiometry.emissivity import Radiometry, recorrect_celsius
 from flir_research_interface.radiometry.temperature_linear import IRFormat, counts_to_celsius
 
 MAX_ROIS = 32
@@ -73,7 +74,44 @@ def parse_rois(raw: str) -> list[dict[str, Any]]:
             out.append({"id": rid, "kind": "polygon", "points": points})
         else:
             raise ValueError(f"unknown roi kind {kind!r}")
+        _optical(it, out[-1])
     return out
+
+
+def _optical(src: dict[str, Any], dst: dict[str, Any]) -> None:
+    """Per-ROI emissivity (0.01..1) and reflected temperature (°C), optional."""
+    eps = src.get("emissivity")
+    if eps is not None:
+        if isinstance(eps, bool) or not isinstance(eps, int | float) or not 0.01 <= eps <= 1.0:
+            raise ValueError("emissivity must be a number between 0.01 and 1")
+        dst["emissivity"] = float(eps)
+    trefl = src.get("reflected_c")
+    if trefl is not None:
+        if (
+            isinstance(trefl, bool)
+            or not isinstance(trefl, int | float)
+            or not -100 <= trefl <= 2000
+        ):
+            raise ValueError("reflected_c must be a temperature in °C")
+        dst["reflected_c"] = float(trefl)
+
+
+def roi_field(
+    field: np.ndarray, roi: dict[str, Any], cam: dict[str, Any] | None, celsius: bool
+) -> np.ndarray:
+    """``field`` re-corrected for the ROI's emissivity / reflected temperature when it has one
+    and the camera constants are known; otherwise ``field`` unchanged."""
+    if not celsius or ("emissivity" not in roi and "reflected_c" not in roi):
+        return field
+    rad = Radiometry.from_camera(cam)
+    if rad is None:
+        return field
+    rbf, eps_cam, trefl_cam = rad
+    eps = float(roi.get("emissivity", eps_cam))
+    trefl_k = float(roi["reflected_c"]) + 273.15 if "reflected_c" in roi else trefl_cam
+    return recorrect_celsius(
+        field, rbf, eps_cam=eps_cam, trefl_cam_k=trefl_cam, eps=eps, trefl_k=trefl_k
+    )
 
 
 def _line_pixels(x0: int, y0: int, x1: int, y1: int) -> list[tuple[int, int]]:
@@ -104,8 +142,10 @@ def roi_index(roi: dict[str, Any], w: int, h: int) -> tuple[np.ndarray, np.ndarr
         pts = [(int(roi["x"]), int(roi["y"]))]
     elif kind == "circle":
         cx, cy, r = roi["cx"], roi["cy"], roi["r"]
-        ys, xs = np.mgrid[max(0, int(np.floor(cy - r))) : min(h, int(np.ceil(cy + r)) + 1),
-                          max(0, int(np.floor(cx - r))) : min(w, int(np.ceil(cx + r)) + 1)]
+        ys, xs = np.mgrid[
+            max(0, int(np.floor(cy - r))) : min(h, int(np.ceil(cy + r)) + 1),
+            max(0, int(np.floor(cx - r))) : min(w, int(np.ceil(cx + r)) + 1),
+        ]
         m = (xs - cx) ** 2 + (ys - cy) ** 2 <= r * r
         return ys[m], xs[m]
     elif kind == "line":
@@ -164,6 +204,7 @@ def roi_series(
             fmt = None
     except ValueError:
         fmt = None
+    cam = reader.metadata.get("camera")
     acc: dict[int, dict[str, np.ndarray]] = {}
     for r in rois:
         keys = ("value",) if r["kind"] == "spot" else ("min", "max", "mean")
@@ -171,9 +212,10 @@ def roi_series(
     for start in range(0, n, max(1, batch)):
         stop = min(n, start + batch)
         block = reader.counts_block(start, stop)
-        field = counts_to_celsius(block, fmt) if fmt is not None else block.astype(np.float64)
-        _, h, w = field.shape
+        field0 = counts_to_celsius(block, fmt) if fmt is not None else block.astype(np.float64)
+        _, h, w = field0.shape
         for r in rois:
+            field = roi_field(field0, r, cam, fmt is not None)
             dst = acc[r["id"]]
             if r["kind"] == "spot":
                 if 0 <= r["x"] < w and 0 <= r["y"] < h:
@@ -203,4 +245,4 @@ def roi_series(
     }
 
 
-__all__ = ["MAX_ROIS", "parse_rois", "roi_index", "roi_series"]
+__all__ = ["MAX_ROIS", "parse_rois", "roi_field", "roi_index", "roi_series"]

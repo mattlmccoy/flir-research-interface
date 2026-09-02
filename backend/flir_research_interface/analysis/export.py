@@ -48,6 +48,19 @@ def _linear_format(reader: ExperimentReader) -> IRFormat | None:
 
 
 def _roi_desc(r: dict[str, Any]) -> str:
+    return _roi_geom(r) + _roi_optics(r)
+
+
+def _roi_optics(r: dict[str, Any]) -> str:
+    parts = []
+    if "emissivity" in r:
+        parts.append(f"emissivity={r['emissivity']:g}")
+    if "reflected_c" in r:
+        parts.append(f"reflected_c={r['reflected_c']:g}")
+    return f" [{', '.join(parts)}]" if parts else ""
+
+
+def _roi_geom(r: dict[str, Any]) -> str:
     k = r["kind"]
     if k == "spot":
         return f"S{r['id']}: spot x={r['x']} y={r['y']}"

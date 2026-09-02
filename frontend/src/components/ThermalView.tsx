@@ -1,3 +1,4 @@
+import type { Radiometry } from "../lib/emissivity.ts";
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as RKeyboardEvent, PointerEvent as RPointerEvent, ReactNode } from "react";
 import type { FrameMessage } from "../lib/protocol.ts";
@@ -37,6 +38,8 @@ interface Props {
   topLayer?: ReactNode;
   /** Called with per-ROI statistics every time a frame or the ROI set changes. */
   onStats?: (stats: StatsMap, frame: FrameMessage) => void;
+  /** Camera constants for per-ROI emissivity correction (null: ROI emissivity is ignored). */
+  rad?: Radiometry | null;
 }
 
 /** The shape a drag from `a` to `b` produces for the active tool (null when degenerate). */
@@ -56,7 +59,7 @@ export function dragShape(tool: Tool, a: Pt, b: Pt, w: number, h: number): RoiIn
 }
 
 /** Renders raw counts -> °C -> palette on a canvas, with an ROI overlay layer. Data arrays are never mutated. */
-export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois = NO_ROIS, selected = null, tool = "select", zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats }: Props) {
+export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois = NO_ROIS, selected = null, tool = "select", zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null }: Props) {
   const viewRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const celsiusRef = useRef<Float32Array | null>(null);
@@ -113,10 +116,10 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
     const c = celsiusRef.current;
     if (!frame || !c) return;
     const m: StatsMap = new Map();
-    for (const r of rois) m.set(r.id, roiStats(c, frame.header.width, frame.header.height, r));
+    for (const r of rois) m.set(r.id, roiStats(c, frame.header.width, frame.header.height, r, rad));
     setStats(m);
     onStats?.(m, frame);
-  }, [frame, rois, onStats]);
+  }, [frame, rois, onStats, rad]);
 
   function pix(e: { currentTarget: HTMLCanvasElement; clientX: number; clientY: number }): Pt | null {
     if (!hdr) return null;

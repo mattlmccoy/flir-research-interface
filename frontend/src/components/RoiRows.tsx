@@ -42,6 +42,12 @@ function ColorPicker({ r, i, dispatch, onDone }: { r: Roi; i: number; dispatch: 
       ))}
       <input type="color" aria-label="custom colour" value={r.color ?? "#ffffff"} title="any colour"
         onChange={(e) => dispatch({ type: "recolor", id: r.id, color: e.target.value })} />
+      <span className="hint" style={{ flexBasis: "100%", display: "flex", gap: 6, alignItems: "center", marginTop: 4 }} title="Per-ROI optics: this ROI's values are re-corrected from the camera's global emissivity / reflected temperature using the camera's own R, B, F constants (FLIR signal model, atmosphere ≈ 1). Leave blank to use the camera's setting.">
+        ε <input type="number" min={0.01} max={1} step={0.01} value={r.emissivity ?? ""} placeholder="camera" style={{ width: 64 }} aria-label={`emissivity of ${roiLabel(r)}`}
+          onChange={(e) => dispatch({ type: "setOptics", id: r.id, emissivity: e.target.value === "" ? null : Number(e.target.value) })} />
+        T<sub>refl</sub> <input type="number" step={0.5} value={r.reflected_c ?? ""} placeholder="camera" style={{ width: 64 }} aria-label={`reflected temperature of ${roiLabel(r)} in °C`}
+          onChange={(e) => dispatch({ type: "setOptics", id: r.id, reflected_c: e.target.value === "" ? null : Number(e.target.value) })} /> °C
+      </span>
     </div>
   );
 }
@@ -59,7 +65,7 @@ export function RoiRows({ rois, stats, selected, dispatch }: Props) {
         <li>╱ Line: drag from one end to the other; the pixels along it are measured.</li>
         <li>⬠ Polygon: click each vertex; double-click places the last one and closes the shape (Enter closes, Esc cancels, Backspace undoes a vertex).</li>
         <li>↖ Select: click an ROI, then drag to move it; Delete removes it.</li>
-        <li>Click the colour square to recolour; double-click the name to rename; ◉ hides an ROI on the image without removing it.</li>
+        <li>Click the colour square to recolour, set a per-ROI emissivity and reflected temperature (values are re-corrected from the camera's setting); double-click the name to rename; ◉ hides an ROI on the image and plot without removing it.</li>
       </ul>
     </Disclosure>
   );
@@ -79,7 +85,7 @@ export function RoiRows({ rois, stats, selected, dispatch }: Props) {
               ) : (
                 <button type="button" className="lbl" style={{ border: "none", padding: 0 }} aria-pressed={selected === r.id}
                   onClick={() => dispatch({ type: "select", id: selected === r.id ? null : r.id })} onDoubleClick={() => setEditing(r.id)} title={`${where(r)} · double-click to rename`}>
-                  {roiLabel(r)}{r.name ? <small className="muted"> {roiId(r)}</small> : null}
+                  {roiLabel(r)}{r.name ? <small className="muted"> {roiId(r)}</small> : null}{r.emissivity !== undefined ? <small className="muted" title={`per-ROI emissivity ${r.emissivity}`}> ε{r.emissivity}</small> : null}
                 </button>
               )}
             </span>,

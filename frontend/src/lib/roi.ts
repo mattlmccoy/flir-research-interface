@@ -1,3 +1,4 @@
+import { recorrectCelsius, type Radiometry } from "./emissivity.ts";
 /**
  * Regions of interest (spec §3, Milestone 6): spots and half-open rectangles in image pixel
  * coordinates (x = column, y = row, origin top-left). Statistics mirror backend
@@ -5,7 +6,16 @@
  */
 
 /** Optional presentation fields every ROI may carry. */
-interface Meta { name?: string; color?: string; /** Not drawn and not selectable; still measured, recorded and exported. */ hidden?: boolean; }
+interface Meta {
+  name?: string;
+  color?: string;
+  /** Not drawn and not selectable; still measured, recorded and exported. */
+  hidden?: boolean;
+  /** Per-ROI emissivity (0.01–1); values are re-corrected from the camera's global setting. */
+  emissivity?: number;
+  /** Per-ROI reflected temperature in °C (defaults to the camera's setting). */
+  reflected_c?: number;
+}
 export interface Spot extends Meta { id: number; kind: "spot"; x: number; y: number; }
 export interface Rect extends Meta { id: number; kind: "rect"; x0: number; y0: number; x1: number; y1: number; }
 /** Disc of radius r (pixels) around (cx, cy); a pixel belongs when its centre is within r. */
@@ -30,6 +40,7 @@ export type RoiAction =
   | { type: "rename"; id: number; name: string }
   | { type: "recolor"; id: number; color: string | null }
   | { type: "toggleHidden"; id: number }
+  | { type: "setOptics"; id: number; emissivity?: number | null; reflected_c?: number | null }
   | { type: "setHiddenAll"; hidden: boolean }
   | { type: "replace"; rois: Roi[] }
   | { type: "clear" };
@@ -74,6 +85,17 @@ export function roiReducer(s: RoiState, a: RoiAction): RoiState {
       return patch(s, a.id, (r) => { const name = a.name.trim(); const { name: _old, ...rest } = r; return name ? { ...rest, name } as Roi : rest as Roi; });
     case "recolor":
       return patch(s, a.id, (r) => { const { color: _old, ...rest } = r; return a.color ? { ...rest, color: a.color } as Roi : rest as Roi; });
+    case "setOptics":
+      return patch(s, a.id, (r) => {
+        const { emissivity: e0, reflected_c: t0, ...rest } = r;
+        const next: Roi = rest as Roi;
+        const e = a.emissivity === undefined ? e0 : a.emissivity;
+        const t = a.reflected_c === undefined ? t0 : a.reflected_c;
+        if (typeof e === "number" && e > 0 && e <= 1) next.emissivity = e;
+        else if (e !== null && e0 !== undefined) next.emissivity = e0;
+        if (typeof t === "number" && Number.isFinite(t)) next.reflected_c = t;
+        return next;
+      });
     case "toggleHidden": {
       const next = patch(s, a.id, (r) => { const { hidden, ...rest } = r; return hidden ? rest as Roi : { ...rest, hidden: true } as Roi; });
       return next.rois.find((r) => r.id === a.id)?.hidden && s.selected === a.id ? { ...next, selected: null } : next;
@@ -173,10 +195,13 @@ export function roiPixels(roi: Roi, w: number, h: number): number[] {
 }
 
 /** Statistics of `field` (row-major w×h) inside `roi`. Out-of-image pixels count as absent. */
-export function roiStats(field: Float32Array, w: number, h: number, roi: Roi): RoiStats {
+export function roiStats(field: Float32Array, w: number, h: number, roi: Roi, rad?: Radiometry | null): RoiStats {
   let n = 0, nan = 0, min = Infinity, max = -Infinity, sum = 0;
+  const eps = roi.emissivity;
+  const correct = rad && eps !== undefined && eps > 0 && eps <= 1;
+  const treflK = (roi.reflected_c ?? (rad ? rad.treflCamK - 273.15 : 0)) + 273.15;
   for (const k of roiPixels(roi, w, h)) {
-    const v = field[k];
+    const v = correct ? recorrectCelsius(field[k], rad, eps, treflK) : field[k];
     if (Number.isNaN(v)) { nan++; continue; }
     n++; sum += v;
     if (v < min) min = v;
@@ -208,6 +233,8 @@ function asRoi(v: unknown): Roi | null {
   if (typeof r.name === "string" && r.name.trim()) meta.name = r.name.trim().slice(0, 40);
   if (typeof r.color === "string" && HEX.test(r.color)) meta.color = r.color.toLowerCase();
   if (r.hidden === true) meta.hidden = true;
+  if (typeof r.emissivity === "number" && r.emissivity > 0 && r.emissivity <= 1) meta.emissivity = r.emissivity;
+  if (typeof r.reflected_c === "number" && Number.isFinite(r.reflected_c)) meta.reflected_c = r.reflected_c;
   let shape: Roi | null = null;
   if (r.kind === "spot" && isInt(r.x) && isInt(r.y)) shape = { id: r.id, kind: "spot", x: r.x, y: r.y };
   else if (r.kind === "rect" && isInt(r.x0) && isInt(r.y0) && isInt(r.x1) && isInt(r.y1) && r.x1 > r.x0 && r.y1 > r.y0) {

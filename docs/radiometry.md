@@ -142,3 +142,24 @@ these nodes act on this lens. Not part of the MVP.
 1. Software equivalence vs Research Studio at ≥3 temperatures (docs/validation.md).
 2. Out-of-range/saturation encoding (§4).
 3. Behaviour of temperature-linear output during a NUC and a range switch (frame gaps? stale frames?).
+
+
+## Per-ROI emissivity and reflected temperature (2026-09-02)
+
+The camera converts radiance to temperature once, with its global `ObjectEmissivity` and
+`ReflectedTemperature`. An ROI may carry its own `emissivity` (0.01–1) and `reflected_c` (°C);
+its values are then re-corrected, identically in the browser (`lib/emissivity.ts`) and the
+operator (`radiometry/emissivity.py`, used by the series endpoint, `roi_series.csv` and
+`roi_plot.png`), with the FLIR signal model and the camera's own constants R, B, F
+(`metadata.json` → `camera.calibration_constants`):
+
+    W(T)   = R / (exp(B / T) − F)
+    W_meas = ε_cam · W(T_reported) + (1 − ε_cam) · W(T_refl,cam)        (undo the camera)
+    T_obj  = W⁻¹( (W_meas − (1 − ε) · W(T_refl)) / ε )                    (apply the ROI's optics)
+
+Atmospheric transmission is taken as 1 (bench distance; the A70 estimates ≈1 at 0.44 m, 50 % RH).
+The raw counts are never changed; the CSV header lists each ROI's optics
+(`[emissivity=0.5, reflected_c=40]`) so a reader knows which rule produced the numbers. Without
+the camera constants (no `calibration_constants` in the metadata) the per-ROI setting is ignored
+and the camera's value is used unchanged. Reference check in the tests: an object at 60 °C with
+ε = 0.5 viewed by a camera set to ε = 0.95 reads lower; the re-correction recovers 60.000 °C.

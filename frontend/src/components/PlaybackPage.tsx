@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { radiometryFromCamera } from "../lib/emissivity.ts";
+import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import type { Dispatch, ReactNode } from "react";
 import { api, type ExperimentInfo, type RecordingStatus, type RoiSeries, type Status, type Timeline } from "../lib/api.ts";
 import { decodeFrameMessage, type FrameMessage } from "../lib/protocol.ts";
@@ -125,6 +126,7 @@ export function PlaybackPage(p: Props) {
   const hdr = frame?.header;
   const exp = (info?.experiment ?? {}) as Record<string, unknown>;
   const cam = (info?.camera ?? {}) as Record<string, unknown>;
+  const rad = useMemo(() => radiometryFromCamera(info?.camera), [info]);
   const active = cam.active_case as { low_c?: number; high_c?: number } | undefined;
   const markers = info && tl ? eventsToMarkers(info.events ?? [], tl, info.started_utc) : [];
   const hasVideo = !!info?.visible?.file;
@@ -156,7 +158,7 @@ export function PlaybackPage(p: Props) {
       center={
         <div className={`center-split ${p.layout.visibleMode === "side" && hasVideo ? "on" : ""}`}>
           <ThermalView frame={frame} palette={p.palette} scaleMode={p.scaleMode} manual={p.manual} onScale={setShown}
-            rois={p.rois.rois} selected={p.rois.selected} tool={p.layout.tool} zoom={p.layout.zoom} onRoi={p.roiDispatch} onStats={onStats}
+            rois={p.rois.rois} selected={p.rois.selected} tool={p.layout.tool} zoom={p.layout.zoom} onRoi={p.roiDispatch} onStats={onStats} rad={rad}
             overlay={p.layout.visibleMode === "overlay" && hasVideo ? <VisibleVideo plain name={p.name} t={t} playing={playing} speed={speed} /> : undefined} overlayStyle={p.layout.overlay} overlayH={overlayH} />
           {p.layout.visibleMode === "side" && hasVideo && <VisibleVideo big name={p.name} t={t} playing={playing} speed={speed} measuredFps={info?.visible?.measured_fps} />}
         </div>
