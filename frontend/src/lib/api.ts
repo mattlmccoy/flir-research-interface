@@ -89,6 +89,8 @@ export const api = {
   health: () => j<{ status: string; version: string }>(fetch("/api/health")),
   sdk: () => j<Record<string, unknown>>(fetch("/api/setup/sdk")),
   discovery: () => j<Record<string, unknown>>(fetch("/api/setup/discovery")),
+  forceIp: (mac: string, ip: string, subnet_mask: string, gateway = "0.0.0.0") =>
+    j<{ acked: boolean; camera_ip: string | null; reachable_by_sdk: boolean }>(fetch("/api/setup/force-ip", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mac, ip, subnet_mask, gateway }) })),
   devices: (backend: string) => j<Device[]>(fetch(`/api/camera/devices?backend=${encodeURIComponent(backend)}`)),
   status: () => j<Status>(fetch("/api/camera/status")),
   info: () => j<Record<string, unknown>>(fetch("/api/camera/info")),

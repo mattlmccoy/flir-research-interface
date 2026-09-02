@@ -45,6 +45,21 @@ ping -c 2 192.168.7.2
 cd backend && uv run fri-probe --output-dir ../probe_output_a70
 ```
 
+## Camera answers but announces no IP (seen 2026-09-02)
+
+Symptom: the setup page finds the A70 and Spinnaker lists it, but every connect fails with
+"camera is on a wrong subnet" even though the host adapter is on 192.168.7.1/24 and the camera
+answers pings at 192.168.7.2. Raw discovery shows why: the DISCOVERY_ACK carries
+`current_ip 0.0.0.0 / subnet 0.0.0.0` (IP-config bits: persistent + LLA) while the reply itself
+comes from 192.168.7.2. Spinnaker computes `GevDeviceIsWrongSubnet` from the announced address,
+so it refuses. Observed after the USB adapter was unplugged and re-plugged.
+
+Remedy (setup page → "Force IP", or `POST /api/setup/force-ip`): a GigE Vision FORCEIP command
+that assigns the address the camera is already answering from, inside the adapter's subnet.
+The camera acknowledged, announced 192.168.7.2/24 on the next discovery, and the hardware
+tests passed. FORCEIP is temporary (until the camera reboots) and does not alter the persistent
+IP setting; a power cycle of the camera is the other fix.
+
 ## Alternative: change the camera's IP (not done automatically)
 
 Spinnaker's SpinView "Force IP"/persistent-IP settings, or the camera web UI, can move the

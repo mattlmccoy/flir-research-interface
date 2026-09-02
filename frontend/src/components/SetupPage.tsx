@@ -21,6 +21,15 @@ export function SetupPage({ onConnected }: { onConnected: () => void }) {
     setBusy("connecting"); setErr(null);
     try { await api.connect(backend, serial); onConnected(); } catch (e) { setErr(String(e)); } finally { setBusy(null); }
   }
+  const [forceResult, setForceResult] = useState<string | null>(null);
+  async function forceIp(mac: string, f: { ip: string; subnet_mask: string; gateway: string }) {
+    setBusy("forcing"); setErr(null); setForceResult(null);
+    try {
+      const r = await api.forceIp(mac, f.ip, f.subnet_mask, f.gateway);
+      setForceResult(r.acked ? `camera acknowledged; now ${r.camera_ip ?? "?"}` : "no acknowledgement from the camera; try a power cycle");
+      setDisc(await api.discovery());
+    } catch (e) { setErr(String(e)); } finally { setBusy(null); }
+  }
   useEffect(() => { void load(); }, []);
 
   const pyspinOk = sdk?.pyspin_importable === true;
@@ -57,17 +66,29 @@ export function SetupPage({ onConnected }: { onConnected: () => void }) {
           <span className="muted">Raw GigE Vision discovery on every adapter, then Spinnaker.</span>
         </div>
         {disc && gvcp.length === 0 && spin.length === 0 && <div className="errbox">No camera answered. Check PoE power, cable, and that the adapter link light is on.</div>}
-        {gvcp.map((d, i) => (
-          <div key={i} className={d.reachable_by_sdk ? "row" : "warnbox"}>
-            <div><b>{String(d.manufacturer)} {String(d.model)}</b> fw {String(d.firmware)} at <code>{String(d.camera_ip)}</code> via {String(d.via_interface)} (host {String(d.host_ip)})</div>
-            {!d.reachable_by_sdk && (
-              <div>
-                <div>Wrong subnet: put the host adapter on the camera's subnet, then scan again.</div>
-                <pre>{(d.fix as string[]).join("\n")}</pre>
-              </div>
-            )}
-          </div>
-        ))}
+        {gvcp.map((d, i) => {
+          const force = d.force_ip as { ip: string; subnet_mask: string; gateway: string } | null | undefined;
+          return (
+            <div key={i} className={d.reachable_by_sdk ? "row" : "warnbox"}>
+              <div><b>{String(d.manufacturer)} {String(d.model)}</b> fw {String(d.firmware)} at <code>{String(d.camera_ip)}</code> via {String(d.via_interface)} (host {String(d.host_ip)})</div>
+              {d.problem === "no_ip_announced" && force && (
+                <div>
+                  <div>The camera answers from <code>{force.ip}</code> but announces no IP address (0.0.0.0), so the SDK refuses it. This happens after re-plugging the link. Assign the address it is answering from until its next reboot, or power-cycle the camera.</div>
+                  <div className="row" style={{ marginTop: 6 }}>
+                    <button className="primary" disabled={busy !== null} onClick={() => forceIp(String(d.mac), force)}>{busy === "forcing" ? "Assigning…" : `Force IP ${force.ip}/${force.subnet_mask}`}</button>
+                    {forceResult && <span className="muted">{forceResult}</span>}
+                  </div>
+                </div>
+              )}
+              {d.problem === "wrong_subnet" && (
+                <div>
+                  <div>Wrong subnet: put the host adapter on the camera's subnet, then scan again.</div>
+                  <pre>{(d.fix as string[]).join("\n")}</pre>
+                </div>
+              )}
+            </div>
+          );
+        })}
         {spin.map((d, i) => (
           <div key={`s${i}`} className="row">
             <span>Spinnaker sees <b>{String(d.model)}</b> serial {String(d.serial)} at {String(d.ip_address)}</span>
