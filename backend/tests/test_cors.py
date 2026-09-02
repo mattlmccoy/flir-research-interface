@@ -77,3 +77,17 @@ def test_browser_posts_need_the_client_header(tmp_path: Path) -> None:
         # the operator-served UI is same-origin: Origin equals Host, no header needed
         same = c.post("/api/camera/disconnect", headers={"Origin": "http://testserver"})
         assert same.status_code == 200
+
+
+def test_preflight_allows_put_for_calibration(tmp_path: Path) -> None:
+    with _client(tmp_path) as c:
+        r = c.options(
+            "/api/calibration/visible",
+            headers={
+                "Origin": SITE,
+                "Access-Control-Request-Method": "PUT",
+                "Access-Control-Request-Headers": "x-fri-client, content-type",
+            },
+        )
+        assert r.status_code == 200, r.text
+        assert "PUT" in r.headers["access-control-allow-methods"]

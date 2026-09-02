@@ -79,7 +79,7 @@ def install_cross_origin_policy(app: FastAPI, *, site_origin: str | None) -> Non
         CORSMiddleware,
         allow_origins=[site_origin] if site_origin else [],
         allow_origin_regex=LOCAL_ORIGIN_RE,
-        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["content-type", CLIENT_HEADER, "if-none-match"],
         expose_headers=["etag", "content-disposition"],
         allow_private_network=True,  # Chrome Local Network Access preflight

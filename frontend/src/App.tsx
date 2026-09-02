@@ -52,7 +52,13 @@ export function App() {
     api.getAlignment().then((doc) => { const a = parseAlignment(doc); if (a.H) alignDispatch({ type: "adopt", state: a }); }).catch(() => undefined);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   async function saveAlignmentToOperator(): Promise<string> {
-    await api.putAlignment(serializeAlignment(align));
+    try {
+      await api.putAlignment(serializeAlignment(align));
+    } catch (e) {
+      const msg = String(e);
+      if (/Failed to fetch|404/.test(msg)) throw new Error("the running operator does not have the alignment endpoint yet (restart it on the latest build); the alignment is kept in this browser meanwhile");
+      throw e;
+    }
     return "saved on the operator; future recordings carry it";
   }
 
