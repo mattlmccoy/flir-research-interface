@@ -90,3 +90,14 @@ from events.json as markers. Camera-controls rail section follows as its own ste
 - [ ] Playback: show visible.mp4 beside/overlaid on the thermal image (needs FOV registration)
 
 ## Next: deployment (spec §6) — GitHub Pages site + operator packaging + PWA offline; blocked on the GitHub repo existing (gh repo create refused by the sandbox; user runs it)
+
+## 2026-09-02 (later): camera connect failure fixed on the A70
+- Cause: after re-plugging the USB adapter the camera announced current IP 0.0.0.0 in DISCOVERY_ACK while
+  answering from 192.168.7.2; Spinnaker refused (GevDeviceIsWrongSubnet) and a leaked reference aborted
+  ReleaseInstance. Fix: gvcp.diagnose + FORCEIP (setup page button, POST /api/setup/force-ip); connect
+  releases SDK refs on refusal. Verified: 5/5 hardware tests, live 30 fps in the UI, camera node writes + NUC.
+- Deployment plan progress: operator CORS/private-network/X-FRI-Client + api_version handshake (backend),
+  lib/operator.ts (base URL, handshake). Still to do: api.ts on the operator base + client header, site-mode
+  first-run screen (install operator / detect), PWA manifest + service worker, Pages + CI workflows,
+  operator installers (launchd/systemd/Windows service), SDK install job from the private artifact URL.
+- Disk on the acquisition Mac is ~1-3 GB free: recording refuses below 2 GB.

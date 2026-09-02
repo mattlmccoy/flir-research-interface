@@ -47,3 +47,13 @@ test("valuesFromForm skips null (unknown) fields", () => {
   const base = formFromInfo({});
   assert.deepEqual(valuesFromForm({ ...base, emissivity: 0.8 }, base), { ObjectEmissivity: 0.8 });
 });
+
+test("formFromInfo rounds the camera's float32 noise to display precision", () => {
+  const f = formFromInfo({
+    object_parameters: { ObjectEmissivity: 0.949999988079071, ReflectedTemperature: 293.1499938964844, AtmosphericTemperature: 293.15, ObjectDistance: 1.0000000149, RelativeHumidity: 0.5000000074505806 },
+  });
+  assert.equal(f.emissivity, 0.95);
+  assert.equal(f.reflected_c, 20);
+  assert.equal(f.distance_m, 1);
+  assert.equal(f.humidity_pct, 50);
+});

@@ -29,7 +29,7 @@ recording), and export CSV/TIFF/PNG/NPY/HDF5. What exists:
 | UI system + Studio layout (tokens, tool strip, rail, dock, status bar) | `frontend/src/theme.css`, `frontend/src/components/studio/` | logic tested; verified in browser |
 | Experiment previews + hover-scrub cards + reveal in file manager | `backend/.../analysis/preview.py`, `api/reveal.py`, `frontend/src/components/ExperimentCard.tsx` | tested; verified in browser |
 | ROIs (spot / rectangle), live traces, whole-recording series + event markers (M6) | `frontend/src/lib/roi.ts`, `plot.ts`, `components/ThermalView.tsx`, `TimePlot.tsx`, `backend/.../analysis/series.py` | tested; verified in browser |
-| Camera controls (case, object parameters, NUC mode, frame rate, NUC now; locked while recording) | `backend/.../camera/controls.py`, `frontend/src/components/CameraControls.tsx` | tested on the simulated camera; Spinnaker writes untested on hardware |
+| Camera controls (case, object parameters, NUC mode, frame rate, NUC now; locked while recording) | `backend/.../camera/controls.py`, `frontend/src/components/CameraControls.tsx` | tested; **verified on the A70** (emissivity / reflected temperature written and read back, NUC executed, stream undisturbed) |
 | Exports: ROI series CSV, frame CSV/TIFF/PNG/NPY, whole-run HDF5 (M7) | `backend/.../analysis/export.py`, `frontend/src/components/ExportSection.tsx` | tested |
 | Event marks during recording + post-hoc metadata edits (M8) | `backend/.../recording/metadata.py`, `frontend/src/components/MetadataEditor.tsx` | tested; verified in browser |
 | Visible-camera recorder: ffmpeg stream copy of RTSP `/avc/ch1` beside the thermal store (M9 core) | `backend/.../visible/recorder.py` | tested with a fake ffmpeg; **not yet run against the A70** |

@@ -17,18 +17,24 @@ export interface CameraForm {
 
 function num(v: unknown): number | null { return typeof v === "number" && Number.isFinite(v) ? v : null; }
 function str(v: unknown): string | null { return typeof v === "string" ? v : null; }
-function kToC(v: unknown): number | null { const k = num(v); return k === null ? null : k - KELVIN_OFFSET; }
+/** The camera stores float32; round to the precision the form edits at so 0.95 is not 0.949999988. */
+function round(v: number | null, decimals: number): number | null {
+  if (v === null) return null;
+  const f = 10 ** decimals;
+  return Math.round(v * f) / f;
+}
+function kToC(v: unknown): number | null { const k = num(v); return k === null ? null : round(k - KELVIN_OFFSET, 2); }
 
 export function formFromInfo(info: Record<string, unknown>): CameraForm {
   const obj = (info.object_parameters ?? {}) as Record<string, unknown>;
   const active = (info.active_case ?? {}) as Record<string, unknown>;
   const hum = num(obj.RelativeHumidity);
   return {
-    emissivity: num(obj.ObjectEmissivity),
+    emissivity: round(num(obj.ObjectEmissivity), 3),
     reflected_c: kToC(obj.ReflectedTemperature),
     atmospheric_c: kToC(obj.AtmosphericTemperature),
-    distance_m: num(obj.ObjectDistance),
-    humidity_pct: hum === null ? null : hum * 100,
+    distance_m: round(num(obj.ObjectDistance), 3),
+    humidity_pct: hum === null ? null : round(hum * 100, 1),
     case_index: num(active.index),
     nuc_mode: str(info.nuc_mode),
     ir_frame_rate: str(info.ir_frame_rate),
