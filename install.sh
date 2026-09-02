@@ -20,6 +20,7 @@ if ! command -v brew >/dev/null 2>&1; then
 fi
 
 say "Tools (uv, ffmpeg@6, libomp, libusb, git)"
+export HOMEBREW_NO_AUTO_UPDATE=1
 brew list uv >/dev/null 2>&1 || brew install uv
 brew list ffmpeg@6 >/dev/null 2>&1 || brew install ffmpeg@6
 brew list libomp >/dev/null 2>&1 || brew install libomp
@@ -50,4 +51,13 @@ if [ -n "$WHEEL_TGZ" ] && ! ( cd "$DEST/backend" && uv run python -c "import PyS
 fi
 
 say "Camera credentials + background service"
-( cd "$DEST/backend" && uv run fri-install "$@" )
+# When piped through `curl | bash`, stdin is the script itself: take the prompts from the terminal.
+if [ -t 0 ]; then
+  ( cd "$DEST/backend" && uv run fri-install "$@" )
+else
+  ( cd "$DEST/backend" && uv run fri-install "$@" < /dev/tty )
+fi
+
+say "Done"
+echo "Open https://mattlmccoy.github.io/flir-research-interface/ in this Mac's browser: it will find the"
+echo "operator at http://127.0.0.1:8000 by itself. Re-run this same command any time to update."

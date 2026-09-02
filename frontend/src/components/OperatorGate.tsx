@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { SITE_MODE, api, operatorBase, setOperatorBase, type Health } from "../lib/api.ts";
 import { UI_API_VERSION, checkHandshake, type Handshake } from "../lib/operator.ts";
-import { detectPlatform, installerFor, type Platform } from "../lib/platform.ts";
+import { detectPlatform, installSteps, type Platform } from "../lib/platform.ts";
 
-const RELEASES = "https://github.com/mattlmccoy/flir-research-interface/releases/latest";
+const DOCS = "https://github.com/mattlmccoy/flir-research-interface/blob/main/docs/installation.md";
 const POLL_MS = 2000;
 
 /**
@@ -12,6 +12,20 @@ const POLL_MS = 2000;
  * first-run page (install the operator for this platform, or point at a running one). Once it
  * answers, check the API handshake and render the normal UI against it.
  */
+function CommandBox({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(command); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* selection fallback below */ }
+  };
+  return (
+    <div className="row" style={{ alignItems: "stretch" }}>
+      <input type="text" readOnly value={command} onFocus={(e) => e.currentTarget.select()} aria-label="install command"
+        style={{ flex: 1, minWidth: 320, fontFamily: "var(--font-mono)", fontSize: 12 }} />
+      <button className="primary" onClick={copy}>{copied ? "copied ✓" : "copy"}</button>
+    </div>
+  );
+}
+
 export function OperatorGate({ children }: { children: ReactNode }) {
   const [health, setHealth] = useState<Health | null>(null);
   const [tries, setTries] = useState(0);
@@ -42,25 +56,31 @@ export function OperatorGate({ children }: { children: ReactNode }) {
     );
   }
 
-  const inst = installerFor(platform);
+  const inst = installSteps(platform);
   return (
     <div className="page-body">
       <div className="card">
-        <h2>FLIR Research Interface · operator {health ? "incompatible" : "not detected"}</h2>
+        <h2>FLIR Research Interface · {health ? "operator incompatible" : "set up this computer"}</h2>
         {hs?.level === "refuse" && <div className="errbox">{hs.message}</div>}
-        {!health && (
-          <div className="muted">
-            Looking for the operator at <code>{base}</code>{tries > 0 ? ` (${tries} attempts)` : ""}. The operator is the small local service that
-            talks to the camera; this page keeps polling and continues automatically once it answers.
-          </div>
+        <div className="muted">
+          This website is the whole user interface. It talks to a small <b>operator</b> service on the computer the camera is plugged into.
+          {!health && <> None is answering at <code>{base}</code>{tries > 0 ? ` (checked ${tries}×)` : ""}; this page keeps checking every 2 s and continues by itself.</>}
+        </div>
+        {inst.command ? (
+          <>
+            <div className="hint" style={{ marginTop: 10 }}><b>One command installs everything on this Mac:</b></div>
+            <CommandBox command={inst.command} />
+          </>
+        ) : (
+          <div className="hint" style={{ marginTop: 10 }}><b>{platform === "windows" ? "Windows" : "Linux"}: manual install for now</b> (the one-line installer is macOS only).</div>
         )}
-        <div className="row" style={{ marginTop: 10 }}>
-          <a className="dl" href={inst.url ?? RELEASES} target="_blank" rel="noreferrer">
-            <button className="primary">Install operator · {inst.label}</button>
-          </a>
+        <ol className="help" style={{ marginTop: 8 }}>
+          {inst.steps.map((st, i) => <li key={i}>{st}</li>)}
+        </ol>
+        <div className="row" style={{ marginTop: 6 }}>
+          <a className="dl" href={DOCS} target="_blank" rel="noreferrer">full installation guide</a>
           <a className="dl" href={base} target="_blank" rel="noreferrer">already installed? open the local copy</a>
         </div>
-        <div className="hint" style={{ marginTop: 8 }}>{inst.note}</div>
       </div>
       <div className="card">
         <h2>Operator address</h2>
@@ -68,13 +88,6 @@ export function OperatorGate({ children }: { children: ReactNode }) {
           <input type="text" value={base} style={{ width: 260 }} onChange={(e) => setBase(e.target.value)} aria-label="Operator base URL" />
           <button className="secondary" onClick={() => { setOperatorBase(base); setBase(operatorBase()); setTries(0); }}>use</button>
           <span className="muted">default http://localhost:8000</span>
-        </div>
-      </div>
-      <div className="card">
-        <h2>Manual route</h2>
-        <div className="hint">
-          Clone <code>github.com/mattlmccoy/flir-research-interface</code>, then <code>cd backend && uv sync --extra dev --inexact && uv run fri-serve --backend spinnaker</code>.
-          The Spinnaker SDK and PySpin come from Teledyne (see docs/installation.md); the setup page checks them.
         </div>
       </div>
     </div>
