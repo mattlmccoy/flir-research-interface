@@ -129,3 +129,16 @@ def test_reveal_root_reports_500_when_root_cannot_be_created(tmp_path: Path) -> 
     with TestClient(app) as c:
         r = c.post("/api/experiments/reveal-root")
         assert r.status_code == 500
+
+
+def test_exp_dir_rejects_symlinked_experiment_escaping_root(tmp_path: Path) -> None:
+    root = tmp_path / "experiments"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "metadata.json").write_text("{}")
+    (outside / "preview.png").write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    (root / "escape").symlink_to(outside)
+    with TestClient(create_app(experiments_root=root)) as c:
+        assert c.get("/api/experiments/escape/preview.png").status_code == 400
+        assert c.post("/api/experiments/escape/reveal").status_code == 400

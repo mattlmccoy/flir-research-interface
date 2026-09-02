@@ -299,6 +299,8 @@ def create_app(
         d = root / name
         if not d.is_dir():
             raise HTTPException(404, f"experiment {name!r} not found")
+        if not contained(root, d):
+            raise HTTPException(400, "experiment path is outside the experiments root")
         return d
 
     def _open(name: str) -> ExperimentReader:

@@ -47,7 +47,7 @@ export function RecordPanel({ acquiring }: { acquiring: boolean }) {
     try { await api.recordingStop(); setStatus(await api.recordingStatus()); } catch (e) { setErr(String(e)); } finally { setBusy(false); }
   }
 
-  const low = (status.free_space_gb ?? Infinity) < 5;
+  const low = (status.free_space_gb ?? Infinity) < (status.min_free_gb ?? 2);
 
   return (
     <>
@@ -87,7 +87,7 @@ export function RecordPanel({ acquiring }: { acquiring: boolean }) {
       {status.experiment_dir && <div className="muted" style={{ fontSize: 12, wordBreak: "break-all" }}>{status.experiment_dir}</div>}
       {status.error && <div className="errbox">{status.error}</div>}
       {err && <div className="errbox">{err}</div>}
-      {low && <div className="warnbox">Low disk space: recording needs about 1 GB per minute uncompressed.</div>}
+      {low && <div className="warnbox">Free space is below the recorder's minimum; recording needs about 1 GB per minute uncompressed.</div>}
     </>
   );
 }
