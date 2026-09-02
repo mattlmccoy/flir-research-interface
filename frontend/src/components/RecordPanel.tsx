@@ -120,6 +120,7 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: unk
           <span>Visible</span><span className="v" style={{ color: vis.state === "error" ? "var(--err)" : undefined }}>{vis.state}{vis.error ? ` · ${vis.error}` : ""}</span>
         </>)}
         <span>Rec. dropped</span><span className="v" style={{ color: (status.queue_dropped ?? 0) > 0 ? "var(--err)" : undefined }}>{status.queue_dropped ?? 0}</span>
+        <span title="consecutive frames with identical pixels: the camera repeats its last image during a NUC (~2 s). Kept in the record, logged in events.json as frozen_frames">Frozen frames</span><span className="v" style={{ color: (status.repeated_frames ?? 0) > 0 ? "var(--warn)" : undefined }}>{status.repeated_frames ?? 0}</span>
         <span>Camera gaps</span><span className="v" style={{ color: (status.frame_id_gaps ?? 0) > 0 ? "var(--warn)" : undefined }}>{status.frame_id_gaps ?? 0}</span>
         <span>Free disk</span><span className="v" style={{ color: low ? "var(--err)" : undefined }}>{status.free_space_gb != null ? `${status.free_space_gb.toFixed(1)} GB` : "—"}</span>
       </div>

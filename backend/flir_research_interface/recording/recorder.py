@@ -161,6 +161,10 @@ class Recorder:
         self._frames_written = 0
         self._queue_dropped = 0
         self._gap_events: list[dict[str, int]] = []
+        self._repeated_frames = 0
+        self._frozen_runs: list[dict[str, int]] = []
+        self._open_frozen: dict[str, int] | None = None
+        self._last_counts: Any = None
         self._last_frame_id: int | None = None
         self._last_submitted_id: int | None = None
         self._first_ts: int | None = None
@@ -195,6 +199,7 @@ class Recorder:
                 "queue_depth": self._queue.qsize(),
                 "queue_dropped": self._queue_dropped,
                 "frame_id_gaps": sum(g["missing"] for g in self._gap_events),
+                "repeated_frames": self._repeated_frames,
                 "duration_s": dur,
                 "recorded_fps": (self._frames_written - 1) / dur
                 if dur > 0 and self._frames_written > 1
@@ -418,6 +423,38 @@ class Recorder:
             if self._first_ts is None:
                 self._first_ts = frame.device_timestamp_ns
             self._last_ts = frame.device_timestamp_ns
+            self._account_frozen(frame)
+
+    def _account_frozen(self, frame: Frame) -> None:
+        """The A70 repeats its last image (fresh id + timestamp) while it performs a NUC.
+
+        Identical consecutive frames are kept (the record is what the camera sent) but counted,
+        and each run is logged as one ``frozen_frames`` event once it ends. Lock held by caller.
+        """
+        prev = self._last_counts
+        self._last_counts = frame.counts
+        if (
+            prev is not None
+            and prev.shape == frame.counts.shape
+            and np.array_equal(prev, frame.counts)
+        ):
+            self._repeated_frames += 1
+            if self._open_frozen is None:
+                self._open_frozen = {"first_frame_id": frame.frame_id, "repeats": 0}
+            self._open_frozen["repeats"] += 1
+            self._open_frozen["last_frame_id"] = frame.frame_id
+            return
+        self._close_frozen()
+
+    def _close_frozen(self) -> None:
+        run = self._open_frozen
+        if run is None:
+            return
+        self._open_frozen = None
+        self._frozen_runs.append(run)
+        self._events.append(
+            {"t_utc": datetime.now(timezone.utc).isoformat(), "type": "frozen_frames", **run}
+        )
 
     def _flush(self) -> None:
         with self._lock:
@@ -478,6 +515,8 @@ class Recorder:
 
     def _write_manifest(self) -> dict[str, Any]:
         assert self._exp_dir is not None
+        with self._lock:
+            self._close_frozen()  # a NUC still in progress at stop is still a frozen run
         self._event("recording_stopped", {})
         (self._exp_dir / "events.json").write_text(json.dumps(self._events, indent=2))
         with self._lock:
@@ -495,6 +534,9 @@ class Recorder:
                 "frames_written": self._frames_written,
                 "queue_dropped": self._queue_dropped,
                 "frame_id_gaps": gaps,
+                "repeated_frames": self._repeated_frames,
+                "frozen_runs": len(self._frozen_runs),
+                "frozen_events": self._frozen_runs,
                 "gap_events": list(self._gap_events),
                 "duration_s": dur,
                 "error": self._error,

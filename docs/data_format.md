@@ -77,7 +77,11 @@ experiments/<YYYYMMDD_HHMMSS>_<name>/
                          the ROIs in force (`rois`, with names/colours) and the visible↔IR
                          alignment in force (`visible_alignment`); post-hoc edits append to `edits`
   events.json            recording start/stop, frame gaps, NUCs, operator marks (RF ON/OFF,
-                         custom) each with the frame id it happened at
+                         custom) each with the frame id it happened at, and `frozen_frames`
+                         runs: the A70 repeats its last image (new frame id and timestamp,
+                         identical pixels) for ~2 s while it performs a NUC; those frames are
+                         kept but counted (`repeated_frames`, `frozen_runs` in manifest.json
+                         and the live status) so a flat stretch in a trace is explained
   manifest.json          written at clean stop: frames written, gaps, drops, complete flag,
                          file checksums, visible-video summary
   visible.mp4 + .json    the visible camera (H.264 stream copy) when "visible video" was ticked,
