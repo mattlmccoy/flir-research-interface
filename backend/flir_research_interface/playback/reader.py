@@ -70,6 +70,7 @@ class ExperimentReader:
             "duration_s": float(self._t_s[-1]) if self.n_frames else 0.0,
             "complete": insp["complete"],
             "manifest": self.manifest,
+            "previews": (self.manifest or {}).get("previews"),
             "ir_format": self.ir_format,
             "pixel_format": self.pixel_format,
             "conversion": self.metadata.get("conversion"),

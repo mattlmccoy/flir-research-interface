@@ -329,6 +329,33 @@ def create_app(
         )
         return Response(content=payload, media_type="application/octet-stream")
 
+    def _png_response(path: Path) -> Response:
+        if not path.is_file():
+            raise HTTPException(404, f"{path.name} not generated yet")
+        return Response(
+            content=path.read_bytes(),
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
+    @app.get("/api/experiments/{name}/preview.png")
+    def experiment_preview(name: str) -> Response:
+        return _png_response(_open(name).path / "preview.png")
+
+    @app.get("/api/experiments/{name}/keyframes.png")
+    def experiment_keyframes(name: str) -> Response:
+        return _png_response(_open(name).path / "keyframes.png")
+
+    @app.post("/api/experiments/{name}/previews")
+    async def experiment_regenerate_previews(name: str) -> dict[str, Any]:
+        from flir_research_interface.analysis.preview import generate_previews
+
+        r = _open(name)
+        try:
+            return await run_in_threadpool(generate_previews, r.path)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
     # -- live frames -----------------------------------------------------------------------
 
     @app.websocket("/ws/frames")

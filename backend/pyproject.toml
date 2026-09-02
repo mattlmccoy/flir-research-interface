@@ -31,6 +31,7 @@ fri-sdk-check = "flir_research_interface.sdk_install:main"
 fri-live = "flir_research_interface.validation:main"
 fri-rtsp-check = "flir_research_interface.visible.rtsp:main"
 fri-serve = "flir_research_interface.api.server:main"
+fri-thumbs = "flir_research_interface.thumbs:main"
 
 [build-system]
 requires = ["hatchling"]
