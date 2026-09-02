@@ -168,3 +168,18 @@ def test_recording_without_visible_support_reports_it(tmp_path: Path) -> None:
         assert st["visible"]["state"] == "unavailable"
         c.post("/api/recording/stop")
         c.post("/api/camera/disconnect")
+
+
+def test_default_factory_builds_the_ch1_url_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    from flir_research_interface.visible import recorder as mod
+
+    monkeypatch.setattr(mod, "find_ffprobe", lambda candidates: "/opt/ffmpeg")
+    monkeypatch.setenv("FRI_CAMERA_HOST", "192.168.7.2")
+    monkeypatch.setenv("FRI_RTSP_USER", "rtsp")
+    monkeypatch.setenv("FRI_RTSP_PASSWORD", "p w")
+    factory = mod.default_visible_factory(None)
+    assert factory is not None
+    rec = factory()
+    assert rec.stats()["url"] == "rtsp://rtsp:***@192.168.7.2/avc/ch1"
+    monkeypatch.delenv("FRI_RTSP_USER")
+    assert mod.default_visible_factory(None) is None

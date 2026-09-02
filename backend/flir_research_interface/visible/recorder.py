@@ -193,7 +193,7 @@ def default_visible_factory(dotenv: Path | None = None) -> Callable[[], VisibleR
     if not host or not user:
         logger.warning("visible recorder unavailable: FRI_CAMERA_HOST / FRI_RTSP_USER not set")
         return None
-    url = build_rtsp_url(host, RTSP_PATHS["visible"], user=user, password=password)
+    url = build_rtsp_url(host, RTSP_PATHS["visible_full"], user=user, password=password)
     return lambda: VisibleRecorder(ffmpeg=ffmpeg, url=url)
 
 
