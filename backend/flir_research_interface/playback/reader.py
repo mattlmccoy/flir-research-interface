@@ -89,6 +89,8 @@ class ExperimentReader:
             "started_utc": self.metadata.get("started_utc"),
             "n_events": len(self.events),
             "visible": self.visible,
+            "rois": self.metadata.get("rois"),
+            "visible_alignment": self.metadata.get("visible_alignment"),
         }
 
     def timeline(self) -> dict[str, list[Any]]:

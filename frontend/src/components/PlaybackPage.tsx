@@ -6,7 +6,7 @@ import type { PaletteName } from "../lib/palette.ts";
 import type { Range, ScaleMode } from "../lib/scale.ts";
 import type { LayoutAction, LayoutState } from "../lib/layout.ts";
 import { SPEEDS, clampIndex, nextFrameDelayMs, speedLabel } from "../lib/playback.ts";
-import { roiLabel, type RoiAction, type RoiState } from "../lib/roi.ts";
+import { loadRois, roiLabel, type Roi, type RoiAction, type RoiState } from "../lib/roi.ts";
 import { roiColor } from "../lib/overlay.ts";
 import { eventsToMarkers, nearestIndex } from "../lib/events.ts";
 import { fmtAny, fmtCelsius } from "../lib/format.ts";
@@ -191,6 +191,14 @@ export function PlaybackPage(p: Props) {
                 <span>frame id</span><span className="v plain">{hdr.frame_id}</span>
               </div>
             ) : <div className="muted">loading…</div>}
+            {info?.rois && info.rois.length > 0 && (
+              <div className="row">
+                <button className="secondary" onClick={() => { const parsed = loadRois({ getItem: () => JSON.stringify({ rois: info.rois, nextId: 1 }), setItem: () => undefined } as unknown as Storage); p.roiDispatch({ type: "replace", rois: parsed.rois as Roi[] }); }}>
+                  load this recording's {info.rois.length} ROI{info.rois.length > 1 ? "s" : ""}
+                </button>
+                <span className="hint">as they were when it was recorded (exports/roi_series.csv matches them)</span>
+              </div>
+            )}
             <RoiRows rois={p.rois.rois} stats={stats} selected={p.rois.selected}
               dispatch={p.roiDispatch} />
             {err && <div className="errbox">{err}</div>}

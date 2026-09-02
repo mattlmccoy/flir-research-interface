@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import platform
 import shutil
@@ -98,6 +99,7 @@ class RecordingStartRequest(BaseModel):
     name: str
     metadata: dict[str, Any] = {}
     visible: bool = False
+    rois: list[dict[str, Any]] | None = None
 
 
 class ParametersRequest(BaseModel):
@@ -178,6 +180,19 @@ def create_app(
     def recorder() -> Recorder | None:
         return app.state.recorder  # type: ignore[no-any-return]
 
+    def _export_roi_series(exp_dir: Path) -> None:
+        """Write exports/roi_series.csv for the ROIs stored with the recording (if any)."""
+        from flir_research_interface.analysis.export import series_csv
+
+        reader = ExperimentReader(exp_dir)
+        rois = reader.metadata.get("rois")
+        if not rois or reader.n_frames == 0:
+            return
+        out_dir = exp_dir / "exports"
+        out_dir.mkdir(exist_ok=True)
+        (out_dir / "roi_series.csv").write_text(series_csv(reader, rois))
+        logger.info("wrote %s", out_dir / "roi_series.csv")
+
     def _visible_status() -> dict[str, Any]:
         vis = app.state.visible
         if vis is not None:
@@ -192,9 +207,15 @@ def create_app(
         rec = recorder()
         manifest = None
         if rec is not None:
+            exp_dir = rec.experiment_dir
             if rec.state in (RecorderState.RECORDING, RecorderState.ERROR):
                 manifest = await run_in_threadpool(rec.stop)
             app.state.recorder = None
+            if manifest is not None and exp_dir is not None:
+                try:
+                    await run_in_threadpool(_export_roi_series, exp_dir)
+                except Exception:  # noqa: BLE001 - a convenience file must never fail the finalize
+                    logger.exception("automatic ROI series export failed")
         vis = app.state.visible
         if vis is not None:
             app.state.visible = None
@@ -467,14 +488,29 @@ def create_app(
             svc, experiments_root=app.state.experiments_root, min_free_gb=app.state.min_free_gb
         )
         from flir_research_interface.analysis.calibration import load_alignment
+        from flir_research_interface.analysis.series import parse_rois
 
+        extra: dict[str, Any] = {}
         alignment = load_alignment(app.state.experiments_root)
+        if alignment:
+            extra["visible_alignment"] = alignment
+        if req.rois is not None:
+            try:
+                parsed = parse_rois(json.dumps(req.rois))
+            except ValueError as exc:
+                raise HTTPException(400, f"rois: {exc}") from exc
+            # keep the operator's names/colours alongside the validated geometry
+            by_id = {r["id"]: r for r in req.rois}
+            for r in parsed:
+                src = by_id.get(r["id"], {})
+                if isinstance(src.get("name"), str) and src["name"].strip():
+                    r["name"] = src["name"].strip()[:40]
+                if isinstance(src.get("color"), str):
+                    r["color"] = src["color"]
+            extra["rois"] = parsed
         try:
             exp_dir = await run_in_threadpool(
-                rec.start,
-                name=req.name,
-                metadata=req.metadata,
-                extra={"visible_alignment": alignment} if alignment else None,
+                rec.start, name=req.name, metadata=req.metadata, extra=extra or None
             )
         except RuntimeError as exc:
             raise HTTPException(507 if "free space" in str(exc) else 400, str(exc)) from exc

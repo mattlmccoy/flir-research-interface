@@ -13,7 +13,7 @@ const FIELDS: { key: string; label: string; type?: "number" }[] = [
   { key: "notes", label: "Notes" },
 ];
 
-export function RecordPanel({ acquiring }: { acquiring: boolean }) {
+export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: unknown[] }) {
   const [name, setName] = useState("Run");
   const [meta, setMeta] = useState<Record<string, string>>({ material: "PA12", rf_frequency_mhz: "13.56" });
   const [status, setStatus] = useState<RecordingStatus>({ state: "idle" });
@@ -41,7 +41,7 @@ export function RecordPanel({ acquiring }: { acquiring: boolean }) {
         const v = meta[f.key];
         if (v !== undefined && v !== "") m[f.key] = f.type === "number" ? Number(v) : v;
       }
-      await api.recordingStart(name, m, withVisible && visibleAvailable);
+      await api.recordingStart(name, m, withVisible && visibleAvailable, rois);
       setStatus(await api.recordingStatus());
     } catch (e) { setErr(String(e)); } finally { setBusy(false); }
   }
@@ -108,6 +108,7 @@ export function RecordPanel({ acquiring }: { acquiring: boolean }) {
         </div>
       )}
       <div className="kv">
+        <span>ROIs saved</span><span className="v">{rois.length}</span>
         <span>State</span><span className="v">{recording ? <span className="badge rec">● REC</span> : status.state}</span>
         {recording && (<>
           <span>Written</span><span className="v">{status.frames_written ?? 0} / {status.frames_received ?? 0}</span>

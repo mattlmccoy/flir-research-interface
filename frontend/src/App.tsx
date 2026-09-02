@@ -227,7 +227,7 @@ export function App() {
             <CameraControls info={info} locked={isRecording} onApplied={refreshInfo} />
           </RailSection>
           <RailSection title="recording" open={layout.sections.recording} onToggle={() => dispatch({ type: "toggleSection", section: "recording" })}>
-            <RecordPanel acquiring={status.state === "acquiring"} />
+            <RecordPanel acquiring={status.state === "acquiring"} rois={rois.rois} />
           </RailSection>
           <RailSection title="display" open={layout.sections.display} onToggle={() => dispatch({ type: "toggleSection", section: "display" })} tag="visualization only">
             <DisplayControls palette={palette} setPalette={setPalette} scaleMode={scaleMode} setScaleMode={setScaleMode} manual={manual} setManual={setManual} shown={shown} />

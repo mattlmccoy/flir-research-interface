@@ -196,3 +196,14 @@ test("roiReducer rename and recolor set or clear the optional fields", () => {
   assert.equal(s2.rois[0].color, "#00ff00");
   assert.equal(roiReducer(s2, { type: "recolor", id: 1, color: null }).rois[0].color, undefined);
 });
+
+test("roiReducer replace swaps in a recording's ROI set, keeps ids unique afterwards", () => {
+  const s0 = roiReducer(EMPTY, { type: "add", roi: { kind: "spot", x: 1, y: 1 } });
+  const s = roiReducer(s0, { type: "replace", rois: [
+    { id: 7, kind: "spot", x: 2, y: 2, name: "a" },
+    { id: 9, kind: "rect", x0: 0, y0: 0, x1: 4, y1: 4 },
+  ] });
+  assert.deepEqual(s.rois.map((r) => r.id), [7, 9]);
+  assert.equal(s.selected, null);
+  assert.equal(roiReducer(s, { type: "add", roi: { kind: "spot", x: 0, y: 0 } }).rois[2].id, 10);
+});

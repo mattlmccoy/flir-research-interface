@@ -64,6 +64,34 @@ t_s = (g["device_timestamp_ns"][:] - g["device_timestamp_ns"][0]) / 1e9
 MATLAB (R2025a+): `counts = zarrread("…/thermal.zarr/counts");` then apply the same rule. For older
 MATLAB use the HDF5 export below.
 
+## What one recording contains
+
+```
+experiments/<YYYYMMDD_HHMMSS>_<name>/
+  thermal.zarr/          every radiometric frame, lossless: counts[t,y,x] uint16 (zstd),
+                         frame_id[t], device_timestamp_ns[t], host_timestamp_ns[t]
+  metadata.json          written at start: camera identity + every node that affects the
+                         measurement (case, emissivity, reflected/atmospheric temperature,
+                         distance, humidity, lens, calibration constants), the counts→°C rule,
+                         software version + git commit + host, the operator's experiment fields,
+                         the ROIs in force (`rois`, with names/colours) and the visible↔IR
+                         alignment in force (`visible_alignment`); post-hoc edits append to `edits`
+  events.json            recording start/stop, frame gaps, NUCs, operator marks (RF ON/OFF,
+                         custom) each with the frame id it happened at
+  manifest.json          written at clean stop: frames written, gaps, drops, complete flag,
+                         file checksums, visible-video summary
+  visible.mp4 + .json    the visible camera (H.264 stream copy) when "visible video" was ticked,
+                         with host-clock start/stop, measured fps and hash
+  preview.png, keyframes.png, previews.json   thumbnails (visualization only)
+  exports/roi_series.csv  written automatically at stop: every stored ROI evaluated on every
+                         frame (mean/min/max, or value for spots), in °C
+  exports/<name>.h5      on demand: the whole run as HDF5 for MATLAB / Python
+```
+
+Nothing derived is ever written back into `thermal.zarr`. ROI statistics, plots and exports are
+recomputed from the raw counts, so ROIs can be redrawn after the fact (playback → "load this
+recording's ROIs" restores the recorded set).
+
 ## Exports (Milestone 7)
 
 All exports are derived from the read-only reader; the Zarr store is never modified.

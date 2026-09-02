@@ -29,6 +29,7 @@ export type RoiAction =
   | { type: "move"; id: number; dx: number; dy: number }
   | { type: "rename"; id: number; name: string }
   | { type: "recolor"; id: number; color: string | null }
+  | { type: "replace"; rois: Roi[] }
   | { type: "clear" };
 
 /** The same shape shifted by (dx, dy); shifts are clamped so no coordinate goes below zero. */
@@ -68,6 +69,10 @@ export function roiReducer(s: RoiState, a: RoiAction): RoiState {
       return patch(s, a.id, (r) => { const name = a.name.trim(); const { name: _old, ...rest } = r; return name ? { ...rest, name } as Roi : rest as Roi; });
     case "recolor":
       return patch(s, a.id, (r) => { const { color: _old, ...rest } = r; return a.color ? { ...rest, color: a.color } as Roi : rest as Roi; });
+    case "replace": {
+      const maxId = a.rois.reduce((m, r) => Math.max(m, r.id), 0);
+      return { rois: a.rois, selected: null, nextId: Math.max(s.nextId, maxId + 1) };
+    }
     case "clear":
       return { ...s, rois: [], selected: null };
   }
