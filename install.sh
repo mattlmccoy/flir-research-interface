@@ -46,7 +46,7 @@ say "Python environment"
 ( cd "$DEST/backend" && uv sync --inexact -q )
 
 say "Spinnaker SDK (PySpin)"
-MAC_DMG="${FRI_MAC_DMG:-SpinnakerSDK_FULL_4.4.0.246_arm64.dmg}"
+MAC_DMG="${FRI_MAC_DMG:-Spinnaker-4.4.0.246.dmg}"
 if ! ( cd "$DEST/backend" && uv run python -c "import PySpin" 2>/dev/null ); then
   if [ ! -d /Applications/Spinnaker ]; then
     TMP=$(mktemp -d)

@@ -31,10 +31,10 @@ Publishing the mirror (owner only, from a machine that has the artifacts):
 
 ```bash
 gh release create sdk-4.4.0.246 --prerelease --title "Spinnaker SDK 4.4.0.246 (internal mirror)" --notes "Internal mirror; SDK is Teledyne FLIR's."
-gh release upload sdk-4.4.0.246 vendor/spinnaker/*  SpinnakerSDK_FULL_4.4.0.246_arm64.dmg spinnaker_python-4.4.0.246-cp312-cp312-win_amd64.zip
+gh release upload sdk-4.4.0.246 vendor/spinnaker/*  Spinnaker-4.4.0.246.dmg spinnaker_python-4.4.0.246-cp312-cp312-win_amd64.zip
 ```
 
-Files the scripts look for: `SpinnakerSDK_FULL_4.4.0.246_arm64.dmg` (macOS; override the name
+Files the scripts look for: `Spinnaker-4.4.0.246.dmg` (macOS; override the name
 with `FRI_MAC_DMG`), `spinnaker_python-4.4.0.246-cp312-cp312-macosx_14_0_arm64.tar.gz`,
 `SpinnakerSDK_FULL_4.4.0.246_x64.exe` + `spinnaker_python-4.4.0.246-cp312-cp312-win_amd64.zip`
 (Windows), `spinnaker-4.4.0.246-{focal,jammy,noble}-{amd64,arm64}-pkg.tar.gz` +
