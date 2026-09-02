@@ -116,3 +116,8 @@ from events.json as markers. Camera-controls rail section follows as its own ste
 - [x] Palette/range strip button removed (display lives in the rail); settings/NUC strip buttons removed (they duplicated the open camera section)
 - [x] NUC explained in the camera section (what it does, Automatic vs Off, logged as an event)
 - [x] ROI geometries: circle, line, connected lines (polyline) live + playback + series + CSV; verified on the A70
+
+## 2026-09-02 (late): visible camera placement
+- [x] live preview (MJPEG relay, low latency, watchdog), recorded video in playback, side by side, overlay with registration sliders
+- [ ] served bundle (frontend/dist) is BEHIND source since the overlay commit: rebuild with `npm run build` after the user's experiment (the operator serves dist statically; the running operator does not need a restart for frontend changes)
+- [ ] the rest: operator installers, SDK install job, Research Studio comparison, disk space
