@@ -87,6 +87,7 @@ def install_cross_origin_policy(app: FastAPI, *, site_origin: str | None) -> Non
         max_age=600,
     )
 
+
 FRONTEND_DIST = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 
 
@@ -744,6 +745,21 @@ def create_app(
         from flir_research_interface.analysis.export import export_hdf5
 
         return await run_in_threadpool(export_hdf5, _open(name))
+
+    @app.delete("/api/experiments/{name}")
+    async def delete_experiment(name: str) -> dict[str, str]:
+        """Remove a run folder for good (no trash: the acquisition Mac is short of disk)."""
+        d = _exp_dir(name)
+        rec = recorder()
+        if (
+            rec is not None
+            and rec.experiment_dir is not None
+            and rec.experiment_dir.resolve() == d.resolve()
+        ):
+            raise HTTPException(409, "this run is being recorded right now; stop it first")
+        await run_in_threadpool(shutil.rmtree, d)
+        logger.warning("deleted experiment %s", d)
+        return {"deleted": name}
 
     @app.post("/api/experiments/{name}/export/thermal-video")
     async def export_thermal_video_route(name: str) -> dict[str, Any]:

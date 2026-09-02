@@ -7,6 +7,7 @@ import {
   roiStats,
   loadRois,
   saveRois,
+  visibleRois,
   type Roi,
   type RoiState,
 } from "./roi.ts";
@@ -206,4 +207,25 @@ test("roiReducer replace swaps in a recording's ROI set, keeps ids unique afterw
   assert.deepEqual(s.rois.map((r) => r.id), [7, 9]);
   assert.equal(s.selected, null);
   assert.equal(roiReducer(s, { type: "add", roi: { kind: "spot", x: 0, y: 0 } }).rois[2].id, 10);
+});
+
+test("hide/show: toggleHidden flips one ROI, setHiddenAll sets every ROI, visibleRois filters", () => {
+  let s = roiReducer(EMPTY, { type: "add", roi: { kind: "spot", x: 1, y: 1 } });
+  s = roiReducer(s, { type: "add", roi: { kind: "rect", x0: 0, y0: 0, x1: 2, y1: 2 } });
+  s = roiReducer(s, { type: "toggleHidden", id: 1 });
+  assert.deepEqual(s.rois.map((r) => !!r.hidden), [true, false]);
+  assert.deepEqual(visibleRois(s.rois).map((r) => r.id), [2]);
+  s = roiReducer(s, { type: "toggleHidden", id: 1 });
+  assert.deepEqual(s.rois.map((r) => !!r.hidden), [false, false]);
+  s = roiReducer(s, { type: "setHiddenAll", hidden: true });
+  assert.deepEqual(visibleRois(s.rois), []);
+  assert.equal(s.selected, null, "hiding everything drops the selection");
+  s = roiReducer(s, { type: "setHiddenAll", hidden: false });
+  assert.equal(visibleRois(s.rois).length, 2);
+  // hidden survives a save/load round trip
+  s = roiReducer(s, { type: "toggleHidden", id: 2 });
+  const store = new Map<string, string>();
+  const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); } } as unknown as Storage;
+  saveRois(storage, s);
+  assert.deepEqual(loadRois(storage).rois.map((r) => !!r.hidden), [false, true]);
 });

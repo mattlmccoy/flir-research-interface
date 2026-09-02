@@ -103,6 +103,7 @@ export function RoiOverlay(p: Props) {
     const accent = cssVar("--accent");
     ctx.font = `11px ${cssVar("--font-mono")}`;
     p.rois.forEach((r, i) => {
+      if (r.hidden) return; // keep i so default colours match the rows
       const color = resolve(roiColor(r, i));
       const sel = r.id === p.selected;
       ctx.strokeStyle = color;

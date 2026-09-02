@@ -5,7 +5,7 @@
  */
 
 /** Optional presentation fields every ROI may carry. */
-interface Meta { name?: string; color?: string; }
+interface Meta { name?: string; color?: string; /** Not drawn and not selectable; still measured, recorded and exported. */ hidden?: boolean; }
 export interface Spot extends Meta { id: number; kind: "spot"; x: number; y: number; }
 export interface Rect extends Meta { id: number; kind: "rect"; x0: number; y0: number; x1: number; y1: number; }
 /** Disc of radius r (pixels) around (cx, cy); a pixel belongs when its centre is within r. */
@@ -29,8 +29,13 @@ export type RoiAction =
   | { type: "move"; id: number; dx: number; dy: number }
   | { type: "rename"; id: number; name: string }
   | { type: "recolor"; id: number; color: string | null }
+  | { type: "toggleHidden"; id: number }
+  | { type: "setHiddenAll"; hidden: boolean }
   | { type: "replace"; rois: Roi[] }
   | { type: "clear" };
+
+/** The ROIs that should be drawn and hit-tested. */
+export function visibleRois(rois: Roi[]): Roi[] { return rois.filter((r) => !r.hidden); }
 
 /** The same shape shifted by (dx, dy); shifts are clamped so no coordinate goes below zero. */
 export function moveRoi(roi: Roi, dx: number, dy: number): Roi {
@@ -69,6 +74,12 @@ export function roiReducer(s: RoiState, a: RoiAction): RoiState {
       return patch(s, a.id, (r) => { const name = a.name.trim(); const { name: _old, ...rest } = r; return name ? { ...rest, name } as Roi : rest as Roi; });
     case "recolor":
       return patch(s, a.id, (r) => { const { color: _old, ...rest } = r; return a.color ? { ...rest, color: a.color } as Roi : rest as Roi; });
+    case "toggleHidden": {
+      const next = patch(s, a.id, (r) => { const { hidden, ...rest } = r; return hidden ? rest as Roi : { ...rest, hidden: true } as Roi; });
+      return next.rois.find((r) => r.id === a.id)?.hidden && s.selected === a.id ? { ...next, selected: null } : next;
+    }
+    case "setHiddenAll":
+      return { ...s, rois: s.rois.map((r) => { const { hidden, ...rest } = r; return a.hidden ? { ...rest, hidden: true } as Roi : rest as Roi; }), selected: a.hidden ? null : s.selected };
     case "replace": {
       const maxId = a.rois.reduce((m, r) => Math.max(m, r.id), 0);
       return { rois: a.rois, selected: null, nextId: Math.max(s.nextId, maxId + 1) };
@@ -196,6 +207,7 @@ function asRoi(v: unknown): Roi | null {
   const meta: Meta = {};
   if (typeof r.name === "string" && r.name.trim()) meta.name = r.name.trim().slice(0, 40);
   if (typeof r.color === "string" && HEX.test(r.color)) meta.color = r.color.toLowerCase();
+  if (r.hidden === true) meta.hidden = true;
   let shape: Roi | null = null;
   if (r.kind === "spot" && isInt(r.x) && isInt(r.y)) shape = { id: r.id, kind: "spot", x: r.x, y: r.y };
   else if (r.kind === "rect" && isInt(r.x0) && isInt(r.y0) && isInt(r.x1) && isInt(r.y1) && r.x1 > r.x0 && r.y1 > r.y0) {

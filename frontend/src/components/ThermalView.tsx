@@ -4,7 +4,7 @@ import type { FrameMessage } from "../lib/protocol.ts";
 import { countsToCelsius } from "../lib/radiometry.ts";
 import { buildLut, mapToRgba, type PaletteName } from "../lib/palette.ts";
 import { autoScale, resolveScale, type Range, type ScaleMode } from "../lib/scale.ts";
-import { normalizeRect, roiStats, type Roi, type RoiAction, type RoiInput, type RoiStats } from "../lib/roi.ts";
+import { normalizeRect, roiStats, type Roi, type RoiAction, type RoiInput, type RoiStats, visibleRois } from "../lib/roi.ts";
 import { clientToImage, hitTest, type Box } from "../lib/overlay.ts";
 import type { Tool } from "../lib/layout.ts";
 import { RoiOverlay, type Draft } from "./RoiOverlay.tsx";
@@ -146,7 +146,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
       setDraft(next.length >= 2 ? { kind: "polygon", points: next } : null);
       return;
     }
-    const hit = hitTest(rois, p.x, p.y, HIT_TOL_PX);
+    const hit = hitTest(visibleRois(rois), p.x, p.y, HIT_TOL_PX);
     onRoi({ type: "select", id: hit });
     if (hit !== null) { moving.current = { id: hit, last: p }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ } }
   }

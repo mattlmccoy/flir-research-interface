@@ -27,6 +27,13 @@ export function ExperimentCard({ exp, onOpen, onChanged }: Props) {
     const r = e.currentTarget.getBoundingClientRect();
     setK(keyframeIndex(e.clientX - r.left, r.width, count));
   }
+  async function remove(e: React.MouseEvent) {
+    e.stopPropagation();
+    const ok = window.confirm(`Delete "${exp.name}" for good?\n\nThis removes the whole run folder (thermal.zarr, visible video, exports). There is no undo.`);
+    if (!ok) return;
+    setBusy(true); setNote(null);
+    try { await api.deleteExperiment(exp.name); onChanged(); } catch (err) { setNote(String(err)); } finally { setBusy(false); }
+  }
   async function reveal(e: React.MouseEvent) {
     e.stopPropagation();
     setBusy(true);
@@ -118,6 +125,9 @@ export function ExperimentCard({ exp, onOpen, onChanged }: Props) {
           </button>
           <button className="secondary" disabled={busy || !n || !!exp.error} onClick={exportH5} title="Export the whole recording to HDF5 (in the experiment's exports folder)">
             export
+          </button>
+          <button className="danger" disabled={busy} onClick={remove} title="Delete this run and everything in its folder (no undo)" style={{ marginLeft: "auto" }}>
+            delete
           </button>
         </div>
         {exp.error && <div className="errbox">{exp.error}</div>}

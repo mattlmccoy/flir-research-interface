@@ -59,7 +59,7 @@ export function RoiRows({ rois, stats, selected, dispatch }: Props) {
         <li>╱ Line: drag from one end to the other; the pixels along it are measured.</li>
         <li>⬠ Polygon: click each vertex; double-click places the last one and closes the shape (Enter closes, Esc cancels, Backspace undoes a vertex).</li>
         <li>↖ Select: click an ROI, then drag to move it; Delete removes it.</li>
-        <li>Click the colour square to recolour; double-click the name to rename.</li>
+        <li>Click the colour square to recolour; double-click the name to rename; ◉ hides an ROI on the image without removing it.</li>
       </ul>
     </Disclosure>
   );
@@ -84,12 +84,16 @@ export function RoiRows({ rois, stats, selected, dispatch }: Props) {
               )}
             </span>,
             <Values key={`v${r.id}`} r={r} s={stats.get(r.id)} />,
-            <button key={`x${r.id}`} className="secondary" type="button" onClick={() => dispatch({ type: "remove", id: r.id })} aria-label={`Remove ${roiLabel(r)}`} title="Remove">×</button>,
+            <span key={`x${r.id}`} style={{ display: "flex", gap: 4 }}>
+              <button className="secondary" type="button" onClick={() => dispatch({ type: "toggleHidden", id: r.id })} aria-pressed={!!r.hidden} aria-label={`${r.hidden ? "Show" : "Hide"} ${roiLabel(r)}`} title={r.hidden ? "Hidden on the image (still measured and recorded) · click to show" : "Hide on the image (still measured and recorded)"} style={{ opacity: r.hidden ? 0.5 : 1 }}>{r.hidden ? "◌" : "◉"}</button>
+              <button className="secondary" type="button" onClick={() => dispatch({ type: "remove", id: r.id })} aria-label={`Remove ${roiLabel(r)}`} title="Remove">×</button>
+            </span>,
             picking === r.id ? <div key={`c${r.id}`} style={{ gridColumn: "1 / -1" }}><ColorPicker r={r} i={i} dispatch={dispatch} onDone={() => setPicking(null)} /></div> : null,
           ]
         ))}
       </div>
       <div className="row">
+        <button className="secondary" type="button" onClick={() => dispatch({ type: "setHiddenAll", hidden: !rois.every((r) => r.hidden) })} title="Hide or show every ROI on the image; measurements, recording and exports are unaffected">{rois.every((r) => r.hidden) ? "show all" : "hide all"}</button>
         <button className="secondary" type="button" onClick={() => dispatch({ type: "clear" })}>clear all</button>
       </div>
       {help}
