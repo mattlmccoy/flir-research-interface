@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const themePath = join(here, "..", "theme.css");
+const stylesPath = join(here, "..", "styles.css");
 const indexHtmlPath = join(here, "..", "..", "index.html");
 const fontsDir = join(here, "..", "..", "public", "fonts");
 
@@ -15,6 +16,10 @@ function extractRootBlock(source: string): string {
   const match = source.match(/:root\s*{([^}]*)}/s);
   assert.ok(match, ":root block not found in theme.css");
   return match![1];
+}
+
+function declaredTokens(block: string): string[] {
+  return [...block.matchAll(/(--[a-z0-9-]+)\s*:/gi)].map((m) => m[1]);
 }
 
 const rootBlock = extractRootBlock(css);
@@ -34,11 +39,13 @@ const REQUIRED_TOKENS = [
   "--strip-w", "--rail-w", "--dock-h", "--topbar-h", "--statusbar-h",
 ];
 
-test("theme.css :root defines every design token, and only inside :root", () => {
-  assert.equal(REQUIRED_TOKENS.length, 30, "REQUIRED_TOKENS list itself drifted from theme.css — update it alongside the CSS");
-  for (const token of REQUIRED_TOKENS) {
-    assert.match(rootBlock, new RegExp(`${token}\\s*:`), `${token} missing from :root`);
-  }
+test("theme.css :root defines exactly the spec's token set — nothing missing, nothing untracked", () => {
+  const declared = declaredTokens(rootBlock);
+  assert.deepEqual(
+    [...declared].sort(),
+    [...REQUIRED_TOKENS].sort(),
+    "declared :root tokens must match REQUIRED_TOKENS exactly — update REQUIRED_TOKENS if theme.css intentionally changed",
+  );
 });
 
 test("theme.css self-hosts IBM Plex via @font-face (no Google Fonts URLs)", () => {
@@ -67,4 +74,9 @@ test("index.html sets the app title and links no external Google Fonts", () => {
   const html = readFileSync(indexHtmlPath, "utf8");
   assert.match(html, /<title>FLIR Research Interface<\/title>/);
   assert.doesNotMatch(html, /fonts\.googleapis\.com|fonts\.gstatic\.com/);
+});
+
+test("styles.css defines no :root block (theme.css is the only source of tokens)", () => {
+  const styles = readFileSync(stylesPath, "utf8");
+  assert.doesNotMatch(styles, /:root\s*{/, "styles.css must not re-declare :root — it would shadow theme.css's tokens");
 });

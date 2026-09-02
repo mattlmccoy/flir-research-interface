@@ -25,7 +25,7 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) 
                     <td>{n}</td>
                     <td>{dur != null ? `${dur.toFixed(1)} s` : "—"}</td>
                     <td>{fmt ?? "—"}</td>
-                    <td>{e.complete ? <span style={{ color: "var(--ok)" }}>complete</span> : <span style={{ color: "var(--warn)" }}>INCOMPLETE</span>}</td>
+                    <td>{e.complete ? <span style={{ color: "var(--live)" }}>complete</span> : <span style={{ color: "var(--warn)" }}>INCOMPLETE</span>}</td>
                     <td><button className="primary" disabled={!n} onClick={() => onOpen(e.name)}>Open</button></td>
                   </tr>
                 );
