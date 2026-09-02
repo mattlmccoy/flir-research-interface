@@ -122,6 +122,16 @@ camera's field of view registers to the thermal FOV (needed for any overlay); de
 camera's colour thermal RTSP stream is worth recording as a preview (probably not: we render
 our own from the radiometric data).
 
+### Live preview and an RTSP hang (2026-09-02)
+
+The live preview (`GET /api/visible/live.mjpeg`, `visible/preview.py`) runs one ffmpeg per viewer
+that transcodes `/avc/ch1` to a 640 px, 8 fps MJPEG. A first version re-created the `<img>` URL on
+every render, which opened a new RTSP session per thermal frame; ~40 sessions later the camera's
+GStreamer RTSP server stopped answering DESCRIBE on every path (TCP 554 still accepted
+connections) while GigE streaming and the web UI kept working. The operator now keeps one URL per
+"show", closes the transcode when the viewer leaves, and caps the preview at 2 viewers. The RTSP
+server did not recover by itself within minutes; a camera power cycle restores it.
+
 ## 3. The antenna (Wi-Fi)
 
 Manual §10.5.7.2: the camera radio can be **Off**, **Server mode** (camera is a hotspot at
