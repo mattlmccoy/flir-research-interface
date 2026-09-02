@@ -18,13 +18,15 @@ import { PlotDock } from "./components/studio/PlotDock.tsx";
 import { StatusBar } from "./components/studio/StatusBar.tsx";
 
 type Page = "live" | "setup" | "experiments" | "playback";
-const storage = typeof localStorage !== "undefined" ? localStorage : null;
+const storage = (() => {
+  try { return typeof localStorage !== "undefined" ? localStorage : null; } catch { return null; }
+})();
 
 export function App() {
   const [page, setPage] = useState<Page>("setup");
   const [openExp, setOpenExp] = useState<string | null>(null);
   const [layout, dispatch] = useReducer(layoutReducer, DEFAULT_LAYOUT, () => loadLayout(storage));
-  useEffect(() => saveLayout(storage, layout), [layout]);
+  useEffect(() => { saveLayout(storage, layout); }, [layout]);
 
   const [status, setStatus] = useState<Status>({ state: "disconnected" });
   const [recording, setRecording] = useState<RecordingStatus | null>(null);
@@ -36,7 +38,7 @@ export function App() {
   const [wsFps, setWsFps] = useState(0);
   const [lastFrameAt, setLastFrameAt] = useState(0);
   const fpsCounter = useRef({ n: 0, t: performance.now() });
-  const info = useRef<Record<string, unknown> | null>(null);
+  const [info, setInfo] = useState<Record<string, unknown> | null>(null);
 
   const refresh = useCallback(async () => {
     try { setStatus(await api.status()); } catch { setStatus({ state: "unreachable" }); }
@@ -60,7 +62,7 @@ export function App() {
         if (dt >= 1000) { setWsFps((c.n * 1000) / dt); c.n = 0; c.t = performance.now(); }
       } catch (e) { console.error(e); }
     };
-    api.info().then((i) => { info.current = i; }).catch(() => undefined);
+    api.info().then(setInfo).catch(() => undefined);
     return () => { alive = false; ws.close(); };
   }, [status.state]);
 
@@ -71,22 +73,22 @@ export function App() {
   async function disconnect() { await api.disconnect(); setFrame(null); await refresh(); setPage("setup"); }
 
   const hdr = frame?.header;
-  const cam = info.current ?? {};
+  const cam = info ?? {};
   const active = cam.active_case as { low_c?: number; high_c?: number } | undefined;
   const obj = cam.object_parameters as Record<string, unknown> | undefined;
   const nearLimit = hdr && active && hdr.max_c != null && active.high_c != null && hdr.max_c > active.high_c - 10;
-  const panelsHidden = !layout.strip || !layout.rail || !layout.dock;
+  const allHidden = !layout.strip && !layout.rail && !layout.dock;
 
   const topbar = (
     <>
       <span className="wordmark">FLIR RESEARCH INTERFACE</span>
       <nav className="tabs">
-        <button className={page === "live" ? "active" : ""} onClick={() => setPage("live")}>live</button>
-        <button className={page === "experiments" || page === "playback" ? "active" : ""} onClick={() => setPage("experiments")}>experiments</button>
-        <button className={page === "setup" ? "active" : ""} onClick={() => setPage("setup")}>setup</button>
+        <button className={page === "live" ? "active" : ""} aria-current={page === "live" ? "page" : undefined} onClick={() => setPage("live")}>live</button>
+        <button className={page === "experiments" || page === "playback" ? "active" : ""} aria-current={page === "experiments" || page === "playback" ? "page" : undefined} onClick={() => setPage("experiments")}>experiments</button>
+        <button className={page === "setup" ? "active" : ""} aria-current={page === "setup" ? "page" : undefined} onClick={() => setPage("setup")}>setup</button>
       </nav>
-      <button className="secondary" aria-label="Toggle panels" title={panelsHidden ? "Restore panels" : "Hide panels (image only)"}
-        onClick={() => dispatch({ type: panelsHidden ? "restoreAll" : "collapseAll" })}>⛶</button>
+      <button className="secondary" aria-pressed={allHidden} title={allHidden ? "Restore panels" : "Hide panels (image only)"}
+        onClick={() => dispatch({ type: allHidden ? "restoreAll" : "collapseAll" })}>⛶</button>
       <span className="conn">
         <span className={`dot ${dot}`} />
         <span className="who">{status.device ? `${status.device.model} · ${status.device.serial}` : "no camera"}</span>
@@ -138,7 +140,7 @@ export function App() {
               <span>case</span><span className="v">{active ? `${active.low_c?.toFixed(0)}…${active.high_c?.toFixed(0)} °C` : "—"}</span>
               <span>emissivity</span><span className="v">{fmtAny(obj?.ObjectEmissivity)}</span>
               <span>T reflected</span><span className="v">{kelvin(obj?.ReflectedTemperature)}</span>
-              <span>distance</span><span className="v">{fmtAny(obj?.ObjectDistance)} m</span>
+              <span>distance</span><span className="v">{obj?.ObjectDistance == null ? "—" : `${fmtAny(obj.ObjectDistance)} m`}</span>
               <span>NUC</span><span className="v plain">{fmtAny(cam.nuc_mode)}</span>
               <span>lens</span><span className="v plain">{fmtAny(cam.lens)}</span>
             </div>
