@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_LAYOUT, layoutReducer, loadLayout, saveLayout, type LayoutState } from "./layout.ts";
+import { DEFAULT_LAYOUT, layoutReducer, loadLayout, saveLayout, studioClasses, type LayoutState } from "./layout.ts";
 
 function memStorage(): Storage {
   const m = new Map<string, string>();
@@ -71,4 +71,29 @@ test("a throwing Storage never escapes", () => {
   const bad = { getItem() { throw new Error("SecurityError"); }, setItem() { throw new Error("QuotaExceeded"); } } as unknown as Storage;
   assert.deepEqual(loadLayout(bad), DEFAULT_LAYOUT);
   assert.doesNotThrow(() => saveLayout(bad, DEFAULT_LAYOUT));
+});
+
+test("studioClasses: all panels present and open yields the bare studio class", () => {
+  const r = studioClasses(DEFAULT_LAYOUT, { page: false, hasStrip: true, hasRail: true, hasDock: true });
+  assert.equal(r.className, "studio");
+  assert.equal(r.showStrip, true); assert.equal(r.showRail, true); assert.equal(r.showDock, true);
+});
+
+test("studioClasses: page mode with only a rail hides strip and dock regardless of layout flags", () => {
+  const r = studioClasses(DEFAULT_LAYOUT, { page: true, hasStrip: true, hasRail: true, hasDock: true });
+  assert.equal(r.className, "studio page no-strip no-dock");
+  assert.equal(r.showRail, true);
+});
+
+test("studioClasses: rail hidden by caller (no rail content) reports no-rail", () => {
+  const r = studioClasses(DEFAULT_LAYOUT, { page: false, hasStrip: true, hasRail: false, hasDock: true });
+  assert.match(r.className, /\bno-rail\b/);
+  assert.equal(r.showRail, false);
+});
+
+test("studioClasses: strip content present but layout.strip closed reports no-strip", () => {
+  const closed: LayoutState = { ...DEFAULT_LAYOUT, strip: false };
+  const r = studioClasses(closed, { page: false, hasStrip: true, hasRail: true, hasDock: true });
+  assert.match(r.className, /\bno-strip\b/);
+  assert.equal(r.showStrip, false);
 });

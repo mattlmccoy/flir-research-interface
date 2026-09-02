@@ -13,6 +13,24 @@ export interface LayoutState {
   sections: Record<Section, boolean>;
 }
 
+/**
+ * Computes the Studio grid's className and per-panel visibility from layout flags and which
+ * slots actually have content. A panel only shows when both the layout flag is open AND the
+ * caller supplied content for it (`has*`); `page` mode always suppresses strip and dock.
+ */
+export function studioClasses(
+  layout: LayoutState,
+  opts: { page: boolean; hasStrip: boolean; hasRail: boolean; hasDock: boolean },
+): { className: string; showStrip: boolean; showRail: boolean; showDock: boolean } {
+  const { page, hasStrip, hasRail, hasDock } = opts;
+  const showStrip = !page && layout.strip && hasStrip;
+  const showRail = layout.rail && hasRail;
+  const showDock = !page && layout.dock && hasDock;
+  const className = ["studio", page ? "page" : "", showStrip ? "" : "no-strip", showRail ? "" : "no-rail", showDock ? "" : "no-dock"]
+    .filter(Boolean).join(" ");
+  return { className, showStrip, showRail, showDock };
+}
+
 export const DEFAULT_LAYOUT: LayoutState = {
   strip: true,
   rail: true,

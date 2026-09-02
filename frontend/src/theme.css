@@ -23,11 +23,15 @@
   --live: #5cff8a;
   --live-glow: 0 0 8px rgba(92, 255, 138, 0.7);
   --live-glow-dim: 0 0 3px rgba(92, 255, 138, 0.4);
+  --live-bg: rgba(92, 255, 138, 0.12);
   --warn: var(--accent);
   --warn-bg: rgba(255, 180, 84, 0.10);
   --err: #ff5f56;
   --err-bg: rgba(255, 95, 86, 0.12);
   --rec: var(--err);
+  --image-bg: #000;
+  --scrim: rgba(11, 14, 18, 0.85);
+  --danger-ink: #ffffff;
   --font-ui: "IBM Plex Sans", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --fs: 13px;

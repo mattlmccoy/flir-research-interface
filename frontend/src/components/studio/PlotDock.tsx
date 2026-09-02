@@ -7,7 +7,7 @@ export function PlotDock({ title = "temperature vs time", onCollapse, children }
     <div className="dock">
       <div className="dock-head">
         <span>{title}</span>
-        <button className="secondary" style={{ marginLeft: "auto", padding: "0 6px" }} onClick={onCollapse} title="Collapse dock">▾</button>
+        <button className="secondary" aria-label="Collapse dock" title="Collapse dock" onClick={onCollapse}>▾</button>
       </div>
       <div className="dock-body">{children ?? <span>plots arrive with ROIs (Milestone 6)</span>}</div>
     </div>

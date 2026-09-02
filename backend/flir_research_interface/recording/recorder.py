@@ -201,6 +201,7 @@ class Recorder:
                 "free_space_gb": self._free_space_gb(self._exp_dir or self._root)
                 if self._root
                 else None,
+                "min_free_gb": self._min_free_gb,
                 "error": self._error,
             }
 

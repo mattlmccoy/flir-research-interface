@@ -62,6 +62,7 @@ def test_record_from_simulated_service_writes_every_frame(tmp_path: Path) -> Non
     st = rec.stats()
     assert summary["frames_written"] == st["frames_received"] > 0
     assert st["queue_dropped"] == 0
+    assert st["min_free_gb"] == 2.0  # default guard threshold surfaces to the frontend too
     g = zarr.open_group(str(exp_dir / "thermal.zarr"), mode="r")
     counts = g["counts"]
     assert counts.shape == (summary["frames_written"], H, W) and counts.dtype == np.uint16
