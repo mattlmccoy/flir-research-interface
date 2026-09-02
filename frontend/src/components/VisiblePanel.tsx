@@ -11,7 +11,9 @@ type Props =
  * the thermal cursor (host-clock alignment, ~tens of ms; not frame-exact).
  */
 export function VisiblePanel(p: Props) {
-  const [on, setOn] = useState(false);
+  // One stable URL per "show": a changing src would restart the stream (and its ffmpeg) on every render.
+  const [src, setSrc] = useState<string | null>(null);
+  const on = src !== null;
   const [err, setErr] = useState<string | null>(null);
   const video = useRef<HTMLVideoElement>(null);
 
@@ -34,12 +36,12 @@ export function VisiblePanel(p: Props) {
     return (
       <>
         <div className="row">
-          <button className={on ? "danger" : "secondary"} onClick={() => { setOn(!on); setErr(null); }}>{on ? "stop preview" : "show visible camera"}</button>
+          <button className={on ? "danger" : "secondary"} onClick={() => { setSrc(on ? null : `${api.visibleLiveUrl()}?t=${Date.now()}`); setErr(null); }}>{on ? "stop preview" : "show visible camera"}</button>
           <span className="hint">RTSP /avc/ch1 → MJPEG 640 px, ~8 fps (the camera limits it while the thermal stream runs)</span>
         </div>
         {on && (
           <div className="visible-box">
-            <img src={`${api.visibleLiveUrl()}?t=${Date.now()}`} alt="visible camera" onError={() => setErr("stream ended or the camera refused the RTSP connection")} />
+            <img src={src} alt="visible camera" onError={() => setErr("stream ended or the camera refused the RTSP connection")} />
           </div>
         )}
         {err && <div className="errbox">{err}</div>}

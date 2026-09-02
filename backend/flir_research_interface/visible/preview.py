@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 BOUNDARY = "ffmpeg"  # ffmpeg's mpjpeg muxer uses this boundary string
 CHUNK = 64 * 1024
+MAX_VIEWERS = 2  # each viewer is one ffmpeg transcode on the operator
 
 
 def mjpeg_command(ffmpeg: str, url: str, *, fps: int = 8, width: int = 640) -> list[str]:
@@ -52,30 +53,37 @@ class MjpegRelay:
     def __init__(self, *, cmd: list[str], popen: Callable[..., Any] = subprocess.Popen) -> None:
         self._cmd = cmd
         self._popen = popen
+        self._proc: Any = None
+        self._closed = False
+
+    def close(self) -> None:
+        """Stop the transcode (idempotent). Called when the viewer disconnects."""
+        self._closed = True
+        proc = self._proc
+        if proc is None:
+            return
+        try:
+            proc.terminate()
+            try:
+                proc.wait(timeout=3.0)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=3.0)
+        except (OSError, ValueError):
+            pass
 
     def stream(self) -> Iterator[bytes]:
-        proc = self._popen(
+        self._proc = self._popen(
             self._cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
         )
         try:
-            while True:
-                chunk = proc.stdout.read(CHUNK)
+            while not self._closed:
+                chunk = self._proc.stdout.read(CHUNK)
                 if not chunk:
                     break
                 yield chunk
         finally:
-            try:
-                if proc.poll() is None:
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=3.0)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                        proc.wait(timeout=3.0)
-                else:
-                    proc.terminate()
-            except (OSError, ValueError):
-                pass
+            self.close()
 
 
 def default_preview_factory(dotenv: Path | None = None) -> Callable[[], MjpegRelay] | None:

@@ -406,17 +406,32 @@ def create_app(
     @app.get("/api/visible/live.mjpeg")
     def visible_live() -> Response:
         """Low-rate MJPEG of the visible camera; one ffmpeg per viewer, killed on disconnect."""
+        from starlette.background import BackgroundTask
         from starlette.responses import StreamingResponse
+
+        from flir_research_interface.visible.preview import MAX_VIEWERS
 
         if preview_factory is None:
             raise HTTPException(
                 503, "visible preview unavailable: ffmpeg or RTSP credentials not configured"
             )
+        viewers: set[Any] = app.state.__dict__.setdefault("preview_viewers", set())
+        for stale in [v for v in viewers if getattr(v, "_closed", False)]:
+            viewers.discard(stale)
+        if len(viewers) >= MAX_VIEWERS:
+            raise HTTPException(409, f"visible preview already open in {MAX_VIEWERS} viewers")
         relay = preview_factory()
+        viewers.add(relay)
+
+        def _done() -> None:
+            relay.close()
+            viewers.discard(relay)
+
         return StreamingResponse(
             relay.stream(),
             media_type=relay.content_type,
             headers={"Cache-Control": "no-store"},
+            background=BackgroundTask(_done),
         )
 
     # -- recording -------------------------------------------------------------------------

@@ -112,3 +112,23 @@ def test_live_preview_endpoint_streams_from_the_factory(tmp_path: Path) -> None:
             assert r.headers["content-type"].startswith("multipart/x-mixed-replace")
             body = b"".join(r.iter_bytes())
         assert b"JPEG1" in body
+
+
+def test_relay_close_terminates_the_process_even_while_streaming() -> None:
+    class Blocking(FakeStream):
+        def __init__(self) -> None:
+            super().__init__([b"--ffmpeg\r\nJPEG"])
+
+    proc = Blocking()
+    relay = MjpegRelay(cmd=["x"], popen=lambda *a, **k: proc)
+    gen = relay.stream()
+    next(gen)  # process started, first chunk out
+    relay.close()
+    assert proc.killed is True
+    assert list(gen) == []  # a closed relay yields nothing more
+
+
+def test_live_preview_is_capped_to_a_few_viewers(tmp_path: Path) -> None:
+    from flir_research_interface.visible.preview import MAX_VIEWERS
+
+    assert 1 <= MAX_VIEWERS <= 4

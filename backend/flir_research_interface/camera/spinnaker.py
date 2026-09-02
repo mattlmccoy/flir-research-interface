@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import time
+import traceback
 from collections.abc import Iterator
 from typing import Any
 
@@ -388,23 +389,54 @@ class SpinnakerCameraBackend(CameraBackend):
             )
         except (ps.SpinnakerException, CameraError) as exc:
             # Drop every SDK reference *before* re-raising: a traceback that still pins `cam`
-            # makes Spinnaker abort the process on ReleaseInstance ("something still holds a
-            # reference to the camera", -1004).
+            # (or a node pointer in a callee's frame) makes Spinnaker abort the whole process on
+            # ReleaseInstance ("something still holds a reference to the camera", -1004).
+            message = str(exc)
+            is_camera_error = isinstance(exc, CameraError)
+            traceback.clear_frames(exc.__traceback__)
+            if self._cam is not None:  # Init() succeeded before the failure: undo it
+                try:
+                    self._cam.DeInit()
+                except ps.SpinnakerException:
+                    pass
             self._cam = None
+            self._nodemap = None
+            self._stream_nodemap = None
             cam = None
             c = None  # noqa: F841 - the loop variable still points at the matched camera
             tl = None  # noqa: F841 - deliberately clear the local
             self._cam_list.Clear()
             self._cam_list = None
             self._release_system()
-            if isinstance(exc, CameraError):
-                raise CameraError(str(exc)) from None
-            raise CameraError(f"Spinnaker: {exc}") from None
+            if is_camera_error:
+                raise CameraError(message) from None
+            raise CameraError(f"Spinnaker: {message}") from None
+
+    def _stop_stale_acquisition(self) -> bool:
+        """A previous owner that died (killed operator) can leave the camera streaming, which
+        locks PixelFormat/IRFormat. Sending AcquisitionStop releases them. True if sent."""
+        ps, nm = self._ps, self._nodemap
+        try:
+            node = nm.GetNode("AcquisitionStop")
+            if node is None or not ps.IsWritable(node):
+                return False
+            ps.CCommandPtr(node).Execute()
+            logger.warning("camera was still streaming for a previous owner; sent AcquisitionStop")
+            return True
+        except ps.SpinnakerException as exc:
+            logger.warning("AcquisitionStop failed: %s", exc)
+            return False
 
     def _configure(self) -> None:
         ps, nm = self._ps, self._nodemap
         if self._ir_format is not None:
-            prev = _set_enum(ps, nm, "PixelFormat", self._pixel_format)
+            try:
+                prev = _set_enum(ps, nm, "PixelFormat", self._pixel_format)
+            except CameraError:
+                if not self._stop_stale_acquisition():
+                    raise
+                time.sleep(0.3)
+                prev = _set_enum(ps, nm, "PixelFormat", self._pixel_format)
             if prev != self._pixel_format:
                 self._restore_values.append(("PixelFormat", prev))
             prev = _set_enum(ps, nm, "IRFormat", self._ir_format.value)
