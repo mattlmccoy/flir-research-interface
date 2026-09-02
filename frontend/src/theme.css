@@ -13,18 +13,21 @@
   --panel: #141920;
   --line: #232a33;
   --line-strong: #2f3843;
+  --line-control: #4a5561;
   --fg: #d7dde5;
   --fg-strong: #f5f7fa;
   --muted: #8b97a5;
   --accent: #ffb454;
-  --accent-ink: #101418;
+  --accent-ink: var(--bg);
+  --focus: var(--accent);
   --live: #5cff8a;
   --live-glow: 0 0 8px rgba(92, 255, 138, 0.7);
-  --warn: #ffb454;
+  --live-glow-dim: 0 0 3px rgba(92, 255, 138, 0.4);
+  --warn: var(--accent);
   --warn-bg: rgba(255, 180, 84, 0.10);
   --err: #ff5f56;
   --err-bg: rgba(255, 95, 86, 0.12);
-  --rec: #ff5f56;
+  --rec: var(--err);
   --font-ui: "IBM Plex Sans", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --fs: 13px;
@@ -37,5 +40,5 @@
   --statusbar-h: 28px;
 }
 
-@keyframes fri-glow { 0%, 100% { box-shadow: var(--live-glow); } 50% { box-shadow: 0 0 3px rgba(92, 255, 138, 0.4); } }
+@keyframes fri-glow { 0%, 100% { box-shadow: var(--live-glow); } 50% { box-shadow: var(--live-glow-dim); } }
 @keyframes fri-blink { 0%, 60% { opacity: 1; } 61%, 100% { opacity: 0.25; } }

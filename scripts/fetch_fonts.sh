@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Downloads IBM Plex Sans/Mono woff2 (latin subset) from Google Fonts into frontend/public/fonts.
 # Run once; the files are committed so builds and offline mode need no network.
+#
+# frontend/public/fonts/OFL.txt is NOT fetched by this script — it is added by hand
+# from https://raw.githubusercontent.com/IBM/plex/master/LICENSE.txt.
 set -euo pipefail
 OUT="$(cd "$(dirname "$0")/.." && pwd)/frontend/public/fonts"
 mkdir -p "$OUT"
@@ -9,17 +12,27 @@ mkdir -p "$OUT"
 # Chrome UA reliably gets .woff2. Kept configurable in case that flips again.
 UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 fetch() { # family weight outfile
+  local css url magic
   css=$(curl -sL -A "$UA" "https://fonts.googleapis.com/css2?family=$1:wght@$2&display=swap")
   # The CSS2 response contains one @font-face block per unicode subset (cyrillic-ext,
   # cyrillic, greek, vietnamese, latin-ext, latin, ...). We want ONLY the "latin"
   # block's font file, not just the first url in the response (which is cyrillic-ext).
+  # awk exits right after the "latin" block is found, and grep -m1 stops at the first
+  # match too, so nothing downstream closes the pipe early under `set -o pipefail`
+  # (a trailing `| head -1` would risk a SIGPIPE in awk/grep and a false failure).
   url=$(printf '%s' "$css" | awk '
     /^\/\*/ { sub(/^\/\* */,""); sub(/ *\*\/$/,""); subset=$0; next }
     { buf = buf "\n" $0 }
     /^}/ { if (subset=="latin") { print buf; exit } buf="" }
-  ' | grep -o 'https://fonts.gstatic.com/[^)]*\.woff2' | head -1)
+  ' | grep -m1 -o 'https://fonts.gstatic.com/[^)]*\.woff2')
   [ -n "$url" ] || { echo "no latin woff2 url for $1 $2" >&2; exit 1; }
-  curl -sL "$url" -o "$OUT/$3"; echo "$3 <- $url"
+  curl -fsSL --retry 3 -o "$OUT/$3" "$url"
+  magic=$(head -c 4 "$OUT/$3")
+  if [ "$magic" != "wOF2" ]; then
+    echo "downloaded $3 does not start with the wOF2 magic bytes (got: $magic)" >&2
+    exit 1
+  fi
+  echo "$3 <- $url"
 }
 fetch "IBM+Plex+Sans" 400 IBMPlexSans-400.woff2
 fetch "IBM+Plex+Sans" 500 IBMPlexSans-500.woff2
