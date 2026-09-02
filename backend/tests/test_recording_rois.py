@@ -54,3 +54,19 @@ def test_bad_rois_are_rejected_before_anything_is_written(tmp_path: Path) -> Non
         assert r.status_code == 400
         assert not any(p.is_dir() for p in tmp_path.iterdir())
         c.post("/api/camera/disconnect")
+
+
+def test_stop_writes_readme_and_roi_plot(tmp_path: Path) -> None:
+    with _client(tmp_path) as c:
+        devs = c.get("/api/camera/devices").json()
+        c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        d = Path(
+            c.post("/api/recording/start", json={"name": "rd", "rois": ROIS}).json()[
+                "experiment_dir"
+            ]
+        )
+        time.sleep(0.3)
+        assert c.post("/api/recording/stop").status_code == 200
+        c.post("/api/camera/disconnect")
+        assert "Regions of interest at record time: 3" in (d / "README.txt").read_text()
+        assert (d / "exports" / "roi_plot.png").stat().st_size > 1000

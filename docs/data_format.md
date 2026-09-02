@@ -83,6 +83,11 @@ experiments/<YYYYMMDD_HHMMSS>_<name>/
   visible.mp4 + .json    the visible camera (H.264 stream copy) when "visible video" was ticked,
                          with host-clock start/stop, measured fps and hash
   preview.png, keyframes.png, previews.json   thumbnails (visualization only)
+  README.txt             written at stop: the recording described in plain prose (camera,
+                         case, object parameters, °C rule, experiment fields, ROIs, marks,
+                         which file holds what) for whoever opens the folder later
+  exports/roi_plot.png   written at stop when ROIs were stored: every ROI's trace against
+                         time (spot value, or mean with a min–max band) with the marks
   exports/roi_series.csv  written automatically at stop: every stored ROI evaluated on every
                          frame (mean/min/max, or value for spots), in °C
   exports/thermal_preview.mp4  rendered automatically after stop (in the background, so the stop

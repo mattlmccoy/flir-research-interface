@@ -193,6 +193,12 @@ def create_app(
         (out_dir / "roi_series.csv").write_text(series_csv(reader, rois))
         logger.info("wrote %s", out_dir / "roi_series.csv")
 
+    def _write_run_summary(exp_dir: Path) -> None:
+        """README.txt (plain prose) + exports/roi_plot.png, derived, regenerable."""
+        from flir_research_interface.analysis.run_summary import write_run_summary
+
+        logger.info("run summary: %s", write_run_summary(ExperimentReader(exp_dir)))
+
     app.state.render_tasks = set()
 
     def _render_thermal_video(exp_dir: Path) -> None:
@@ -237,6 +243,10 @@ def create_app(
                     await run_in_threadpool(_export_roi_series, exp_dir)
                 except Exception:  # noqa: BLE001 - a convenience file must never fail the finalize
                     logger.exception("automatic ROI series export failed")
+                try:
+                    await run_in_threadpool(_write_run_summary, exp_dir)
+                except Exception:  # noqa: BLE001 - a convenience file must never fail the finalize
+                    logger.exception("run summary failed")
                 _schedule_thermal_video(exp_dir)
         vis = app.state.visible
         if vis is not None:
