@@ -4,6 +4,7 @@ import { decodeFrameMessage, type FrameMessage } from "./lib/protocol.ts";
 import type { PaletteName } from "./lib/palette.ts";
 import type { Range, ScaleMode } from "./lib/scale.ts";
 import { DEFAULT_LAYOUT, layoutReducer, loadLayout, saveLayout } from "./lib/layout.ts";
+import { fmtAny, fmtCelsius, kelvinToCelsiusLabel } from "./lib/format.ts";
 import { ThermalView } from "./components/ThermalView.tsx";
 import { DisplayControls } from "./components/DisplayControls.tsx";
 import { SetupPage } from "./components/SetupPage.tsx";
@@ -124,10 +125,10 @@ export function App() {
           <RailSection title="measurements" open={layout.sections.measurements} onToggle={() => dispatch({ type: "toggleSection", section: "measurements" })}>
             {hdr ? (
               <div className="kv">
-                <span>center</span><span className="v">{fmt(hdr.center_c)}</span>
-                <span>min</span><span className="v">{fmt(hdr.min_c)}</span>
-                <span>max</span><span className="v">{fmt(hdr.max_c)}</span>
-                <span>mean</span><span className="v">{fmt(hdr.mean_c)}</span>
+                <span>center</span><span className="v">{fmtCelsius(hdr.center_c)}</span>
+                <span>min</span><span className="v">{fmtCelsius(hdr.min_c)}</span>
+                <span>max</span><span className="v">{fmtCelsius(hdr.max_c)}</span>
+                <span>mean</span><span className="v">{fmtCelsius(hdr.mean_c)}</span>
                 <span>ir format</span><span className="v plain">{hdr.ir_format}</span>
                 <span>frame</span><span className="v plain">{hdr.frame_id}</span>
               </div>
@@ -139,7 +140,7 @@ export function App() {
             <div className="kv">
               <span>case</span><span className="v">{active ? `${active.low_c?.toFixed(0)}…${active.high_c?.toFixed(0)} °C` : "—"}</span>
               <span>emissivity</span><span className="v">{fmtAny(obj?.ObjectEmissivity)}</span>
-              <span>T reflected</span><span className="v">{kelvin(obj?.ReflectedTemperature)}</span>
+              <span>T reflected</span><span className="v">{kelvinToCelsiusLabel(obj?.ReflectedTemperature)}</span>
               <span>distance</span><span className="v">{obj?.ObjectDistance == null ? "—" : `${fmtAny(obj.ObjectDistance)} m`}</span>
               <span>NUC</span><span className="v plain">{fmtAny(cam.nuc_mode)}</span>
               <span>lens</span><span className="v plain">{fmtAny(cam.lens)}</span>
@@ -156,7 +157,3 @@ export function App() {
     />
   );
 }
-
-function fmt(v: number | null | undefined): string { return v == null ? "—" : `${v.toFixed(2)} °C`; }
-function fmtAny(v: unknown): string { return v == null ? "—" : typeof v === "number" ? v.toFixed(2) : String(v); }
-function kelvin(v: unknown): string { return typeof v === "number" ? `${(v - 273.15).toFixed(1)} °C` : "—"; }

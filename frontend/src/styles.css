@@ -85,11 +85,13 @@ input[type=range] { accent-color: var(--accent); }
 .colorbar span { white-space: nowrap; font-family: var(--font-mono); font-size: 11px; }
 
 /* ---- Status bar --------------------------------------------------------------- */
-.statusbar { display: flex; align-items: center; gap: 18px; padding: 0 14px; background: var(--bg-deep); border-top: 1px solid var(--line); font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+.statusbar { display: flex; align-items: center; gap: 18px; padding: 0 14px; background: var(--bg-deep); border-top: 1px solid var(--line); font-family: var(--font-mono); font-size: 11px; color: var(--muted); overflow: hidden; }
 .statusbar b { color: var(--fg); font-weight: 500; }
 .statusbar .bad { color: var(--err); }
 .statusbar .warnv { color: var(--warn); }
 .statusbar .right { margin-left: auto; display: flex; gap: 18px; }
+.statusbar > span { white-space: nowrap; flex: 0 0 auto; }
+.statusbar > span.bad { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---- Pages (setup, experiments) ------------------------------------------------- */
 .page-body { padding: 20px; overflow: auto; }

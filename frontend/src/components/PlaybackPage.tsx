@@ -6,6 +6,7 @@ import type { PaletteName } from "../lib/palette.ts";
 import type { Range, ScaleMode } from "../lib/scale.ts";
 import type { LayoutAction, LayoutState } from "../lib/layout.ts";
 import { SPEEDS, clampIndex, nextFrameDelayMs, speedLabel } from "../lib/playback.ts";
+import { fmtAny, fmtCelsius } from "../lib/format.ts";
 import { ThermalView } from "./ThermalView.tsx";
 import { DisplayControls } from "./DisplayControls.tsx";
 import { StudioFrame } from "./studio/StudioFrame.tsx";
@@ -46,7 +47,7 @@ export function PlaybackPage(p: Props) {
     const hit = cache.current.get(i);
     if (hit) return hit;
     const msg = decodeFrameMessage(await api.frameBuffer(p.name, i));
-    if (cache.current.size > 64) cache.current.delete(cache.current.keys().next().value as number);
+    if (cache.current.size >= 64) cache.current.delete(cache.current.keys().next().value as number);
     cache.current.set(i, msg);
     return msg;
   }, [p.name]);
@@ -62,13 +63,20 @@ export function PlaybackPage(p: Props) {
   useEffect(() => {
     if (!playing || !tl || n === 0) return;
     if (index >= n - 1) { setPlaying(false); return; }
+    if (!Number.isFinite(speed)) {
+      // "max" speed: advance as fast as frames actually load, never faster than the network/cache.
+      let cancelled = false;
+      load(index + 1).then(() => { if (!cancelled) setIndex((i) => clampIndex(i + 1, n)); }).catch(() => setPlaying(false));
+      return () => { cancelled = true; };
+    }
     const t = window.setTimeout(() => setIndex((i) => clampIndex(i + 1, n)), nextFrameDelayMs(tl.t_s[index], tl.t_s[index + 1], speed));
     return () => window.clearTimeout(t);
-  }, [playing, index, tl, n, speed]);
+  }, [playing, index, tl, n, speed, load]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+      const el = e.target;
+      if (el instanceof HTMLElement && el.closest("input, select, textarea, button, [contenteditable]")) return;
       if (e.key === " ") { e.preventDefault(); setPlaying((v) => !v); }
       if (e.key === "ArrowRight") setIndex((i) => clampIndex(i + 1, n));
       if (e.key === "ArrowLeft") setIndex((i) => clampIndex(i - 1, n));
@@ -86,24 +94,25 @@ export function PlaybackPage(p: Props) {
   const active = cam.active_case as { low_c?: number; high_c?: number } | undefined;
 
   const transport = (
-    <span style={{ display: "flex", gap: 8, alignItems: "center", flex: 1 }}>
-      <button className="secondary" onClick={() => setIndex(0)} title="Home" aria-label="First frame">⏮</button>
-      <button className="secondary" onClick={() => setIndex((i) => clampIndex(i - 1, n))} title="←" aria-label="Previous frame">◀︎</button>
-      <button className="primary" style={{ minWidth: 64 }} onClick={() => setPlaying((v) => !v)} aria-pressed={playing}>{playing ? "pause" : "play"}</button>
-      <button className="secondary" onClick={() => setIndex((i) => clampIndex(i + 1, n))} title="→" aria-label="Next frame">▶︎</button>
-      <button className="secondary" onClick={() => setIndex(clampIndex(n - 1, n))} title="End" aria-label="Last frame">⏭</button>
+    <span style={{ display: "flex", gap: 8, alignItems: "center", flex: "1 1 auto", minWidth: 0 }}>
+      <button className="secondary" onClick={() => setIndex(0)} title="First frame" aria-label="First frame">⏮</button>
+      <button className="secondary" onClick={() => setIndex((i) => clampIndex(i - 1, n))} title="Previous frame" aria-label="Previous frame">◀︎</button>
+      <button className="primary" style={{ minWidth: 64 }} onClick={() => setPlaying((v) => !v)}>{playing ? "pause" : "play"}</button>
+      <button className="secondary" onClick={() => setIndex((i) => clampIndex(i + 1, n))} title="Next frame" aria-label="Next frame">▶︎</button>
+      <button className="secondary" onClick={() => setIndex(clampIndex(n - 1, n))} title="Last frame" aria-label="Last frame">⏭</button>
       <select value={String(speed)} onChange={(e) => setSpeed(Number(e.target.value))} aria-label="Playback speed">
         {SPEEDS.map((s) => <option key={String(s)} value={String(s)}>{speedLabel(s)}</option>)}
       </select>
-      <input type="range" min={0} max={Math.max(n - 1, 0)} value={index} style={{ flex: 1, minWidth: 120 }} aria-label="Timeline"
+      <input type="range" min={0} max={Math.max(n - 1, 0)} value={index} style={{ flex: "1 1 60px", minWidth: 60 }} aria-label="Timeline"
+        aria-valuetext={`${t.toFixed(3)} s, frame ${index + 1} of ${n}`}
         onChange={(e) => { setPlaying(false); setIndex(Number(e.target.value)); }} />
-      <b style={{ minWidth: 150, textAlign: "right" }}>{t.toFixed(3)} s · {index + 1}/{n}</b>
+      <b style={{ whiteSpace: "nowrap", textAlign: "right" }}>{t.toFixed(3)} s · {index + 1}/{n}</b>
     </span>
   );
 
   return (
     <StudioFrame layout={p.layout} topbar={p.topbar}
-      strip={<nav className="strip" aria-label="playback tools"><button className="active" title="Back to experiments" aria-label="Back to experiments" onClick={p.onBack}>←</button></nav>}
+      strip={<nav className="strip" aria-label="playback tools"><button title="Back to experiments" aria-label="Back to experiments" onClick={p.onBack}>←</button></nav>}
       center={<ThermalView frame={frame} palette={p.palette} scaleMode={p.scaleMode} manual={p.manual} onScale={setShown} />}
       dock={<PlotDock title="temperature vs time (whole recording)" onCollapse={() => p.dispatch({ type: "toggle", panel: "dock" })} />}
       rail={
@@ -116,6 +125,7 @@ export function PlaybackPage(p: Props) {
               <span>status</span><span className="v plain">{info ? (info.complete ? "complete" : "INCOMPLETE") : "—"}</span>
               <span>format</span><span className="v plain">{info?.ir_format ?? "—"}</span>
               <span>case</span><span className="v">{active ? `${active.low_c?.toFixed(0)}…${active.high_c?.toFixed(0)} °C` : "—"}</span>
+              <span>emissivity</span><span className="v">{fmtAny((cam.object_parameters as Record<string, unknown> | undefined)?.ObjectEmissivity)}</span>
               {Object.entries(exp).filter(([k]) => k !== "name").map(([k, v]) => [
                 <span key={`k-${k}`}>{k}</span>,
                 <span key={`v-${k}`} className="v plain">{String(v)}</span>,
@@ -125,10 +135,10 @@ export function PlaybackPage(p: Props) {
           <RailSection title="measurements" open={p.layout.sections.measurements} onToggle={() => p.dispatch({ type: "toggleSection", section: "measurements" })} tag="this frame">
             {hdr ? (
               <div className="kv">
-                <span>center</span><span className="v">{fmt(hdr.center_c)}</span>
-                <span>min</span><span className="v">{fmt(hdr.min_c)}</span>
-                <span>max</span><span className="v">{fmt(hdr.max_c)}</span>
-                <span>mean</span><span className="v">{fmt(hdr.mean_c)}</span>
+                <span>center</span><span className="v">{fmtCelsius(hdr.center_c)}</span>
+                <span>min</span><span className="v">{fmtCelsius(hdr.min_c)}</span>
+                <span>max</span><span className="v">{fmtCelsius(hdr.max_c)}</span>
+                <span>mean</span><span className="v">{fmtCelsius(hdr.mean_c)}</span>
                 <span>frame id</span><span className="v plain">{hdr.frame_id}</span>
               </div>
             ) : <div className="muted">loading…</div>}
@@ -139,9 +149,8 @@ export function PlaybackPage(p: Props) {
           </RailSection>
         </Rail>
       }
-      statusbar={<StatusBar status={p.status} recording={p.recording} displayFps={0} stale={false} left={transport} />}
+      statusbar={<StatusBar status={p.status} recording={p.recording} left={transport} />}
     />
   );
 }
 
-function fmt(v: number | null | undefined): string { return v == null ? "—" : `${v.toFixed(2)} °C`; }
