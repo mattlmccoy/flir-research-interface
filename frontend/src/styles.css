@@ -116,3 +116,24 @@ pre { background: var(--bg-deep); border: 1px solid var(--line); padding: 8px; b
 .exp-card .meta { display: flex; gap: 10px; flex-wrap: wrap; color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
 .exp-card .actions { display: flex; gap: 6px; margin-top: auto; }
 .badge.bad { background: var(--err-bg); color: var(--err); }
+
+/* ---- ROI overlay + measurements (Milestone 6) --------------------------------------- */
+.view .overlay { position: absolute; outline: none; touch-action: none; }
+.view .overlay:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
+.roi-rows { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 3px 10px; align-items: center; font-family: var(--font-mono); font-size: 12px; }
+.roi-rows .lbl { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; background: none; border: none; padding: 0; color: var(--fg); font: inherit; font-family: var(--font-mono); }
+.roi-rows .lbl.sel { color: var(--fg-strong); }
+.roi-rows .sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.roi-rows .vals { text-align: right; color: var(--accent); display: flex; flex-direction: column; line-height: 1.25; }
+.roi-rows .vals small { color: var(--muted); font-size: 10px; }
+.roi-rows button { padding: 0 6px; height: 20px; line-height: 18px; }
+.hint { color: var(--muted); font-size: 12px; }
+
+/* ---- Plot dock body ---------------------------------------------------------------- */
+.dock .dock-body.plot-body { display: block; padding: 0; position: relative; min-height: 0; }
+.dock .dock-head .ctl { display: flex; gap: 6px; align-items: center; margin-left: auto; letter-spacing: 0; text-transform: none; }
+.dock .dock-head .ctl select { height: 20px; padding: 0 4px; font-size: 11px; }
+.dock .dock-head .ctl button { margin-left: 0; }
+.plot { position: relative; width: 100%; height: 100%; min-height: 0; }
+.plot canvas { display: block; }
+.plot-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-family: var(--font-mono); font-size: 12px; pointer-events: none; }

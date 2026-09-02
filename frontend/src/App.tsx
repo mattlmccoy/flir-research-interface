@@ -4,11 +4,16 @@ import { decodeFrameMessage, type FrameMessage } from "./lib/protocol.ts";
 import type { PaletteName } from "./lib/palette.ts";
 import type { Range, ScaleMode } from "./lib/scale.ts";
 import { DEFAULT_LAYOUT, layoutReducer, loadLayout, saveLayout } from "./lib/layout.ts";
+import { EMPTY_ROIS, loadRois, roiLabel, roiReducer, saveRois } from "./lib/roi.ts";
+import { TraceBuffer, WINDOWS, visibleWindow, windowLabel } from "./lib/plot.ts";
+import { traceColor } from "./lib/overlay.ts";
 import { fmtAny, fmtCelsius, kelvinToCelsiusLabel } from "./lib/format.ts";
-import { ThermalView } from "./components/ThermalView.tsx";
+import { ThermalView, type StatsMap } from "./components/ThermalView.tsx";
 import { DisplayControls } from "./components/DisplayControls.tsx";
 import { SetupPage } from "./components/SetupPage.tsx";
 import { RecordPanel } from "./components/RecordPanel.tsx";
+import { RoiRows } from "./components/RoiRows.tsx";
+import { TimePlot, type Trace } from "./components/TimePlot.tsx";
 import { ExperimentsPage } from "./components/ExperimentsPage.tsx";
 import { PlaybackPage } from "./components/PlaybackPage.tsx";
 import { StudioFrame } from "./components/studio/StudioFrame.tsx";
@@ -22,12 +27,16 @@ type Page = "live" | "setup" | "experiments" | "playback";
 const storage = (() => {
   try { return typeof localStorage !== "undefined" ? localStorage : null; } catch { return null; }
 })();
+/** ~10 min of live trace at 15 Hz per ROI. */
+const MAX_TRACE_POINTS = 9000;
 
 export function App() {
   const [page, setPage] = useState<Page>("setup");
   const [openExp, setOpenExp] = useState<string | null>(null);
   const [layout, dispatch] = useReducer(layoutReducer, DEFAULT_LAYOUT, () => loadLayout(storage));
   useEffect(() => { saveLayout(storage, layout); }, [layout]);
+  const [rois, roiDispatch] = useReducer(roiReducer, EMPTY_ROIS, () => loadRois(storage));
+  useEffect(() => { saveRois(storage, rois); }, [rois]);
 
   const [status, setStatus] = useState<Status>({ state: "disconnected" });
   const [recording, setRecording] = useState<RecordingStatus | null>(null);
@@ -40,6 +49,23 @@ export function App() {
   const [lastFrameAt, setLastFrameAt] = useState(0);
   const fpsCounter = useRef({ n: 0, t: performance.now() });
   const [info, setInfo] = useState<Record<string, unknown> | null>(null);
+
+  // Live traces: one ring buffer per ROI, time relative to the first frame seen this connection.
+  const buffers = useRef(new Map<number, TraceBuffer>());
+  const t0Ref = useRef<number | null>(null);
+  const [liveStats, setLiveStats] = useState<StatsMap>(new Map());
+  const [liveWindow, setLiveWindow] = useState(60);
+  const onStats = useCallback((m: StatsMap, f: FrameMessage) => {
+    if (t0Ref.current === null) t0Ref.current = f.header.device_timestamp_ns;
+    const t = (f.header.device_timestamp_ns - t0Ref.current) / 1e9;
+    for (const [id, s] of m) {
+      let b = buffers.current.get(id);
+      if (!b) { b = new TraceBuffer(MAX_TRACE_POINTS); buffers.current.set(id, b); }
+      if (b.lastT !== t) b.push(t, s.mean);
+    }
+    for (const id of Array.from(buffers.current.keys())) if (!m.has(id)) buffers.current.delete(id);
+    setLiveStats(m);
+  }, []);
 
   const refresh = useCallback(async () => {
     try { setStatus(await api.status()); } catch { setStatus({ state: "unreachable" }); }
@@ -71,7 +97,14 @@ export function App() {
   const dot = status.state === "acquiring" && !stale ? "live" : status.state === "error" ? "err"
     : status.state === "disconnected" ? "" : "warn";
 
-  async function disconnect() { await api.disconnect(); setFrame(null); await refresh(); setPage("setup"); }
+  async function disconnect() {
+    await api.disconnect();
+    setFrame(null);
+    buffers.current.clear();
+    t0Ref.current = null;
+    await refresh();
+    setPage("setup");
+  }
 
   const hdr = frame?.header;
   const cam = info ?? {};
@@ -79,6 +112,12 @@ export function App() {
   const obj = cam.object_parameters as Record<string, unknown> | undefined;
   const nearLimit = hdr && active && hdr.max_c != null && active.high_c != null && hdr.max_c > active.high_c - 10;
   const allHidden = !layout.strip && !layout.rail && !layout.dock;
+
+  const nowT = hdr && t0Ref.current !== null ? (hdr.device_timestamp_ns - t0Ref.current) / 1e9 : 0;
+  const traces: Trace[] = rois.rois.map((r, i) => {
+    const b = buffers.current.get(r.id);
+    return { id: r.id, label: roiLabel(r), color: traceColor(i), t: b?.t ?? [], v: b?.v ?? [] };
+  });
 
   const topbar = (
     <>
@@ -111,6 +150,7 @@ export function App() {
   }
   if (page === "playback" && openExp) {
     return <PlaybackPage name={openExp} layout={layout} dispatch={dispatch} topbar={topbar}
+      rois={rois} roiDispatch={roiDispatch}
       palette={palette} setPalette={setPalette} scaleMode={scaleMode} setScaleMode={setScaleMode}
       manual={manual} setManual={setManual} onBack={() => setPage("experiments")} status={status} recording={recording} />;
   }
@@ -118,8 +158,18 @@ export function App() {
   return (
     <StudioFrame layout={layout} topbar={topbar} statusbar={statusbar}
       strip={<ToolStrip tool={layout.tool} onTool={(t) => dispatch({ type: "setTool", tool: t })} onCollapseAll={() => dispatch({ type: "collapseAll" })} />}
-      center={<ThermalView frame={frame} palette={palette} scaleMode={scaleMode} manual={manual} onScale={setShown} />}
-      dock={<PlotDock onCollapse={() => dispatch({ type: "toggle", panel: "dock" })} />}
+      center={<ThermalView frame={frame} palette={palette} scaleMode={scaleMode} manual={manual} onScale={setShown}
+        rois={rois.rois} selected={rois.selected} tool={layout.tool} onRoi={roiDispatch} onStats={onStats} />}
+      dock={
+        <PlotDock onCollapse={() => dispatch({ type: "toggle", panel: "dock" })}
+          controls={
+            <select value={String(liveWindow)} onChange={(e) => setLiveWindow(Number(e.target.value))} aria-label="Plot time window">
+              {WINDOWS.map((w) => <option key={String(w)} value={String(w)}>{windowLabel(w)}</option>)}
+            </select>
+          }>
+          <TimePlot traces={traces} window={visibleWindow(nowT, liveWindow, 0)} emptyText="add a spot or rectangle ROI to plot its temperature" />
+        </PlotDock>
+      }
       rail={
         <Rail>
           <RailSection title="measurements" open={layout.sections.measurements} onToggle={() => dispatch({ type: "toggleSection", section: "measurements" })}>
@@ -135,6 +185,8 @@ export function App() {
             ) : <div className="muted">waiting for frames…</div>}
             {hdr && hdr.kelvin_per_count === null && <div className="errbox">Stream is not temperature-linear; raw counts only.</div>}
             {nearLimit && <div className="warnbox">Max within 10 °C of the range limit ({active?.high_c} °C).</div>}
+            <RoiRows rois={rois.rois} stats={liveStats} selected={rois.selected}
+              onSelect={(id) => roiDispatch({ type: "select", id })} onRemove={(id) => roiDispatch({ type: "remove", id })} onClear={() => roiDispatch({ type: "clear" })} />
           </RailSection>
           <RailSection title="camera" open={layout.sections.camera} onToggle={() => dispatch({ type: "toggleSection", section: "camera" })} tag="read-only until M6">
             <div className="kv">

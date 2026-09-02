@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 import zarr
 
 from flir_research_interface.camera.base import Frame
@@ -121,6 +122,14 @@ class ExperimentReader:
 
     def t_s(self, index: int) -> float:
         return float(self._t_s[index])
+
+    def counts_block(self, start: int, stop: int) -> npt.NDArray[np.uint16]:
+        """Frames ``[start, stop)`` as one read-only (n, h, w) uint16 array."""
+        if not 0 <= start <= stop <= self.n_frames:
+            raise IndexError(f"block [{start}, {stop}) out of range [0, {self.n_frames}]")
+        block = np.asarray(self._counts[start:stop], dtype=np.uint16)
+        block.setflags(write=False)
+        return block
 
 
 def list_experiments(root: Path) -> list[dict[str, Any]]:

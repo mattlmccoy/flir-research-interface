@@ -45,10 +45,20 @@ export interface Experiment {
 
 export interface ExperimentInfo { name: string; path: string; n_frames: number; width: number; height: number; duration_s: number; complete: boolean; ir_format: string | null; conversion: Record<string, unknown> | null; experiment: Record<string, unknown> | null; camera: Record<string, unknown> | null; software: Record<string, unknown> | null; started_utc: string | null; events?: Record<string, unknown>[]; manifest: Record<string, unknown> | null; }
 export interface Timeline { t_s: number[]; frame_id: number[]; }
+export interface ExperimentEvent { t_s?: number; type?: string; name?: string; [k: string]: unknown; }
+export interface RoiSeries {
+  units: "celsius" | "counts";
+  t_s: number[];
+  frame_id: number[];
+  series: Record<string, { value?: (number | null)[]; min?: (number | null)[]; max?: (number | null)[]; mean?: (number | null)[] }>;
+  events: ExperimentEvent[];
+}
 
 export const api = {
   experiment: (name: string) => j<ExperimentInfo>(fetch(`/api/experiments/${encodeURIComponent(name)}`)),
   timeline: (name: string) => j<Timeline>(fetch(`/api/experiments/${encodeURIComponent(name)}/timeline`)),
+  series: (name: string, rois: unknown[]) =>
+    j<RoiSeries>(fetch(`/api/experiments/${encodeURIComponent(name)}/series?rois=${encodeURIComponent(JSON.stringify(rois))}`)),
   frameBuffer: async (name: string, index: number): Promise<ArrayBuffer> => {
     const res = await fetch(`/api/experiments/${encodeURIComponent(name)}/frames/${index}`);
     if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);

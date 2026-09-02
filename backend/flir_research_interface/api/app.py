@@ -343,6 +343,20 @@ def create_app(
     def experiment_timeline(name: str) -> dict[str, list[Any]]:
         return _open(name).timeline()
 
+    @app.get("/api/experiments/{name}/series")
+    async def experiment_series(name: str, rois: str) -> dict[str, Any]:
+        """ROI values on every frame of a recording (spots: value; rects: min/max/mean)."""
+        from flir_research_interface.analysis.series import parse_rois, roi_series
+
+        try:
+            parsed = parse_rois(rois)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        r = _open(name)
+        out = await run_in_threadpool(roi_series, r, parsed)
+        out["events"] = r.events
+        return out
+
     @app.get("/api/experiments/{name}/frames/{index}")
     def experiment_frame(name: str, index: int) -> Response:
         r = _open(name)

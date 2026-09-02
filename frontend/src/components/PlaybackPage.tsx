@@ -1,15 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Dispatch, ReactNode } from "react";
-import { api, type ExperimentInfo, type RecordingStatus, type Status, type Timeline } from "../lib/api.ts";
+import { api, type ExperimentInfo, type RecordingStatus, type RoiSeries, type Status, type Timeline } from "../lib/api.ts";
 import { decodeFrameMessage, type FrameMessage } from "../lib/protocol.ts";
 import type { PaletteName } from "../lib/palette.ts";
 import type { Range, ScaleMode } from "../lib/scale.ts";
 import type { LayoutAction, LayoutState } from "../lib/layout.ts";
 import { SPEEDS, clampIndex, nextFrameDelayMs, speedLabel } from "../lib/playback.ts";
+import { roiLabel, type RoiAction, type RoiState } from "../lib/roi.ts";
+import { traceColor } from "../lib/overlay.ts";
+import { eventsToMarkers, nearestIndex } from "../lib/events.ts";
 import { fmtAny, fmtCelsius } from "../lib/format.ts";
-import { ThermalView } from "./ThermalView.tsx";
+import { ThermalView, type StatsMap } from "./ThermalView.tsx";
 import { DisplayControls } from "./DisplayControls.tsx";
+import { RoiRows } from "./RoiRows.tsx";
+import { TimePlot, type Trace } from "./TimePlot.tsx";
 import { StudioFrame } from "./studio/StudioFrame.tsx";
+import { ToolStrip } from "./studio/ToolStrip.tsx";
 import { Rail } from "./studio/Rail.tsx";
 import { RailSection } from "./studio/RailSection.tsx";
 import { PlotDock } from "./studio/PlotDock.tsx";
@@ -18,11 +24,24 @@ import { StatusBar } from "./studio/StatusBar.tsx";
 interface Props {
   name: string;
   layout: LayoutState; dispatch: Dispatch<LayoutAction>; topbar: ReactNode;
+  rois: RoiState; roiDispatch: Dispatch<RoiAction>;
   status: Status; recording: RecordingStatus | null;
   palette: PaletteName; setPalette: (p: PaletteName) => void;
   scaleMode: ScaleMode; setScaleMode: (m: ScaleMode) => void;
   manual: Range; setManual: (r: Range) => void;
   onBack: () => void;
+}
+
+const PLAYBACK_DISABLED_TOOLS = ["camera", "nuc"] as const;
+
+function seriesTraces(series: RoiSeries | null, rois: RoiState): Trace[] {
+  if (!series) return [];
+  return rois.rois.flatMap((r, i) => {
+    const s = series.series[String(r.id)];
+    const raw = s?.value ?? s?.mean;
+    if (!raw) return [];
+    return [{ id: r.id, label: roiLabel(r), color: traceColor(i), t: series.t_s, v: raw.map((v) => (v === null ? NaN : v)) }];
+  });
 }
 
 export function PlaybackPage(p: Props) {
@@ -34,14 +53,27 @@ export function PlaybackPage(p: Props) {
   const [speed, setSpeed] = useState(1);
   const [shown, setShown] = useState<Range>({ min: 0, max: 100 });
   const [err, setErr] = useState<string | null>(null);
+  const [stats, setStats] = useState<StatsMap>(new Map());
+  const [series, setSeries] = useState<RoiSeries | null>(null);
   const cache = useRef(new Map<number, FrameMessage>());
   const n = info?.n_frames ?? 0;
+  const onStats = useCallback((m: StatsMap) => setStats(m), []);
 
   useEffect(() => {
     cache.current.clear();
     Promise.all([api.experiment(p.name), api.timeline(p.name)])
       .then(([i, t]) => { setInfo(i); setTl(t); setIndex(0); }).catch((e) => setErr(String(e)));
   }, [p.name]);
+
+  // Whole-recording ROI series from the backend; debounced so a drag does not fire per pixel.
+  useEffect(() => {
+    if (!info || p.rois.rois.length === 0) { setSeries(null); return; }
+    let alive = true;
+    const id = window.setTimeout(() => {
+      api.series(p.name, p.rois.rois).then((s) => { if (alive) setSeries(s); }).catch((e) => { if (alive) setErr(String(e)); });
+    }, 250);
+    return () => { alive = false; window.clearTimeout(id); };
+  }, [p.name, info, p.rois.rois]);
 
   const load = useCallback(async (i: number): Promise<FrameMessage> => {
     const hit = cache.current.get(i);
@@ -64,7 +96,6 @@ export function PlaybackPage(p: Props) {
     if (!playing || !tl || n === 0) return;
     if (index >= n - 1) { setPlaying(false); return; }
     if (!Number.isFinite(speed)) {
-      // "max" speed: advance as fast as frames actually load, never faster than the network/cache.
       let cancelled = false;
       load(index + 1).then(() => { if (!cancelled) setIndex((i) => clampIndex(i + 1, n)); }).catch(() => setPlaying(false));
       return () => { cancelled = true; };
@@ -76,7 +107,7 @@ export function PlaybackPage(p: Props) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target;
-      if (el instanceof HTMLElement && el.closest("input, select, textarea, button, [contenteditable]")) return;
+      if (el instanceof HTMLElement && el.closest("input, select, textarea, button, canvas, [contenteditable]")) return;
       if (e.key === " ") { e.preventDefault(); setPlaying((v) => !v); }
       if (e.key === "ArrowRight") setIndex((i) => clampIndex(i + 1, n));
       if (e.key === "ArrowLeft") setIndex((i) => clampIndex(i - 1, n));
@@ -92,6 +123,8 @@ export function PlaybackPage(p: Props) {
   const exp = (info?.experiment ?? {}) as Record<string, unknown>;
   const cam = (info?.camera ?? {}) as Record<string, unknown>;
   const active = cam.active_case as { low_c?: number; high_c?: number } | undefined;
+  const markers = info && tl ? eventsToMarkers(info.events ?? [], tl, info.started_utc) : [];
+  const traces = seriesTraces(series, p.rois);
 
   const transport = (
     <span style={{ display: "flex", gap: 8, alignItems: "center", flex: "1 1 auto", minWidth: 0 }}>
@@ -112,9 +145,18 @@ export function PlaybackPage(p: Props) {
 
   return (
     <StudioFrame layout={p.layout} topbar={p.topbar}
-      strip={<nav className="strip" aria-label="playback tools"><button title="Back to experiments" aria-label="Back to experiments" onClick={p.onBack}>←</button></nav>}
-      center={<ThermalView frame={frame} palette={p.palette} scaleMode={p.scaleMode} manual={p.manual} onScale={setShown} />}
-      dock={<PlotDock title="temperature vs time (whole recording)" onCollapse={() => p.dispatch({ type: "toggle", panel: "dock" })} />}
+      strip={<ToolStrip tool={p.layout.tool} onTool={(tool) => p.dispatch({ type: "setTool", tool })} onCollapseAll={() => p.dispatch({ type: "collapseAll" })}
+        disabledTools={PLAYBACK_DISABLED_TOOLS}
+        leading={<button title="Back to experiments" aria-label="Back to experiments" onClick={p.onBack}>←</button>} />}
+      center={<ThermalView frame={frame} palette={p.palette} scaleMode={p.scaleMode} manual={p.manual} onScale={setShown}
+        rois={p.rois.rois} selected={p.rois.selected} tool={p.layout.tool} onRoi={p.roiDispatch} onStats={onStats} />}
+      dock={
+        <PlotDock title="temperature vs time (whole recording)" onCollapse={() => p.dispatch({ type: "toggle", panel: "dock" })}>
+          <TimePlot traces={traces} markers={markers} window={{ t0: 0, t1: Math.max(info?.duration_s ?? 0, 0.001) }} cursorT={t}
+            emptyText={p.rois.rois.length ? "loading series…" : "add a spot or rectangle ROI to plot it over the whole recording"}
+            onSeek={(tt) => { if (tl) { setPlaying(false); setIndex(nearestIndex(tl.t_s, tt)); } }} />
+        </PlotDock>
+      }
       rail={
         <Rail>
           <RailSection title="experiment" open={p.layout.sections.experiment} onToggle={() => p.dispatch({ type: "toggleSection", section: "experiment" })}>
@@ -142,6 +184,8 @@ export function PlaybackPage(p: Props) {
                 <span>frame id</span><span className="v plain">{hdr.frame_id}</span>
               </div>
             ) : <div className="muted">loading…</div>}
+            <RoiRows rois={p.rois.rois} stats={stats} selected={p.rois.selected}
+              onSelect={(id) => p.roiDispatch({ type: "select", id })} onRemove={(id) => p.roiDispatch({ type: "remove", id })} onClear={() => p.roiDispatch({ type: "clear" })} />
             {err && <div className="errbox">{err}</div>}
           </RailSection>
           <RailSection title="display" open={p.layout.sections.display} onToggle={() => p.dispatch({ type: "toggleSection", section: "display" })} tag="visualization only">
@@ -153,4 +197,3 @@ export function PlaybackPage(p: Props) {
     />
   );
 }
-

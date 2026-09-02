@@ -29,6 +29,10 @@
   --err: #ff5f56;
   --err-bg: rgba(255, 95, 86, 0.12);
   --rec: var(--err);
+  --trace-3: #6ec3ff;
+  --trace-4: #ff8ad8;
+  --trace-5: #c9d64f;
+  --trace-6: #b48cff;
   --image-bg: #000;
   --scrim: rgba(11, 14, 18, 0.85);
   --danger-ink: #ffffff;

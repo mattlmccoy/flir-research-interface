@@ -60,3 +60,17 @@ the probe output from the real A70 before touching radiometric node names.
 
 ## Status
 **Session 4 end:** Milestone 1 DONE. Milestone 2 tooling DONE: SpinnakerCameraBackend (hardware tests pass), analysis/stats.py, `fri-live` validation CLI (149 frames @30.03 fps, 0 lost/dropped). BLOCKED on user: Research Studio side-by-side comparison at >=3 temperatures (docs/validation.md table). Disk ~2.9 GiB free — must be freed before Milestone 4 recording. Next dev: Milestone 3 live view (FastAPI + WebSocket + React) once validation table has at least one row. Next session: review probe_report.json, then implement camera/spinnaker.py and Milestone 2 validation.
+
+## M6 ROI / plots (started 2026-09-02, on main after merging feat/ui-studio)
+Design: ROI stats computed client-side from decoded counts (live + playback, no protocol change);
+whole-recording traces from `GET /api/experiments/{name}/series` over the Zarr store; events
+from events.json as markers. Camera-controls rail section follows as its own step.
+- [x] 1 lib/roi.ts (reducer, normalizeRect, roiStats, persistence) — TDD
+- [x] 2 lib/plot.ts (niceTicks, TraceBuffer, ranges, windows) — TDD
+- [x] 3 backend analysis/series.py + /series endpoint — TDD
+- [x] 4 ThermalView: ROI overlay canvas + spot/rect tools + select/delete
+- [x] 5 TimePlot component in PlotDock (traces, events, cursor, window select)
+- [x] 6 Wire live (App): rois state, per-frame stats, measurements rows, live traces
+- [x] 7 Wire playback: per-frame stats, series fetch, cursor, events
+- [ ] 8 Gate (frontend tests, backend tests, ruff, mypy, browser check), commit
+- [ ] 9 Camera controls section (case, object params, NUC, frame rate) with recording lock

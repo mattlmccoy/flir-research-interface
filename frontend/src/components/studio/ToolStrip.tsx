@@ -1,36 +1,47 @@
+import type { ReactNode } from "react";
 import { TOOLS, type Tool } from "../../lib/layout.ts";
 
 /** Presentation for each tool id (ids come from TOOLS in lib/layout.ts). */
 const TOOL_META: Record<Tool, { glyph: string; title: string; enabled: boolean }> = {
   select: { glyph: "↖", title: "Select / hover readout", enabled: true },
-  spot: { glyph: "◎", title: "Spot (Milestone 6)", enabled: false },
-  rect: { glyph: "▭", title: "Rectangle ROI (Milestone 6)", enabled: false },
+  spot: { glyph: "◎", title: "Spot: click to place a point measurement", enabled: true },
+  rect: { glyph: "▭", title: "Rectangle ROI: drag to draw", enabled: true },
   line: { glyph: "╱", title: "Line profile (later)", enabled: false },
   display: { glyph: "▤", title: "Palette & range", enabled: true },
   camera: { glyph: "⚙", title: "Camera controls (Milestone 6)", enabled: false },
   nuc: { glyph: "N", title: "NUC (Milestone 6)", enabled: false },
 };
 
-interface Props { tool: Tool; onTool: (t: Tool) => void; onCollapseAll: () => void; }
+interface Props {
+  tool: Tool;
+  onTool: (t: Tool) => void;
+  onCollapseAll: () => void;
+  /** Rendered before the tools (e.g. a back button on the playback page). */
+  leading?: ReactNode;
+  /** Tools that make no sense in this context (e.g. camera controls during playback). */
+  disabledTools?: readonly Tool[];
+}
 
 /**
  * Left icon strip (spec §3). Disabled tools stay visible so the layout never shifts between
  * releases; they use aria-disabled (not the disabled attribute) so their tooltip still shows.
  */
-export function ToolStrip({ tool, onTool, onCollapseAll }: Props) {
+export function ToolStrip({ tool, onTool, onCollapseAll, leading, disabledTools = [] }: Props) {
   return (
     <nav className="strip" aria-label="tools">
+      {leading}
       {TOOLS.map((id) => {
         const m = TOOL_META[id];
+        const enabled = m.enabled && !disabledTools.includes(id);
         return (
           <button
             key={id}
             className={tool === id ? "active" : ""}
             title={m.title}
             aria-label={m.title}
-            aria-disabled={!m.enabled}
+            aria-disabled={!enabled}
             aria-pressed={tool === id}
-            onClick={() => { if (m.enabled) onTool(id); }}
+            onClick={() => { if (enabled) onTool(id); }}
           >
             {m.glyph}
           </button>
