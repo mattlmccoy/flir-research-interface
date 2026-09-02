@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from flir_research_interface.camera import gvcp
 from flir_research_interface.camera.gvcp import (
     GVCP_PORT,
     GvcpDevice,
@@ -86,3 +87,47 @@ def test_host_fix_commands_per_os() -> None:
         'netsh interface ip set address "Ethernet 2" static 192.168.7.1 255.255.255.0' in c
         for c in win_cmd
     )
+
+
+def _dev(**kw: object) -> gvcp.GvcpDevice:
+    base = dict(
+        source_ip="192.168.7.2", mac="00:40:7f:11:2c:64", current_ip="192.168.7.2",
+        subnet_mask="255.255.255.0", gateway="0.0.0.0", ip_config_options=7, ip_config_current=5,
+        manufacturer="FLIR Systems", model="FLIR A70", device_version="42.0.0",
+        manufacturer_info="", serial="<serial>", user_name="",
+    )
+    base.update(kw)
+    return gvcp.GvcpDevice(**base)  # type: ignore[arg-type]
+
+
+def test_build_forceip_cmd_layout_matches_gige_vision() -> None:
+    pkt = gvcp.build_forceip_cmd(
+        "00:40:7f:11:2c:64", "192.168.7.2", "255.255.255.0", "0.0.0.0", req_id=7
+    )
+    assert len(pkt) == 8 + 56
+    assert pkt[0] == 0x42 and pkt[1] & 0x01  # GVCP key, ack required
+    assert pkt[2:4] == b"\x00\x04"  # FORCEIP_CMD
+    assert pkt[4:6] == (56).to_bytes(2, "big") and pkt[6:8] == (7).to_bytes(2, "big")
+    body = pkt[8:]
+    assert body[2:8] == bytes.fromhex("00407f112c64")
+    assert body[20:24] == bytes([192, 168, 7, 2])
+    assert body[36:40] == bytes([255, 255, 255, 0])
+    assert body[52:56] == bytes([0, 0, 0, 0])
+
+
+def test_announces_no_ip_is_diagnosed_instead_of_a_host_fix() -> None:
+    lost = _dev(current_ip="0.0.0.0", subnet_mask="0.0.0.0")
+    assert gvcp.announces_no_ip(lost) is True
+    assert gvcp.announces_no_ip(_dev()) is False
+    iface = gvcp.HostInterface(
+        name="en13", ip="192.168.7.1", netmask="255.255.255.0", broadcast="192.168.7.255",
+        service_name=None,
+    )
+    hit = gvcp.DiscoveryHit(iface, lost)
+    assert hit.reachable_by_sdk is False
+    d = gvcp.diagnose(hit)
+    assert d["problem"] == "no_ip_announced"
+    assert d["force_ip"] == {
+        "ip": "192.168.7.2", "subnet_mask": "255.255.255.0", "gateway": "0.0.0.0"
+    }
+    assert gvcp.diagnose(gvcp.DiscoveryHit(iface, _dev()))["problem"] is None

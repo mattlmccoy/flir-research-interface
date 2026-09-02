@@ -18,6 +18,7 @@ import struct
 import subprocess
 import time
 from dataclasses import dataclass
+from typing import Any
 
 GVCP_PORT = 3956
 _GVCP_KEY = 0x42
@@ -25,6 +26,9 @@ _FLAG_ACK_REQUIRED = 0x01
 _FLAG_ALLOW_BROADCAST_ACK = 0x10
 _CMD_DISCOVERY = 0x0002
 _ACK_DISCOVERY = 0x0003
+_CMD_FORCEIP = 0x0004
+_ACK_FORCEIP = 0x0005
+UNSET_IP = "0.0.0.0"
 
 
 @dataclass(frozen=True)
@@ -95,6 +99,35 @@ def parse_discovery_ack(data: bytes, *, source_ip: str) -> GvcpDevice:
         serial=_cstr(p, 216, 16),
         user_name=_cstr(p, 232, 16),
     )
+
+
+def build_forceip_cmd(mac: str, ip: str, subnet_mask: str, gateway: str, req_id: int = 1) -> bytes:
+    """GVCP FORCEIP_CMD (GigE Vision 2.0 §14.4): temporarily assign ``ip`` to the camera ``mac``.
+
+    The address holds until the camera reboots; the persistent-IP setting is not modified.
+    Layout of the 56-byte body: 2 reserved, 6 MAC, 12 reserved, 4 IP, 12 reserved, 4 mask,
+    12 reserved, 4 gateway.
+    """
+    mac_bytes = bytes.fromhex(mac.replace(":", "").replace("-", ""))
+    if len(mac_bytes) != 6:
+        raise ValueError(f"bad MAC {mac!r}")
+    body = (
+        b"\x00\x00"
+        + mac_bytes
+        + b"\x00" * 12
+        + ipaddress.IPv4Address(ip).packed
+        + b"\x00" * 12
+        + ipaddress.IPv4Address(subnet_mask).packed
+        + b"\x00" * 12
+        + ipaddress.IPv4Address(gateway).packed
+    )
+    flags = _FLAG_ACK_REQUIRED | _FLAG_ALLOW_BROADCAST_ACK
+    return struct.pack(">BBHHH", _GVCP_KEY, flags, _CMD_FORCEIP, len(body), req_id & 0xFFFF) + body
+
+
+def announces_no_ip(device: GvcpDevice) -> bool:
+    """True when the DISCOVERY_ACK carries no current IP (camera lost/never applied its address)."""
+    return device.current_ip == UNSET_IP or device.subnet_mask == UNSET_IP
 
 
 def same_subnet(ip_a: str, ip_b: str, mask: str) -> bool:
@@ -187,8 +220,58 @@ class DiscoveryHit:
 
     @property
     def reachable_by_sdk(self) -> bool:
-        """True when the camera is inside this adapter's subnet (GenICam stacks require it)."""
+        """True when the camera announces an address inside this adapter's subnet."""
+        if announces_no_ip(self.device):
+            return False
         return same_subnet(self.interface.ip, self.device.current_ip, self.interface.netmask)
+
+
+def diagnose(hit: DiscoveryHit) -> dict[str, Any]:
+    """Why the SDK cannot open this camera, and the remedy.
+
+    ``no_ip_announced``: the camera replies (from ``source_ip``) but reports 0.0.0.0 — seen on
+    the A70 after re-plugging the link. Remedy: a FORCEIP to the address it is answering from
+    (or its persistent one) inside the host adapter's subnet; or a camera power cycle.
+    ``wrong_subnet``: the announced address is outside the adapter's subnet; remedy is the
+    host-side command list.
+    """
+    d, iface = hit.device, hit.interface
+    if announces_no_ip(d):
+        return {
+            "problem": "no_ip_announced",
+            "force_ip": {"ip": d.source_ip, "subnet_mask": iface.netmask, "gateway": UNSET_IP},
+        }
+    if not hit.reachable_by_sdk:
+        return {"problem": "wrong_subnet", "force_ip": None}
+    return {"problem": None, "force_ip": None}
+
+
+def force_ip(
+    hit: DiscoveryHit, ip: str, subnet_mask: str, gateway: str = UNSET_IP, *, timeout_s: float = 2.0
+) -> bool:
+    """Send FORCEIP for ``hit.device`` out of ``hit.interface``; True when the camera acks."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    sock.settimeout(timeout_s)
+    try:
+        sock.bind((hit.interface.ip, 0))
+        pkt = build_forceip_cmd(hit.device.mac, ip, subnet_mask, gateway, req_id=2)
+        for dst in {hit.interface.broadcast, "255.255.255.255"}:
+            try:
+                sock.sendto(pkt, (dst, GVCP_PORT))
+            except OSError:
+                continue
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            try:
+                data, _addr = sock.recvfrom(1024)
+            except TimeoutError:
+                break
+            if len(data) >= 8 and struct.unpack(">H", data[2:4])[0] == _ACK_FORCEIP:
+                return True
+        return False
+    finally:
+        sock.close()
 
 
 def discover(timeout_s: float = 1.5) -> list[DiscoveryHit]:
@@ -232,8 +315,12 @@ __all__ = [
     "DiscoveryHit",
     "GvcpDevice",
     "HostInterface",
+    "announces_no_ip",
     "build_discovery_cmd",
+    "build_forceip_cmd",
+    "diagnose",
     "discover",
+    "force_ip",
     "host_fix_commands",
     "host_interfaces",
     "parse_discovery_ack",

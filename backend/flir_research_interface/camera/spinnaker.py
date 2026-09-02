@@ -386,13 +386,19 @@ class SpinnakerCameraBackend(CameraBackend):
                 self._ir_format_before,
                 _read(ps, self._nodemap, "CurrentCase"),
             )
-        except ps.SpinnakerException as exc:
+        except (ps.SpinnakerException, CameraError) as exc:
+            # Drop every SDK reference *before* re-raising: a traceback that still pins `cam`
+            # makes Spinnaker abort the process on ReleaseInstance ("something still holds a
+            # reference to the camera", -1004).
             self._cam = None
-            if cam is not None:
-                del cam
+            cam = None
+            c = None  # noqa: F841 - the loop variable still points at the matched camera
+            tl = None  # noqa: F841 - deliberately clear the local
             self._cam_list.Clear()
             self._cam_list = None
             self._release_system()
+            if isinstance(exc, CameraError):
+                raise CameraError(str(exc)) from None
             raise CameraError(f"Spinnaker: {exc}") from None
 
     def _configure(self) -> None:

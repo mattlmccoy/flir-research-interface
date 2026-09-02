@@ -113,6 +113,13 @@ class MetadataPatch(BaseModel):
     experiment: Any
 
 
+class ForceIpRequest(BaseModel):
+    mac: str
+    ip: str
+    subnet_mask: str
+    gateway: str = "0.0.0.0"
+
+
 def _make_backend(name: str, *, sim_fps: float) -> CameraBackend:
     if name not in CAMERA_BACKENDS:
         raise HTTPException(400, f"unknown backend {name!r}; known: {sorted(CAMERA_BACKENDS)}")
@@ -250,6 +257,7 @@ def create_app(
                     "mac": d.mac,
                     "camera_ip": f"{d.current_ip}/{d.subnet_mask}",
                     "reachable_by_sdk": hit.reachable_by_sdk,
+                    **gvcp.diagnose(hit),
                     "fix": list(
                         gvcp.host_fix_commands(
                             d,
@@ -274,6 +282,25 @@ def create_app(
         return out
 
     # -- camera ----------------------------------------------------------------------------
+
+    @app.post("/api/setup/force-ip")
+    def setup_force_ip(req: ForceIpRequest) -> dict[str, Any]:
+        """GigE Vision FORCEIP: give the camera (by MAC) a temporary address until it reboots."""
+        from flir_research_interface.camera import gvcp
+
+        hit = next((h for h in gvcp.discover() if h.device.mac.lower() == req.mac.lower()), None)
+        if hit is None:
+            raise HTTPException(404, f"no camera with MAC {req.mac} answered discovery")
+        try:
+            acked = gvcp.force_ip(hit, req.ip, req.subnet_mask, req.gateway)
+        except (OSError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        after = next((h for h in gvcp.discover() if h.device.mac.lower() == req.mac.lower()), None)
+        return {
+            "acked": acked,
+            "camera_ip": f"{after.device.current_ip}/{after.device.subnet_mask}" if after else None,
+            "reachable_by_sdk": after.reachable_by_sdk if after else False,
+        }
 
     @app.get("/api/camera/devices")
     def devices(backend: str | None = None) -> list[dict[str, Any]]:
