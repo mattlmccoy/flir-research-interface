@@ -7,7 +7,27 @@ async function j<T>(r: Promise<Response>): Promise<T> {
   return (await res.json()) as T;
 }
 export interface RecordingStatus { state: string; experiment_dir?: string | null; frames_received?: number; frames_written?: number; queue_depth?: number; queue_dropped?: number; frame_id_gaps?: number; duration_s?: number; recorded_fps?: number | null; free_space_gb?: number | null; min_free_gb?: number; error?: string | null; experiments_root?: string; }
-export interface Experiment { name: string; path: string; complete: boolean; frames_on_disk: number; has_metadata: boolean; manifest: Record<string, unknown> | null; metadata: Record<string, unknown> | null; }
+export interface Previews {
+  units: "celsius" | "counts";
+  preview: { file: string; frame_index: number; t_s: number; size?: [number, number]; units?: string; sha256: string };
+  keyframes: { file: string; count: number; indices: number[]; t_s: number[]; tile?: [number, number]; vmin: number; vmax: number; units?: string; sha256: string };
+}
+export interface RevealResult { ok: boolean; path: string; error?: string; }
+
+export interface Experiment {
+  name: string;
+  path: string;
+  complete: boolean;
+  frames_on_disk: number;
+  has_metadata: boolean;
+  manifest: Record<string, unknown> | null;
+  metadata: Record<string, unknown> | null;
+  previews?: Previews | null;
+  ir_format?: string | null;
+  duration_s?: number;
+  n_frames?: number;
+  experiment?: Record<string, unknown> | null;
+}
 
 export interface ExperimentInfo { name: string; path: string; n_frames: number; width: number; height: number; duration_s: number; complete: boolean; ir_format: string | null; conversion: Record<string, unknown> | null; experiment: Record<string, unknown> | null; camera: Record<string, unknown> | null; software: Record<string, unknown> | null; started_utc: string | null; events?: Record<string, unknown>[]; manifest: Record<string, unknown> | null; }
 export interface Timeline { t_s: number[]; frame_id: number[]; }
@@ -25,6 +45,11 @@ export const api = {
   recordingStop: () => j<Record<string, unknown>>(fetch("/api/recording/stop", { method: "POST" })),
   recordingStatus: () => j<RecordingStatus>(fetch("/api/recording/status")),
   experiments: () => j<Experiment[]>(fetch("/api/experiments")),
+  previewUrl: (name: string) => `/api/experiments/${encodeURIComponent(name)}/preview.png`,
+  keyframesUrl: (name: string) => `/api/experiments/${encodeURIComponent(name)}/keyframes.png`,
+  regeneratePreviews: (name: string) => j<Previews>(fetch(`/api/experiments/${encodeURIComponent(name)}/previews`, { method: "POST" })),
+  reveal: (name: string) => j<RevealResult>(fetch(`/api/experiments/${encodeURIComponent(name)}/reveal`, { method: "POST" })),
+  revealRoot: () => j<RevealResult>(fetch("/api/experiments/reveal-root", { method: "POST" })),
   health: () => j<{ status: string; version: string }>(fetch("/api/health")),
   sdk: () => j<Record<string, unknown>>(fetch("/api/setup/sdk")),
   discovery: () => j<Record<string, unknown>>(fetch("/api/setup/discovery")),
