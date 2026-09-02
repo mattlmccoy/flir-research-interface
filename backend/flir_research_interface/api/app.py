@@ -413,6 +413,47 @@ def create_app(
         )
         return Response(content=payload, media_type="application/octet-stream")
 
+    # -- exports (Milestone 7) ---------------------------------------------------------------
+
+    def _download(data: bytes | str, media_type: str, filename: str) -> Response:
+        return Response(
+            content=data,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    @app.get("/api/experiments/{name}/export/series.csv")
+    async def export_series_csv(name: str, rois: str) -> Response:
+        from flir_research_interface.analysis.export import series_csv
+        from flir_research_interface.analysis.series import parse_rois
+
+        try:
+            parsed = parse_rois(rois)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        r = _open(name)
+        text = await run_in_threadpool(series_csv, r, parsed)
+        return _download(text, "text/csv", f"{r.path.name}_series.csv")
+
+    @app.get("/api/experiments/{name}/frames/{index}/export")
+    async def export_frame(name: str, index: int, format: str = "csv") -> Response:
+        from flir_research_interface.analysis.export import frame_bytes
+
+        r = _open(name)
+        try:
+            data, media, filename = await run_in_threadpool(frame_bytes, r, index, format)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except IndexError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _download(data, media, filename)
+
+    @app.post("/api/experiments/{name}/export/hdf5")
+    async def export_hdf5_route(name: str) -> dict[str, Any]:
+        from flir_research_interface.analysis.export import export_hdf5
+
+        return await run_in_threadpool(export_hdf5, _open(name))
+
     def _png_response(path: Path, request: Request) -> Response:
         if not path.is_file():
             raise HTTPException(404, f"{path.name} not generated yet")

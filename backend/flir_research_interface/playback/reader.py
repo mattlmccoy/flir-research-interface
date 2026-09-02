@@ -123,6 +123,11 @@ class ExperimentReader:
     def t_s(self, index: int) -> float:
         return float(self._t_s[index])
 
+    def timestamps_ns(self) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.int64]]:
+        """(device, host) timestamps in ns for the readable frames (copies)."""
+        n = self.n_frames
+        return self._dev_ts[:n].copy(), self._host_ts[:n].copy()
+
     def counts_block(self, start: int, stop: int) -> npt.NDArray[np.uint16]:
         """Frames ``[start, stop)`` as one read-only (n, h, w) uint16 array."""
         if not 0 <= start <= stop <= self.n_frames:
