@@ -101,6 +101,9 @@ class RecordingStartRequest(BaseModel):
     metadata: dict[str, Any] = {}
     visible: bool = False
     rois: list[dict[str, Any]] | None = None
+    # NUC right before the recording, then NUCMode=Off until stop so the camera never freezes
+    # mid-run (the A70 repeats its image for ~2 s during a NUC); the previous mode is restored.
+    nuc_hold: bool = True
 
 
 class ArmRequest(RecordingStartRequest):
@@ -243,6 +246,7 @@ def create_app(
             if rec.state in (RecorderState.RECORDING, RecorderState.ERROR):
                 manifest = await run_in_threadpool(rec.stop)
             app.state.recorder = None
+            _nuc_hold_end()
             if manifest is not None and exp_dir is not None:
                 try:
                     await run_in_threadpool(_export_roi_series, exp_dir)
@@ -538,8 +542,47 @@ def create_app(
             extra["rois"] = parsed
         return extra
 
+    app.state.nuc_restore = None
+    nuc_settle_s = 2.5  # the A70 freezes its image for ~2 s while it performs a NUC
+
+    def _nuc_hold_begin(svc: AcquisitionService, *, nuc_first: bool) -> dict[str, Any] | None:
+        """NUC now (optional), then NUCMode=Off; metadata block, or None if unsupported."""
+        try:
+            before = svc.backend.camera_info().get("nuc_mode")
+        except Exception:  # noqa: BLE001 - a backend without the node just skips the hold
+            return None
+        if before is None:
+            return None
+        did_nuc = False
+        if nuc_first and before != "Off":
+            try:
+                svc.backend.execute("NUCAction")
+                did_nuc = True
+                if getattr(svc.backend, "name", "") == "spinnaker":
+                    time.sleep(nuc_settle_s)
+            except Exception:  # noqa: BLE001
+                logger.exception("pre-record NUC failed; continuing")
+        try:
+            svc.backend.set_parameters({"NUCMode": "Off"})
+        except Exception:  # noqa: BLE001
+            logger.exception("could not set NUCMode=Off; recording without the hold")
+            return None
+        app.state.nuc_restore = before
+        return {"mode_before": before, "nuc_before_start": did_nuc}
+
+    def _nuc_hold_end() -> None:
+        before = app.state.nuc_restore
+        app.state.nuc_restore = None
+        svc = service()
+        if before is None or svc is None:
+            return
+        try:
+            svc.backend.set_parameters({"NUCMode": before})
+        except Exception:  # noqa: BLE001
+            logger.exception("could not restore NUCMode=%s", before)
+
     async def _start_recording(
-        req: RecordingStartRequest, *, attach_service: bool = True
+        req: RecordingStartRequest, *, attach_service: bool = True, nuc_first: bool = True
     ) -> tuple[Recorder, Path, dict[str, Any]]:
         svc = service()
         if svc is None or svc.state != ServiceState.ACQUIRING:
@@ -547,6 +590,13 @@ def create_app(
         if recorder() is not None and recorder().state == RecorderState.RECORDING:  # type: ignore[union-attr]
             raise HTTPException(409, "already recording")
         extra = _recording_extra(req)
+        hold = None
+        if req.nuc_hold and app.state.nuc_restore is None:
+            hold = await run_in_threadpool(_nuc_hold_begin, svc, nuc_first=nuc_first)
+        elif req.nuc_hold and app.state.nuc_restore is not None:  # armed: held since arm time
+            hold = {"mode_before": app.state.nuc_restore, "nuc_before_start": False}
+        if hold is not None:
+            extra["nuc_hold"] = hold
         rec = Recorder(
             svc if attach_service else None,
             experiments_root=app.state.experiments_root,
@@ -564,6 +614,8 @@ def create_app(
         except RuntimeError as exc:
             raise HTTPException(507 if "free space" in str(exc) else 400, str(exc)) from exc
         app.state.recorder = rec
+        if hold is not None and hold.get("nuc_before_start"):
+            rec.note_event("nuc", {"reason": "pre-record", "requested_by": "nuc_hold"})
         visible: dict[str, Any] = {"state": "idle"}
         if req.visible:
             if visible_factory is None:
@@ -605,10 +657,13 @@ def create_app(
                 if action == "start":
                     req: ArmRequest = app.state.arm_req
                     try:
-                        rec, _exp_dir, _vis = await _start_recording(req, attach_service=False)
+                        rec, _exp_dir, _vis = await _start_recording(
+                            req, attach_service=False, nuc_first=False
+                        )
                     except HTTPException as exc:
                         logger.error("armed start failed: %s", exc.detail)
                         _disarm()
+                        _nuc_hold_end()
                         return
                     pre = armer.attach(rec)
                     rec.note_event(
@@ -672,6 +727,8 @@ def create_app(
         # fewer than 60 fps (A70 max is 30; 2 s at 60 fps of 640x480 uint16 is ~74 MB).
         fps = float(svc.stats().get("camera_fps") or 0)
         armer = Armer(spec, rois, fps_hint=max(fps, 60.0))
+        if req.nuc_hold:
+            await run_in_threadpool(_nuc_hold_begin, svc, nuc_first=True)
         app.state.armer = armer
         app.state.arm_req = req
         svc.add_listener(armer.on_frame)
@@ -693,6 +750,7 @@ def create_app(
             rec.note_event("trigger_end", {"reason": "disarmed"})
             manifest = await _finalize_recording()
             return {"state": "idle", "manifest": manifest}
+        _nuc_hold_end()
         return {"state": "idle"}
 
     @app.post("/api/recording/arm/start")

@@ -24,6 +24,7 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: Roi
   const [err, setErr] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [withVisible, setWithVisible] = useState(true);
+  const [nucHold, setNucHold] = useState(true);
 
   useEffect(() => {
     const tick = async () => { try { setStatus(await api.recordingStatus()); } catch { /* keep last */ } };
@@ -39,7 +40,7 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: Roi
     try {
       const m: Record<string, unknown> = {};
       for (const f of FIELDS) { const v = meta[f.key]; if (v !== undefined && v !== "") m[f.key] = f.type === "number" ? Number(v) : v; }
-      await api.recordingArm(name, m, withVisible && visibleAvailable, rois, trigger);
+      await api.recordingArm(name, m, withVisible && visibleAvailable, rois, trigger, nucHold);
       setStatus(await api.recordingStatus());
     } catch (e) { setErr(String(e)); } finally { setBusy(false); }
   }
@@ -62,7 +63,7 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: Roi
         const v = meta[f.key];
         if (v !== undefined && v !== "") m[f.key] = f.type === "number" ? Number(v) : v;
       }
-      await api.recordingStart(name, m, withVisible && visibleAvailable, rois);
+      await api.recordingStart(name, m, withVisible && visibleAvailable, rois, nucHold);
       setStatus(await api.recordingStatus());
     } catch (e) { setErr(String(e)); } finally { setBusy(false); }
   }
@@ -112,6 +113,9 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: Roi
             <button className="secondary" onClick={() => setShowForm(!showForm)}>{showForm ? "Hide metadata" : "Metadata"}</button>
             <label className="hint" title={visibleAvailable ? "Also record the visible camera (RTSP /avc/ch1, H.264 stream copy) as visible.mp4" : `visible camera unavailable: ${vis?.reason ?? "no status yet"}`}>
               <input type="checkbox" checked={withVisible && visibleAvailable} disabled={!visibleAvailable} onChange={(e) => setWithVisible(e.target.checked)} /> visible video
+            </label>
+            <label className="hint" title="Run a NUC right before the recording, then hold NUCMode=Off until stop so the camera never freezes its image mid-run (~2 s per NUC). The previous mode is restored at stop.">
+              <input type="checkbox" checked={nucHold} onChange={(e) => setNucHold(e.target.checked)} /> NUC before, none during
             </label>
           </>
         ) : recording && !armed ? (

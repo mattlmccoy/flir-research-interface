@@ -96,11 +96,11 @@ export const api = {
     if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
     return res.arrayBuffer();
   },
-  recordingStart: (name: string, metadata: Record<string, unknown>, visible = false, rois: unknown[] | null = null) =>
-    j<{ state: string; experiment_dir: string; visible?: VisibleStatus }>(req("/api/recording/start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, metadata, visible, rois }) })),
+  recordingStart: (name: string, metadata: Record<string, unknown>, visible = false, rois: unknown[] | null = null, nucHold = true) =>
+    j<{ state: string; experiment_dir: string; visible?: VisibleStatus }>(req("/api/recording/start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, metadata, visible, rois, nuc_hold: nucHold }) })),
   recordingStop: () => j<Record<string, unknown>>(req("/api/recording/stop", { method: "POST" })),
-  recordingArm: (name: string, metadata: Record<string, unknown>, visible: boolean, rois: unknown[] | null, trigger: unknown) =>
-    j<{ state: string }>(req("/api/recording/arm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, metadata, visible, rois, trigger }) })),
+  recordingArm: (name: string, metadata: Record<string, unknown>, visible: boolean, rois: unknown[] | null, trigger: unknown, nucHold = true) =>
+    j<{ state: string }>(req("/api/recording/arm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, metadata, visible, rois, trigger, nuc_hold: nucHold }) })),
   recordingDisarm: () => j<Record<string, unknown>>(req("/api/recording/disarm", { method: "POST" })),
   recordingArmStart: () => j<Record<string, unknown>>(req("/api/recording/arm/start", { method: "POST" })),
   recordingStatus: () => j<RecordingStatus>(req("/api/recording/status")),
