@@ -111,6 +111,19 @@ live and playback. Timeline pacing uses the recorded device timestamps. Incomple
 (no manifest) open normally and are labelled INCOMPLETE. Reading never writes: verified by
 hashing the experiment tree before and after a playback session.
 
+## 6c. Frontend system (UI spec 2026-09-01)
+
+Tokens live in `frontend/src/theme.css` (IBM Plex Sans/Mono self-hosted under `frontend/public/fonts`);
+`styles.css` may not define `:root` or colour literals (enforced by tests). The Studio frame
+(`frontend/src/components/studio/`) provides the tool strip, the center image with a plot dock, a
+right rail of collapsible sections, and a status bar that never shows green. Layout state is a
+pure reducer in `lib/layout.ts` persisted under `localStorage["fri.layout.v1"]` with validation on
+load. Experiments render as cards with `preview.png` (frame at 50 %) and a 12-frame
+`keyframes.png` strip for hover-scrub; both are derived from the store by `analysis/preview.py`
+at finalize (or by `fri-thumbs`) and recorded in `manifest.previews` and `previews.json`.
+"Reveal" calls `POST /api/experiments/{name}/reveal`, which opens the folder in the OS file
+manager after verifying the resolved path lies inside the experiments root.
+
 ## 7. Network model (Milestone 10)
 
 The acquisition machine owns the camera link (GigE/PoE). The UI is served on the LAN,

@@ -48,6 +48,7 @@ the probe output from the real A70 before touching radiometric node names.
   Decisions: palette applied client-side only; server never sends colorized data; viz drops counted, never silent; recording not in M3.
 - [x] M4 Recording (2026-09-01): Zarr v2 (docs/data_format.md); recorder + API + UI verified on the A70 (291 frames, 0 drops). Camera-controls panel (case/object params/NUC/frame rate, block-while-recording) still TODO -> fold into M6/M8.
 - [x] M5 Playback (2026-09-01): ExperimentReader (read-only), experiments/timeline/frame endpoints, Experiments + Playback pages (scrub, play/pause, step, speed, keyboard), store hash unchanged after playback.
+- [x] UI plan 1 (2026-09-02, branch feat/ui-studio): tokens+fonts, layout reducer, Studio shell, live/playback in frame, previews (preview.png/keyframes.png/previews.json), reveal endpoint, experiments card grid with hover-scrub. Remaining plans: deployment (site + operator), camera controls.
 - [ ] M6 ROI/plots (+ camera-controls panel), M7 export, M8 experiment metadata/events.
 - [ ] M9 Visible camera recorder (RTSP /avc/ch1 H.264 1280x960 via ffmpeg -c copy; host-clock alignment).
 - [ ] M10 Packaging + mDNS hostname + installer that prompts for the right Teledyne download.
