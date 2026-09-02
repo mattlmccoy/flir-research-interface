@@ -35,6 +35,57 @@ from flir_research_interface.sdk_install import detect_and_select, pyspin_import
 
 logger = logging.getLogger(__name__)
 
+API_VERSION = "1.0"
+"""Handshake version for the site UI (spec §6.3): major mismatch = refuse, minor = banner."""
+LOCAL_ORIGIN_RE = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+CLIENT_HEADER = "x-fri-client"
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def install_cross_origin_policy(app: FastAPI, *, site_origin: str | None) -> None:
+    """CORS for localhost + the site, Private Network Access, and the X-FRI-Client requirement.
+
+    A state-changing request whose ``Origin`` differs from the operator's own host (i.e. the UI
+    served from the site, or any other website) must carry ``X-FRI-Client: 1``; the operator-served
+    UI (same origin) and local tools without an ``Origin`` header are unaffected.
+    """
+    from starlette.middleware.cors import CORSMiddleware
+    from starlette.requests import Request as StarletteRequest
+    from starlette.responses import JSONResponse
+
+    def _cross_origin(request: StarletteRequest) -> bool:
+        origin = request.headers.get("origin")
+        if not origin:
+            return False
+        host = request.headers.get("host", "")
+        return origin.split("://", 1)[-1].lower() != host.lower()
+
+    @app.middleware("http")
+    async def _client_header_guard(request: StarletteRequest, call_next):  # type: ignore[no-untyped-def]
+        if (
+            request.method not in SAFE_METHODS
+            and request.url.path.startswith("/api/")
+            and _cross_origin(request)
+            and request.headers.get(CLIENT_HEADER) != "1"
+        ):
+            return JSONResponse(
+                {"detail": "browser requests must send the X-FRI-Client: 1 header"},
+                status_code=403,
+            )
+        response = await call_next(request)
+        return response
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[site_origin] if site_origin else [],
+        allow_origin_regex=LOCAL_ORIGIN_RE,
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["content-type", CLIENT_HEADER, "if-none-match"],
+        expose_headers=["etag", "content-disposition"],
+        allow_private_network=True,  # Chrome Local Network Access preflight
+        max_age=600,
+    )
+
 FRONTEND_DIST = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 
 
@@ -90,6 +141,7 @@ def create_app(
     min_free_gb: float = 2.0,
     reveal_runner: Runner | None = None,
     visible_factory: Callable[[], Any] | None = None,
+    site_origin: str | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
@@ -104,6 +156,7 @@ def create_app(
             await run_in_threadpool(svc.disconnect)
 
     app = FastAPI(title="FLIR Research Interface", version=__version__, lifespan=lifespan)
+    install_cross_origin_policy(app, site_origin=site_origin)
     app.state.default_backend = default_backend
     app.state.sim_fps = sim_fps
     app.state.viz_fps = viz_fps
@@ -150,7 +203,13 @@ def create_app(
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
-        return {"status": "ok", "version": __version__, "platform": platform.platform()}
+        return {
+            "status": "ok",
+            "version": __version__,
+            "app_version": __version__,
+            "api_version": API_VERSION,
+            "platform": platform.platform(),
+        }
 
     @app.get("/api/setup/sdk")
     def setup_sdk() -> dict[str, Any]:
