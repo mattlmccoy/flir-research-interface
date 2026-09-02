@@ -80,9 +80,7 @@ def test_reveal_endpoints(tmp_path: Path) -> None:
 def test_reveal_endpoint_reports_501_when_unsupported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import flir_research_interface.api.reveal as rv
-
-    monkeypatch.setattr(rv.platform, "system", lambda: "Plan9")
+    monkeypatch.setattr("flir_research_interface.api.reveal.platform.system", lambda: "Plan9")
     app = create_app(experiments_root=tmp_path, reveal_runner=lambda _c: 0)
     with TestClient(app) as c:
         assert c.post("/api/experiments/reveal-root").status_code == 501
