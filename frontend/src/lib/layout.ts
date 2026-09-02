@@ -2,6 +2,7 @@ import { DEFAULT_ISOTHERM, parseIsotherm, type Isotherm } from "./isotherm.ts";
 /** Studio layout state (spec §3): which panels are open, which rail sections, which tool, image zoom. */
 import { isZoom, type Zoom } from "./zoom.ts";
 export const TOOLS = ["select", "spot", "rect", "circle", "line", "polygon"] as const;
+const isDelta = (v: unknown): v is { a: number; b: number } => !!v && typeof v === "object" && Number.isInteger((v as { a: unknown }).a) && Number.isInteger((v as { b: unknown }).b);
 export const SECTIONS = ["measurements", "profile", "camera", "experiment", "recording", "display", "export", "visible"] as const;
 export type Tool = (typeof TOOLS)[number];
 export type Panel = "strip" | "rail" | "dock";
@@ -19,6 +20,8 @@ export interface LayoutState {
   extremes: boolean;
   /** Isotherm painting over the palette (live + playback). */
   isotherm: Isotherm;
+  /** Plot an extra trace A − B (ROI ids), or null. */
+  delta: { a: number; b: number } | null;
   /** Overlay registration: opacity 0–1, scale 0.5–2 and offsets in % of the image (visible lens ≠ IR lens). */
   overlay: Overlay;
   sections: Record<Section, boolean>;
@@ -59,6 +62,7 @@ export const DEFAULT_LAYOUT: LayoutState = {
   visibleMode: "rail",
   extremes: true,
   isotherm: DEFAULT_ISOTHERM,
+  delta: null,
   overlay: DEFAULT_OVERLAY,
   sections: { measurements: true, profile: false, camera: true, experiment: true, recording: true, display: true, export: true, visible: true },
 };
@@ -73,6 +77,7 @@ export type LayoutAction =
   | { type: "setZoom"; zoom: Zoom }
   | { type: "setExtremes"; on: boolean }
   | { type: "setIsotherm"; isotherm: Isotherm }
+  | { type: "setDelta"; delta: { a: number; b: number } | null }
   | { type: "setVisibleMode"; mode: VisibleMode }
   | { type: "setOverlay"; patch: Partial<Overlay> }
   | { type: "collapseAll" }
@@ -89,6 +94,7 @@ export function layoutReducer(s: LayoutState, a: LayoutAction): LayoutState {
     case "setVisibleMode": return { ...s, visibleMode: a.mode };
     case "setExtremes": return { ...s, extremes: a.on };
     case "setIsotherm": return { ...s, isotherm: parseIsotherm(a.isotherm) };
+    case "setDelta": return { ...s, delta: a.delta };
     case "setOverlay": return { ...s, overlay: clampOverlay({ ...s.overlay, ...a.patch }) };
     case "collapseAll": return { ...s, strip: false, rail: false, dock: false };
     case "restoreAll": return { ...s, strip: true, rail: true, dock: true };
@@ -132,6 +138,7 @@ export function loadLayout(storage: Storage | null): LayoutState {
       visibleMode: isVisibleMode(parsed.visibleMode) ? parsed.visibleMode : parsed.visibleSide === true ? "side" : DEFAULT_LAYOUT.visibleMode,
       extremes: typeof parsed.extremes === "boolean" ? parsed.extremes : DEFAULT_LAYOUT.extremes,
       isotherm: parseIsotherm(parsed.isotherm),
+      delta: isDelta(parsed.delta) ? parsed.delta : null,
       overlay: clampOverlay({
         opacity: num(ov.opacity, DEFAULT_OVERLAY.opacity),
         scale: num(ov.scale, DEFAULT_OVERLAY.scale),

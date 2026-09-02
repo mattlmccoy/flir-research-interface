@@ -1,3 +1,5 @@
+import { DeltaPicker } from "../components/DeltaPicker.tsx";
+import { deltaTrace } from "../lib/delta.ts";
 import { ProfilePanel, type FieldSnapshot } from "../components/ProfilePanel.tsx";
 import { radiometryFromCamera } from "../lib/emissivity.ts";
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
@@ -135,6 +137,12 @@ export function PlaybackPage(p: Props) {
   const recordedH = info?.visible_alignment ? parseAlignment(info.visible_alignment).H : null;
   const overlayH = recordedH ?? loadAlignment(typeof localStorage !== "undefined" ? localStorage : null).H;
   const traces = seriesTraces(series, p.rois);
+  const withDelta = (() => {
+    const d = p.layout.delta;
+    if (!d) return traces;
+    const a = traces.find((x) => x.id === d.a), b = traces.find((x) => x.id === d.b);
+    return a && b ? [...traces, deltaTrace(a, b)] : traces;
+  })();
 
   const transport = (
     <span style={{ display: "flex", gap: 8, alignItems: "center", flex: "1 1 auto", minWidth: 0 }}>
@@ -167,7 +175,7 @@ export function PlaybackPage(p: Props) {
       }
       dock={
         <PlotDock title="temperature vs time (whole recording)" onCollapse={() => p.dispatch({ type: "toggle", panel: "dock" })}>
-          <TimePlot traces={traces} markers={markers} window={{ t0: 0, t1: Math.max(info?.duration_s ?? 0, 0.001) }} cursorT={t}
+          <TimePlot traces={withDelta} markers={markers} window={{ t0: 0, t1: Math.max(info?.duration_s ?? 0, 0.001) }} cursorT={t}
             emptyText={p.rois.rois.length ? "loading series…" : "add a spot or rectangle ROI to plot it over the whole recording"}
             onSeek={(tt) => { if (tl) { setPlaying(false); setIndex(nearestIndex(tl.t_s, tt)); } }} />
         </PlotDock>
@@ -209,6 +217,7 @@ export function PlaybackPage(p: Props) {
             )}
             <RoiRows rois={p.rois.rois} stats={stats} selected={p.rois.selected} extremes={p.layout.extremes} onExtremes={(on) => p.dispatch({ type: "setExtremes", on })}
               dispatch={p.roiDispatch} />
+            <DeltaPicker rois={p.rois.rois} delta={p.layout.delta} onChange={(delta) => p.dispatch({ type: "setDelta", delta })} />
             {err && <div className="errbox">{err}</div>}
           </RailSection>
           <RailSection title="display" open={p.layout.sections.display} onToggle={() => p.dispatch({ type: "toggleSection", section: "display" })} tag="visualization only">

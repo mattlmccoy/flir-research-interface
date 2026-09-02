@@ -163,3 +163,14 @@ test("isotherm settings live in the layout and persist", () => {
   saveLayout(storage, s1);
   assert.deepEqual(loadLayout(storage).isotherm, s1.isotherm);
 });
+
+test("delta pair (A − B) lives in the layout, persists, and clears with null", () => {
+  assert.equal(DEFAULT_LAYOUT.delta, null);
+  const s1 = layoutReducer(DEFAULT_LAYOUT, { type: "setDelta", delta: { a: 2, b: 5 } });
+  assert.deepEqual(s1.delta, { a: 2, b: 5 });
+  const store = new Map<string, string>();
+  const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); } } as unknown as Storage;
+  saveLayout(storage, s1);
+  assert.deepEqual(loadLayout(storage).delta, { a: 2, b: 5 });
+  assert.equal(layoutReducer(s1, { type: "setDelta", delta: null }).delta, null);
+});

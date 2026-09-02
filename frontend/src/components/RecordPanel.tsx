@@ -1,3 +1,4 @@
+import { markForKey } from "../lib/delta.ts";
 import { useEffect, useState } from "react";
 import { api, type RecordingStatus } from "../lib/api.ts";
 
@@ -55,6 +56,20 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: unk
   const [markName, setMarkName] = useState("");
   const [markNote, setMarkNote] = useState("");
   const [lastMark, setLastMark] = useState<string | null>(null);
+  useEffect(() => {
+    if (!recording) return;
+    const onKey = (e: KeyboardEvent) => {
+      const tgt = e.target as HTMLElement | null;
+      const inInput = !!tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.tagName === "SELECT" || tgt.isContentEditable);
+      const m = markForKey(e.key, inInput || e.metaKey || e.ctrlKey || e.altKey);
+      if (!m) return;
+      e.preventDefault();
+      void mark(m);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recording, markNote]);
   async function mark(label: string) {
     const nm = label.trim();
     if (!nm) return;
@@ -85,8 +100,8 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: unk
       {recording && (
         <>
           <div className="row" aria-label="event marks">
-            <button className="secondary" onClick={() => mark("RF ON")}>RF ON</button>
-            <button className="secondary" onClick={() => mark("RF OFF")}>RF OFF</button>
+            <button className="secondary" onClick={() => mark("RF ON")} title="keyboard: r">RF ON <small className="muted">r</small></button>
+            <button className="secondary" onClick={() => mark("RF OFF")} title="keyboard: f">RF OFF <small className="muted">f</small></button>
             <input type="text" value={markName} placeholder="custom mark" style={{ width: 110 }} onChange={(e) => setMarkName(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") void mark(markName); }} />
             <button className="secondary" disabled={!markName.trim()} onClick={() => mark(markName)}>mark</button>

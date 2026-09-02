@@ -1,3 +1,5 @@
+import { DeltaPicker } from "./components/DeltaPicker.tsx";
+import { deltaTrace } from "./lib/delta.ts";
 import { ProfilePanel, type FieldSnapshot } from "./components/ProfilePanel.tsx";
 import { radiometryFromCamera } from "./lib/emissivity.ts";
 import { useCallback, useEffect, useReducer, useRef, useState, useMemo } from "react";
@@ -148,6 +150,12 @@ export function App() {
     const b = buffers.current.get(r.id);
     return [{ id: r.id, label: roiLabel(r), color: roiColor(r, i), t: b?.t ?? [], v: b?.v ?? [] }];
   });
+  const withDelta = (() => {
+    const d = layout.delta;
+    if (!d) return traces;
+    const a = traces.find((x) => x.id === d.a), b = traces.find((x) => x.id === d.b);
+    return a && b ? [...traces, deltaTrace(a, b)] : traces;
+  })();
 
   const topbar = (
     <>
@@ -207,7 +215,7 @@ export function App() {
               {WINDOWS.map((w) => <option key={String(w)} value={String(w)}>{windowLabel(w)}</option>)}
             </select>
           }>
-          <TimePlot traces={traces} window={visibleWindow(nowT, liveWindow, 0)} emptyText="add a spot or rectangle ROI to plot its temperature" />
+          <TimePlot traces={withDelta} window={visibleWindow(nowT, liveWindow, 0)} emptyText="add a spot or rectangle ROI to plot its temperature" />
         </PlotDock>
       }
       rail={
@@ -227,6 +235,7 @@ export function App() {
             {nearLimit && <div className="warnbox">Max within 10 °C of the range limit ({active?.high_c} °C).</div>}
             <RoiRows rois={rois.rois} stats={liveStats} selected={rois.selected} extremes={layout.extremes} onExtremes={(on) => dispatch({ type: "setExtremes", on })}
               dispatch={roiDispatch} />
+            <DeltaPicker rois={rois.rois} delta={layout.delta} onChange={(delta) => dispatch({ type: "setDelta", delta })} />
           </RailSection>
           <RailSection title="profile & histogram" open={layout.sections.profile} onToggle={() => dispatch({ type: "toggleSection", section: "profile" })} tag="current frame">
             <ProfilePanel field={field} rois={rois.rois} selected={rois.selected} shown={shown} />
