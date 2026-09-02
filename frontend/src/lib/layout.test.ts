@@ -46,3 +46,29 @@ test("save/load round-trips and ignores corrupt storage", () => {
   assert.deepEqual(loadLayout(st), DEFAULT_LAYOUT);
   assert.deepEqual(loadLayout(null), DEFAULT_LAYOUT);
 });
+
+test("loadLayout rejects invalid shapes instead of trusting them", () => {
+  const st = memStorage();
+  st.setItem("fri.layout.v1", JSON.stringify({ tool: "wrench", strip: "yes", sections: { camera: "open" }, evil: 1 }));
+  assert.deepEqual(loadLayout(st), DEFAULT_LAYOUT);
+});
+
+test("loadLayout keeps valid fields when others are missing or invalid", () => {
+  const st = memStorage();
+  st.setItem("fri.layout.v1", JSON.stringify({ rail: false, tool: "bogus", sections: { camera: false } }));
+  const s = loadLayout(st);
+  assert.equal(s.rail, false); assert.equal(s.tool, "select");
+  assert.equal(s.sections.camera, false); assert.equal(s.sections.display, true);
+});
+
+test("reducer does not mutate its input", () => {
+  const snapshot = structuredClone(DEFAULT_LAYOUT);
+  layoutReducer(DEFAULT_LAYOUT, { type: "toggleSection", section: "camera" });
+  assert.deepEqual(DEFAULT_LAYOUT, snapshot);
+});
+
+test("a throwing Storage never escapes", () => {
+  const bad = { getItem() { throw new Error("SecurityError"); }, setItem() { throw new Error("QuotaExceeded"); } } as unknown as Storage;
+  assert.deepEqual(loadLayout(bad), DEFAULT_LAYOUT);
+  assert.doesNotThrow(() => saveLayout(bad, DEFAULT_LAYOUT));
+});

@@ -260,9 +260,11 @@ Expected: `layout.test.ts` fails: cannot find module `./layout.ts`.
 
 ```ts
 /** Studio layout state (spec §3): which panels are open, which rail sections, which tool. */
-export type Tool = "select" | "spot" | "rect" | "line" | "display" | "camera" | "nuc";
+export const TOOLS = ["select", "spot", "rect", "line", "display", "camera", "nuc"] as const;
+export const SECTIONS = ["measurements", "camera", "experiment", "recording", "display"] as const;
+export type Tool = (typeof TOOLS)[number];
 export type Panel = "strip" | "rail" | "dock";
-export type Section = "measurements" | "camera" | "experiment" | "recording" | "display";
+export type Section = (typeof SECTIONS)[number];
 
 export interface LayoutState {
   strip: boolean;
@@ -279,6 +281,8 @@ export const DEFAULT_LAYOUT: LayoutState = {
   tool: "select",
   sections: { measurements: true, camera: true, experiment: true, recording: true, display: true },
 };
+Object.freeze(DEFAULT_LAYOUT.sections);
+Object.freeze(DEFAULT_LAYOUT);
 
 export type LayoutAction =
   | { type: "toggle"; panel: Panel }
@@ -287,6 +291,7 @@ export type LayoutAction =
   | { type: "collapseAll" }
   | { type: "restoreAll" };
 
+/** Applies one LayoutAction to a LayoutState, returning a new state without mutating the input. */
 export function layoutReducer(s: LayoutState, a: LayoutAction): LayoutState {
   switch (a.type) {
     case "toggle": return { ...s, [a.panel]: !s[a.panel] };
@@ -299,21 +304,40 @@ export function layoutReducer(s: LayoutState, a: LayoutAction): LayoutState {
 
 const KEY = "fri.layout.v1";
 
+function asRecord(v: unknown): Record<string, unknown> {
+  return v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+}
+
+function bool(v: unknown, fallback: boolean): boolean {
+  return typeof v === "boolean" ? v : fallback;
+}
+
+function isTool(v: unknown): v is Tool {
+  return typeof v === "string" && (TOOLS as readonly string[]).includes(v);
+}
+
+/** Reads and validates the persisted layout from storage; any missing, malformed, or unknown field falls back to DEFAULT_LAYOUT's value. */
 export function loadLayout(storage: Storage | null): LayoutState {
   try {
     const raw = storage?.getItem(KEY);
     if (!raw) return DEFAULT_LAYOUT;
-    const parsed = JSON.parse(raw) as Partial<LayoutState>;
+    const parsed = asRecord(JSON.parse(raw));
+    const sec = asRecord(parsed.sections);
     return {
-      ...DEFAULT_LAYOUT,
-      ...parsed,
-      sections: { ...DEFAULT_LAYOUT.sections, ...(parsed.sections ?? {}) },
+      strip: bool(parsed.strip, DEFAULT_LAYOUT.strip),
+      rail: bool(parsed.rail, DEFAULT_LAYOUT.rail),
+      dock: bool(parsed.dock, DEFAULT_LAYOUT.dock),
+      tool: isTool(parsed.tool) ? parsed.tool : DEFAULT_LAYOUT.tool,
+      sections: Object.fromEntries(
+        SECTIONS.map((k) => [k, bool(sec[k], DEFAULT_LAYOUT.sections[k])]),
+      ) as Record<Section, boolean>,
     };
   } catch {
     return DEFAULT_LAYOUT;
   }
 }
 
+/** Persists the layout to storage as JSON, silently ignoring a storage failure (quota, disabled, security error). */
 export function saveLayout(storage: Storage | null, s: LayoutState): void {
   try { storage?.setItem(KEY, JSON.stringify(s)); } catch { /* storage unavailable: ignore */ }
 }
@@ -484,6 +508,7 @@ export function RailSection({ title, open, onToggle, tag, children }: Props) {
 ```tsx
 import type { Tool } from "../../lib/layout.ts";
 
+// ids must come from TOOLS in lib/layout.ts
 const TOOLS: { id: Tool; glyph: string; title: string; enabled: boolean }[] = [
   { id: "select", glyph: "↖", title: "Select / hover readout", enabled: true },
   { id: "spot", glyph: "◎", title: "Spot (Milestone 6)", enabled: false },
