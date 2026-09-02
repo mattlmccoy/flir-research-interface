@@ -443,6 +443,10 @@ class Recorder:
         with self._lock:
             self._frames_written += n
 
+    def note_event(self, kind: str, data: dict[str, Any] | None = None) -> None:
+        """Append a timestamped event (e.g. a NUC request) to this recording's events.json."""
+        self._event(kind, dict(data or {}))
+
     def _event(self, kind: str, data: dict[str, Any]) -> None:
         with self._lock:
             self._events.append(

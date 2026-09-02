@@ -47,6 +47,10 @@ class RecordingStartRequest(BaseModel):
     metadata: dict[str, Any] = {}
 
 
+class ParametersRequest(BaseModel):
+    values: dict[str, Any]
+
+
 def _make_backend(name: str, *, sim_fps: float) -> CameraBackend:
     if name not in CAMERA_BACKENDS:
         raise HTTPException(400, f"unknown backend {name!r}; known: {sorted(CAMERA_BACKENDS)}")
@@ -245,6 +249,40 @@ def create_app(
         if svc is None:
             raise HTTPException(409, "not connected")
         return await run_in_threadpool(svc.backend.camera_info)
+
+    @app.post("/api/camera/parameters")
+    async def camera_parameters(req: ParametersRequest) -> dict[str, Any]:
+        """Write object parameters / case / NUC mode / frame rate. Locked while recording (§30)."""
+        svc = service()
+        if svc is None:
+            raise HTTPException(409, "not connected")
+        rec = recorder()
+        if rec is not None and rec.state == RecorderState.RECORDING:
+            raise HTTPException(409, "camera parameters are locked while recording")
+        try:
+            applied = await run_in_threadpool(svc.backend.set_parameters, req.values)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except CameraError as exc:
+            raise HTTPException(500, str(exc)) from exc
+        return {"applied": applied}
+
+    @app.post("/api/camera/nuc")
+    async def camera_nuc() -> dict[str, Any]:
+        """Trigger a NUC now. Allowed during recording; the request is logged as an event."""
+        svc = service()
+        if svc is None:
+            raise HTTPException(409, "not connected")
+        try:
+            await run_in_threadpool(svc.backend.execute, "NUCAction")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except CameraError as exc:
+            raise HTTPException(500, str(exc)) from exc
+        rec = recorder()
+        if rec is not None and rec.state == RecorderState.RECORDING:
+            rec.note_event("nuc", {"source": "operator"})
+        return {"ok": True}
 
     # -- recording -------------------------------------------------------------------------
 

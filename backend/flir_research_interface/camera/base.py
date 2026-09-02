@@ -100,6 +100,20 @@ class CameraBackend(ABC):
     def frames(self) -> Iterator[Frame]:
         """Yield frames continuously until the consumer stops iterating or disconnects."""
 
+    # -- controls (optional; brief §30) --------------------------------------------------
+
+    def set_parameters(self, values: dict[str, Any]) -> dict[str, Any]:
+        """Write camera nodes (object parameters, CurrentCase, NUCMode, IRFrameRate).
+
+        Returns the values read back. Raises ``ValueError`` for an unknown node or an
+        out-of-range value and ``CameraError`` when the backend cannot write.
+        """
+        raise CameraError(f"{type(self).__name__} does not support writing camera parameters")
+
+    def execute(self, command: str) -> None:
+        """Run a command node such as ``NUCAction``. ``ValueError`` for an unknown command."""
+        raise CameraError(f"{type(self).__name__} does not support command {command!r}")
+
     def __enter__(self) -> CameraBackend:
         return self
 

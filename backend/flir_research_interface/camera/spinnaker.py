@@ -25,6 +25,7 @@ from flir_research_interface.camera.base import (
     Frame,
     NotConnectedError,
 )
+from flir_research_interface.camera.controls import COMMANDS, ENUM_NODES, validate_values
 from flir_research_interface.radiometry.temperature_linear import KELVIN_OFFSET, IRFormat
 
 logger = logging.getLogger(__name__)
@@ -198,6 +199,48 @@ def _set_enum(ps: Any, nodemap: Any, name: str, symbolic: str) -> str:
         raise CameraError(f"entry {symbolic!r} not available on node {name!r}")
     node.SetIntValue(entry.GetValue())
     return previous
+
+
+def _enum_entries(ps: Any, nodemap: Any, name: str) -> list[str]:
+    """Symbolic names of the currently available entries of enumeration ``name``."""
+    try:
+        node = ps.CEnumerationPtr(nodemap.GetNode(name))
+        if not ps.IsReadable(node):
+            return []
+        out: list[str] = []
+        for entry in node.GetEntries():
+            e = ps.CEnumEntryPtr(entry)
+            if ps.IsReadable(e):
+                out.append(str(e.GetSymbolic()))
+        return out
+    except Exception:  # noqa: BLE001 - vendor nodes may throw
+        return []
+
+
+def _write(ps: Any, nodemap: Any, name: str, value: Any) -> None:
+    """Write one node by its GenICam interface type; ``CameraError`` if not writable."""
+    node = nodemap.GetNode(name)
+    if node is None or not ps.IsWritable(node):
+        raise CameraError(f"node {name!r} is not writable")
+    t = node.GetPrincipalInterfaceType()
+    if t == ps.intfIEnumeration:
+        _set_enum(ps, nodemap, name, str(value))
+    elif t == ps.intfIFloat:
+        f = ps.CFloatPtr(node)
+        lo, hi = float(f.GetMin()), float(f.GetMax())
+        if not lo <= float(value) <= hi:
+            raise ValueError(f"{name} must be within {lo}…{hi} on this camera")
+        f.SetValue(float(value))
+    elif t == ps.intfIInteger:
+        i = ps.CIntegerPtr(node)
+        lo, hi = int(i.GetMin()), int(i.GetMax())
+        if not lo <= int(value) <= hi:
+            raise ValueError(f"{name} must be within {lo}…{hi} on this camera")
+        i.SetValue(int(value))
+    elif t == ps.intfIBoolean:
+        ps.CBooleanPtr(node).SetValue(bool(value))
+    else:
+        raise CameraError(f"node {name!r} has an unsupported type for writing")
 
 
 def _ip_from_int(value: Any) -> str | None:
@@ -455,13 +498,51 @@ class SpinnakerCameraBackend(CameraBackend):
             IDENTITY_NODES + ACQUISITION_NODES + OBJECT_PARAMETER_NODES + CALIBRATION_CONSTANT_NODES
         )
         raw = {n: _read(ps, nm, n) for n in names}
-        return build_camera_info(
+        info = build_camera_info(
             raw,
             cases=self._cases,
             spinnaker_version=self.spinnaker_version(),
             ir_format_before=self._ir_format_before,
             timestamp_offset_ns=self._timestamp_offset_ns,
         )
+        info["enum_options"] = {n: _enum_entries(ps, nm, n) for n in ENUM_NODES}
+        info["nuc_count"] = self._nuc_count
+        return info
+
+    # -- controls (brief §30) ------------------------------------------------------------
+
+    _nuc_count = 0
+
+    def set_parameters(self, values: dict[str, Any]) -> dict[str, Any]:
+        self._require_connected()
+        ps, nm = self._ps, self._nodemap
+        clean = validate_values(
+            values,
+            enum_options={n: _enum_entries(ps, nm, n) for n in ENUM_NODES},
+            n_cases=len(self._cases),
+        )
+        try:
+            for name, v in clean.items():
+                _write(ps, nm, name, v)
+        except ps.SpinnakerException as exc:
+            raise CameraError(f"camera rejected the write: {exc}") from exc
+        logger.info("camera parameters written: %s", clean)
+        return {name: _read(ps, nm, name) for name in clean}
+
+    def execute(self, command: str) -> None:
+        self._require_connected()
+        if command not in COMMANDS:
+            raise ValueError(f"unknown command {command!r}")
+        ps, nm = self._ps, self._nodemap
+        node = nm.GetNode(command)
+        if node is None or not ps.IsWritable(node):
+            raise CameraError(f"command {command!r} is not available")
+        try:
+            ps.CCommandPtr(node).Execute()
+        except ps.SpinnakerException as exc:
+            raise CameraError(f"command {command!r} failed: {exc}") from exc
+        self._nuc_count += 1
+        logger.info("camera command executed: %s", command)
 
     def stream_stats(self) -> dict[str, Any]:
         """Transport-layer frame/packet counters (valid while or right after streaming)."""

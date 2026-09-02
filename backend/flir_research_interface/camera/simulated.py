@@ -26,6 +26,7 @@ from flir_research_interface.camera.base import (
     Frame,
     NotConnectedError,
 )
+from flir_research_interface.camera.controls import COMMANDS, validate_values
 from flir_research_interface.radiometry.temperature_linear import (
     KELVIN_OFFSET,
     IRFormat,
@@ -102,6 +103,15 @@ class SimulatedCameraBackend(CameraBackend):
 
     MODEL = "Simulated A70"
     SERIAL = "SIM-0001"
+    # The three factory cases the real A70 reported (°C), used only to mimic its info shape.
+    CASES_C: tuple[tuple[float, float], ...] = ((-20.0, 175.0), (-20.0, 250.0), (175.0, 1000.0))
+    ENUM_OPTIONS: dict[str, list[str]] = {
+        "NUCMode": ["Off", "Automatic"],
+        "IRFrameRate": ["Rate60Hz", "Rate30Hz", "Rate15Hz", "Rate7Hz", "Rate4Hz"],
+    }
+    RATE_HZ: dict[str, float] = {
+        "Rate60Hz": 60.0, "Rate30Hz": 30.0, "Rate15Hz": 15.0, "Rate7Hz": 7.5, "Rate4Hz": 3.75
+    }
 
     def __init__(
         self,
@@ -129,6 +139,19 @@ class SimulatedCameraBackend(CameraBackend):
         self._realtime = realtime
         self._connected = False
         self._frame_index = 0
+        self._params: dict[str, float] = {
+            "ObjectEmissivity": 0.95,
+            "ReflectedTemperature": 293.15,
+            "AtmosphericTemperature": 293.15,
+            "ObjectDistance": 1.0,
+            "RelativeHumidity": 0.5,
+            "ExtOpticsTemperature": 293.15,
+            "ExtOpticsTransmission": 1.0,
+        }
+        self._case = 1
+        self._nuc_mode = "Automatic"
+        self._ir_frame_rate = min(self.RATE_HZ, key=lambda k: abs(self.RATE_HZ[k] - fps))
+        self._nuc_count = 0
 
     # -- CameraBackend -----------------------------------------------------------------
 
@@ -159,6 +182,17 @@ class SimulatedCameraBackend(CameraBackend):
         return self._connected
 
     def camera_info(self) -> dict[str, Any]:
+        cases = [
+            {
+                "index": i,
+                "low_k": lo + KELVIN_OFFSET,
+                "high_k": hi + KELVIN_OFFSET,
+                "enabled": True,
+                "low_c": lo,
+                "high_c": hi,
+            }
+            for i, (lo, hi) in enumerate(self.CASES_C)
+        ]
         return {
             "backend": "simulated",
             "model": self.MODEL,
@@ -168,9 +202,37 @@ class SimulatedCameraBackend(CameraBackend):
             "pixel_format": "Mono16",
             "ir_format": self._ir_format.value,
             "frame_rate_hz": self._fps,
+            "ir_frame_rate": self._ir_frame_rate,
             "noise_k": self._noise_k,
             "scene": {"type": type(self._scene).__name__, **asdict(self._scene)},  # type: ignore[call-overload]
+            "measurement_cases": cases,
+            "active_case": cases[self._case],
+            "object_parameters": dict(self._params),
+            "nuc_mode": self._nuc_mode,
+            "nuc_count": self._nuc_count,
+            "enum_options": {k: list(v) for k, v in self.ENUM_OPTIONS.items()},
         }
+
+    def set_parameters(self, values: dict[str, Any]) -> dict[str, Any]:
+        clean = validate_values(
+            values, enum_options=self.ENUM_OPTIONS, n_cases=len(self.CASES_C)
+        )
+        for name, v in clean.items():
+            if name == "CurrentCase":
+                self._case = int(v)
+            elif name == "NUCMode":
+                self._nuc_mode = str(v)
+            elif name == "IRFrameRate":
+                self._ir_frame_rate = str(v)
+                self._fps = self.RATE_HZ[str(v)]
+            else:
+                self._params[name] = float(v)
+        return clean
+
+    def execute(self, command: str) -> None:
+        if command not in COMMANDS:
+            raise ValueError(f"unknown command {command!r}")
+        self._nuc_count += 1
 
     def frames(self) -> Iterator[Frame]:
         if not self._connected:
