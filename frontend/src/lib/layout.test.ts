@@ -140,3 +140,14 @@ test("overlay registration: defaults, partial updates are clamped, persisted val
   st.set("fri.layout.v1", JSON.stringify({ overlay: { opacity: "x", scale: 1.25, dx: 3 } }));
   assert.deepEqual(loadLayout(storage).overlay, { opacity: 0.5, scale: 1.25, dx: 3, dy: 0 });
 });
+
+test("hot/cold markers default on, toggle, and survive a reload", () => {
+  const s0 = layoutReducer(DEFAULT_LAYOUT, { type: "setZoom", zoom: 1 });
+  assert.equal(s0.extremes, true);
+  const s1 = layoutReducer(s0, { type: "setExtremes", on: false });
+  assert.equal(s1.extremes, false);
+  const store = new Map<string, string>();
+  const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); } } as unknown as Storage;
+  saveLayout(storage, s1);
+  assert.equal(loadLayout(storage).extremes, false);
+});

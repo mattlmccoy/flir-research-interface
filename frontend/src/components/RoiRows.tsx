@@ -4,6 +4,8 @@ import { COLOR_PRESETS, roiColor } from "../lib/overlay.ts";
 import { Disclosure } from "./Disclosure.tsx";
 
 interface Props {
+  /** Hot/cold marker toggle (undefined hides the button). */
+  extremes?: boolean; onExtremes?: (on: boolean) => void;
   rois: Roi[];
   stats: Map<number, RoiStats>;
   selected: number | null;
@@ -53,7 +55,7 @@ function ColorPicker({ r, i, dispatch, onDone }: { r: Roi; i: number; dispatch: 
 }
 
 /** One row per ROI: colour swatch (click to change), editable name, current values, remove. */
-export function RoiRows({ rois, stats, selected, dispatch }: Props) {
+export function RoiRows({ rois, stats, selected, dispatch, extremes, onExtremes }: Props) {
   const [editing, setEditing] = useState<number | null>(null);
   const [picking, setPicking] = useState<number | null>(null);
   const help = (
@@ -101,6 +103,7 @@ export function RoiRows({ rois, stats, selected, dispatch }: Props) {
       <div className="row">
         <button className="secondary" type="button" onClick={() => dispatch({ type: "setHiddenAll", hidden: !rois.every((r) => r.hidden) })} title="Hide or show every ROI on the image; measurements, recording and exports are unaffected">{rois.every((r) => r.hidden) ? "show all" : "hide all"}</button>
         <button className="secondary" type="button" onClick={() => dispatch({ type: "clear" })}>clear all</button>
+        {onExtremes && <button className="secondary" type="button" aria-pressed={!!extremes} onClick={() => onExtremes(!extremes)} title="Mark the hottest (▲) and coldest (▽) pixel inside every area ROI" style={{ marginLeft: "auto", opacity: extremes ? 1 : 0.6 }}>▲▽ hot/cold</button>}
       </div>
       {help}
     </>

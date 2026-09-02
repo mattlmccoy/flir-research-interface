@@ -229,3 +229,27 @@ test("hide/show: toggleHidden flips one ROI, setHiddenAll sets every ROI, visibl
   saveRois(storage, s);
   assert.deepEqual(loadRois(storage).rois.map((r) => !!r.hidden), [false, true]);
 });
+
+test("setOptics stores per-ROI emissivity / reflected temperature and clears with null", () => {
+  let s = roiReducer(EMPTY, { type: "add", roi: { kind: "rect", x0: 0, y0: 0, x1: 2, y1: 2 } });
+  s = roiReducer(s, { type: "setOptics", id: 1, emissivity: 0.3, reflected_c: 25 });
+  assert.equal(s.rois[0].emissivity, 0.3);
+  assert.equal(s.rois[0].reflected_c, 25);
+  s = roiReducer(s, { type: "setOptics", id: 1, emissivity: 1.7, reflected_c: null });
+  assert.equal(s.rois[0].emissivity, 0.3, "out-of-range emissivity is ignored");
+  assert.equal(s.rois[0].reflected_c, undefined);
+  s = roiReducer(s, { type: "setOptics", id: 1, emissivity: null });
+  assert.equal(s.rois[0].emissivity, undefined);
+});
+
+test("roiStats reports where the hottest and coldest pixels are (image coordinates)", () => {
+  // 4x3 field: max at (x=3, y=1), min at (x=0, y=2)
+  const f = new Float32Array([5, 5, 5, 5, 5, 5, 5, 9, 1, 5, 5, 5]);
+  const s = roiStats(f, 4, 3, { id: 1, kind: "rect", x0: 0, y0: 0, x1: 4, y1: 3 });
+  assert.deepEqual(s.maxAt, [3, 1]);
+  assert.deepEqual(s.minAt, [0, 2]);
+  const spot = roiStats(f, 4, 3, { id: 2, kind: "spot", x: 1, y: 1 });
+  assert.equal(spot.maxAt, undefined, "a spot has no extremes");
+  const empty = roiStats(f, 4, 3, { id: 3, kind: "rect", x0: 10, y0: 10, x1: 12, y1: 12 });
+  assert.equal(empty.maxAt, undefined);
+});

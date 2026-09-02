@@ -10,6 +10,8 @@ type PE = RPointerEvent<HTMLCanvasElement>;
 interface Props {
   box: Box; width: number; height: number;
   rois: Roi[]; selected: number | null; stats: Map<number, RoiStats>; draft: Draft | null;
+  /** Draw ▲ at the hottest and ▽ at the coldest pixel of every area ROI (default on). */
+  extremes?: boolean;
   cursor: string;
   onPointerDown: (e: PE) => void; onPointerMove: (e: PE) => void; onPointerUp: (e: PE) => void;
   onPointerLeave: () => void; onKeyDown: (e: RKeyboardEvent<HTMLCanvasElement>) => void;
@@ -83,6 +85,20 @@ function drawShape(ctx: CanvasRenderingContext2D, r: RoiInput, sx: number, sy: n
 }
 
 /** Canvas layer over the image: ROI shapes and value labels in image-pixel coordinates. */
+/** Hot (▲, warm colour) / cold (▽, cool colour) pixel markers, Research Studio style. */
+function drawMarker(ctx: CanvasRenderingContext2D, x: number, y: number, kind: "hot" | "cold", scrim: string): void {
+  const s = 5;
+  ctx.save();
+  ctx.beginPath();
+  if (kind === "hot") { ctx.moveTo(x, y - s); ctx.lineTo(x + s, y + s); ctx.lineTo(x - s, y + s); }
+  else { ctx.moveTo(x, y + s); ctx.lineTo(x + s, y - s); ctx.lineTo(x - s, y - s); }
+  ctx.closePath();
+  ctx.fillStyle = kind === "hot" ? "#ff3b30" : "#4cc9f0";
+  ctx.strokeStyle = scrim; ctx.lineWidth = 1.5;
+  ctx.fill(); ctx.stroke();
+  ctx.restore();
+}
+
 export function RoiOverlay(p: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
 
@@ -112,6 +128,11 @@ export function RoiOverlay(p: Props) {
       const [lx, ly] = drawShape(ctx, r, sx, sy, true);
       if (sel) { ctx.strokeStyle = accent; ctx.lineWidth = 1; ctx.setLineDash([3, 3]); drawShape(ctx, r, sx, sy, false); ctx.setLineDash([]); }
       drawLabel(ctx, `${roiLabel(r)}${statText(r, p.stats.get(r.id))}`, lx, ly, color, scrim, p.box);
+      const st = p.stats.get(r.id);
+      if (p.extremes !== false && st?.maxAt && st.minAt && st.n > 1) {
+        drawMarker(ctx, (st.maxAt[0] + 0.5) * sx, (st.maxAt[1] + 0.5) * sy, "hot", scrim);
+        drawMarker(ctx, (st.minAt[0] + 0.5) * sx, (st.minAt[1] + 0.5) * sy, "cold", scrim);
+      }
     });
     if (p.draft) {
       ctx.strokeStyle = accent; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);

@@ -14,6 +14,8 @@ export interface LayoutState {
   zoom: Zoom;
   /** Where the visible camera shows: small in the rail, beside the thermal image, or blended over it. */
   visibleMode: VisibleMode;
+  /** Draw ▲ hottest / ▽ coldest pixel markers inside area ROIs. */
+  extremes: boolean;
   /** Overlay registration: opacity 0–1, scale 0.5–2 and offsets in % of the image (visible lens ≠ IR lens). */
   overlay: Overlay;
   sections: Record<Section, boolean>;
@@ -52,6 +54,7 @@ export const DEFAULT_LAYOUT: LayoutState = {
   tool: "select",
   zoom: "fit",
   visibleMode: "rail",
+  extremes: true,
   overlay: DEFAULT_OVERLAY,
   sections: { measurements: true, camera: true, experiment: true, recording: true, display: true, export: true, visible: true },
 };
@@ -64,6 +67,7 @@ export type LayoutAction =
   | { type: "openSection"; section: Section }
   | { type: "setTool"; tool: Tool }
   | { type: "setZoom"; zoom: Zoom }
+  | { type: "setExtremes"; on: boolean }
   | { type: "setVisibleMode"; mode: VisibleMode }
   | { type: "setOverlay"; patch: Partial<Overlay> }
   | { type: "collapseAll" }
@@ -78,6 +82,7 @@ export function layoutReducer(s: LayoutState, a: LayoutAction): LayoutState {
     case "setTool": return { ...s, tool: a.tool };
     case "setZoom": return { ...s, zoom: a.zoom };
     case "setVisibleMode": return { ...s, visibleMode: a.mode };
+    case "setExtremes": return { ...s, extremes: a.on };
     case "setOverlay": return { ...s, overlay: clampOverlay({ ...s.overlay, ...a.patch }) };
     case "collapseAll": return { ...s, strip: false, rail: false, dock: false };
     case "restoreAll": return { ...s, strip: true, rail: true, dock: true };
@@ -119,6 +124,7 @@ export function loadLayout(storage: Storage | null): LayoutState {
       tool: isTool(parsed.tool) ? parsed.tool : DEFAULT_LAYOUT.tool,
       zoom: isZoom(parsed.zoom) ? parsed.zoom : DEFAULT_LAYOUT.zoom,
       visibleMode: isVisibleMode(parsed.visibleMode) ? parsed.visibleMode : parsed.visibleSide === true ? "side" : DEFAULT_LAYOUT.visibleMode,
+      extremes: typeof parsed.extremes === "boolean" ? parsed.extremes : DEFAULT_LAYOUT.extremes,
       overlay: clampOverlay({
         opacity: num(ov.opacity, DEFAULT_OVERLAY.opacity),
         scale: num(ov.scale, DEFAULT_OVERLAY.scale),
