@@ -76,6 +76,31 @@ class _Proc(Protocol):
 
 
 PopenFactory = Callable[..., _Proc]
+Probe = Callable[[Path], dict[str, Any]]
+
+
+def ffprobe_facts(path: Path, *, ffprobe: str | None = None) -> dict[str, Any]:
+    """Frame count, duration, size and codec of a finished MP4 (counting frames, not headers)."""
+    exe = ffprobe or find_ffprobe()
+    if exe is None:
+        raise RuntimeError("ffprobe not found")
+    out = subprocess.run(
+        [
+            exe, "-v", "error", "-count_frames", "-select_streams", "v:0",
+            "-show_entries", "stream=codec_name,width,height,nb_read_frames:format=duration",
+            "-of", "json", str(path),
+        ],
+        capture_output=True, text=True, timeout=120, check=True,
+    )
+    j = json.loads(out.stdout)
+    st = (j.get("streams") or [{}])[0]
+    return {
+        "frames": int(st.get("nb_read_frames") or 0),
+        "duration_s": float((j.get("format") or {}).get("duration") or 0.0),
+        "width": st.get("width"),
+        "height": st.get("height"),
+        "codec": st.get("codec_name"),
+    }
 
 
 def ffmpeg_command(ffmpeg: str, url: str, out: Path) -> list[str]:
@@ -101,10 +126,18 @@ def ffmpeg_command(ffmpeg: str, url: str, out: Path) -> list[str]:
 class VisibleRecorder:
     """One ffmpeg process per recording; ``start``/``stop`` are called with the thermal recorder."""
 
-    def __init__(self, *, ffmpeg: str, url: str, popen: PopenFactory = subprocess.Popen) -> None:
+    def __init__(
+        self,
+        *,
+        ffmpeg: str,
+        url: str,
+        popen: PopenFactory = subprocess.Popen,
+        probe: Probe | None = ffprobe_facts,
+    ) -> None:
         self._ffmpeg = ffmpeg
         self._url = url
         self._popen = popen
+        self._probe = probe
         self._lock = threading.Lock()
         self._proc: _Proc | None = None
         self._state = VisibleState.IDLE
@@ -206,7 +239,22 @@ class VisibleRecorder:
             if error:
                 self._error = error
                 logger.error("visible recorder: %s", error)
+            facts: dict[str, Any] = {
+                "frames": None, "duration_s": None, "width": None, "height": None, "codec": None
+            }
+            if size > 0 and self._probe is not None:
+                try:
+                    facts.update(self._probe(out))
+                except Exception as exc:  # noqa: BLE001 - facts are a bonus, never fatal
+                    logger.warning("visible probe failed: %s", exc)
+            fps = (
+                facts["frames"] / facts["duration_s"]
+                if facts.get("frames") and facts.get("duration_s")
+                else None
+            )
             info = {
+                **facts,
+                "measured_fps": fps,
                 "file": FILE_NAME if size > 0 else None,
                 "path": str(out) if size > 0 else None,
                 "url": redact_url(self._url),

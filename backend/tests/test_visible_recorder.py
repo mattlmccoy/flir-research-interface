@@ -241,3 +241,30 @@ def test_stderr_tail_never_contains_the_password(tmp_path: Path) -> None:
     assert "s3cret" not in json.dumps(info)
     assert "s3cret" not in (tmp_path / "visible.json").read_text()
     assert any("rtsp://rtsp:***@192.168.7.2/avc/ch1" in ln for ln in info["stderr_tail"])
+
+
+def test_stop_records_measured_stream_facts_from_the_probe(tmp_path: Path) -> None:
+    probed: list[Path] = []
+
+    def probe(path: Path) -> dict[str, Any]:
+        probed.append(path)
+        return {"frames": 79, "duration_s": 6.4673, "width": 1280, "height": 960, "codec": "h264"}
+
+    rec = VisibleRecorder(ffmpeg="/opt/ffmpeg", url="rtsp://h/avc/ch1", popen=FakeProc, probe=probe)
+    rec.start(tmp_path)
+    info = rec.stop()
+    assert probed == [tmp_path / "visible.mp4"]
+    assert info["frames"] == 79 and info["duration_s"] == 6.4673
+    assert abs(info["measured_fps"] - 79 / 6.4673) < 1e-6
+    side = json.loads((tmp_path / "visible.json").read_text())
+    assert side["measured_fps"] == info["measured_fps"] and side["codec"] == "h264"
+
+
+def test_probe_failure_does_not_break_stop(tmp_path: Path) -> None:
+    def bad(path: Path) -> dict[str, Any]:
+        raise RuntimeError("ffprobe missing")
+
+    rec = VisibleRecorder(ffmpeg="/opt/ffmpeg", url="rtsp://h/avc/ch1", popen=FakeProc, probe=bad)
+    rec.start(tmp_path)
+    info = rec.stop()
+    assert info["returncode"] == 0 and info["measured_fps"] is None

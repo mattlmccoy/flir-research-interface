@@ -7,7 +7,7 @@ FLIR Research Studio.
 
 **Status: Milestones 3–8 implemented and the Milestone 9 core written (2026-09-02) — live view,
 recording, playback, ROIs and temperature-vs-time plots, camera controls, exports, event marks
-and metadata edits, visible-video recorder (fake-tested, not yet run on the A70); Milestone 2
+and metadata edits, visible-video recorder verified on the A70; Milestone 2
 validation table still open.** `fri-serve` + the React UI show live temperature-linear video at
 30 Hz, record lossless Zarr experiments with full frame accounting, replay them without the
 camera, measure spots and rectangles live and in playback, write real camera nodes (locked while
@@ -32,7 +32,7 @@ recording), and export CSV/TIFF/PNG/NPY/HDF5. What exists:
 | Camera controls (case, object parameters, NUC mode, frame rate, NUC now; locked while recording) | `backend/.../camera/controls.py`, `frontend/src/components/CameraControls.tsx` | tested; **verified on the A70** (emissivity / reflected temperature written and read back, NUC executed, stream undisturbed) |
 | Exports: ROI series CSV, frame CSV/TIFF/PNG/NPY, whole-run HDF5 (M7) | `backend/.../analysis/export.py`, `frontend/src/components/ExportSection.tsx` | tested |
 | Event marks during recording + post-hoc metadata edits (M8) | `backend/.../recording/metadata.py`, `frontend/src/components/MetadataEditor.tsx` | tested; verified in browser |
-| Visible-camera recorder: ffmpeg stream copy of RTSP `/avc/ch1` beside the thermal store (M9 core) | `backend/.../visible/recorder.py` | tested with a fake ffmpeg; **not yet run against the A70** |
+| Visible-camera recorder: ffmpeg stream copy of RTSP `/avc/ch1` beside the thermal store (M9 core) | `backend/.../visible/recorder.py` | tested; **verified on the A70** (valid 1280×960 H.264 beside the store; the camera limits it to ~12 fps while the radiometric stream runs) |
 | Docs | `docs/` | architecture, radiometry, installation, camera_setup, validation protocol, data_format, visible_camera |
 
 ## Scientific stance

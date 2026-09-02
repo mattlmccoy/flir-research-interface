@@ -12,8 +12,18 @@ times, the redacted URL, the command and the file hash; `GET /api/experiments/{n
 as `visible`. ffmpeg is stopped with `q` so the MP4 is finalised; if ffmpeg dies the thermal
 recording continues and the status shows `visible: error`. Credentials come from `backend/.env`
 (`FRI_CAMERA_HOST`, `FRI_RTSP_USER`, `FRI_RTSP_PASSWORD`); without them, or without ffmpeg, the
-option reports `unavailable`. Still to do: verify on the A70 (file plays, duration matches,
-host-clock offset vs thermal frames), playback of the visible video beside the thermal image.
+option reports `unavailable`.
+
+**Verified on the A70 (2026-09-02, 8 s run `20260902_122258_m9_visible_check`):** `visible.mp4`
+is a valid 1280×960 H.264 file; ffmpeg's first packet arrived 23 ms after the first thermal
+frame's host timestamp. **The camera throttles the RTSP encoder while the GigE radiometric stream
+is active**: measured with 6 s captures, `/avc/ch1` delivered 169 frames (≈28 fps) with the GigE
+stream stopped but only 63–75 frames (≈11–12 fps) with the radiometric stream running, for every
+timestamp mode tried (`-use_wallclock_as_timestamps`, native RTP, `-fflags +genpts`). So a
+visible recording taken alongside thermal acquisition is a ~12 fps video, which is adequate for
+"what did the sample look like" but not for frame-to-frame fusion. The measured frame count,
+duration and fps are written into `visible.json` at stop. Still to do: playback of the visible
+video beside the thermal image.
 
 ## 1. What the camera offers
 
