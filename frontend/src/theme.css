@@ -1,0 +1,41 @@
+/* FLIR Research Interface — design tokens (spec §2). The ONLY place colours are defined. */
+@font-face { font-family: "IBM Plex Sans"; font-weight: 400; font-display: swap; src: url("/fonts/IBMPlexSans-400.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Sans"; font-weight: 500; font-display: swap; src: url("/fonts/IBMPlexSans-500.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Sans"; font-weight: 600; font-display: swap; src: url("/fonts/IBMPlexSans-600.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-weight: 400; font-display: swap; src: url("/fonts/IBMPlexMono-400.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-weight: 500; font-display: swap; src: url("/fonts/IBMPlexMono-500.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-weight: 600; font-display: swap; src: url("/fonts/IBMPlexMono-600.woff2") format("woff2"); }
+
+:root {
+  color-scheme: dark;
+  --bg: #101418;
+  --bg-deep: #0b0e12;
+  --panel: #141920;
+  --line: #232a33;
+  --line-strong: #2f3843;
+  --fg: #d7dde5;
+  --fg-strong: #f5f7fa;
+  --muted: #8b97a5;
+  --accent: #ffb454;
+  --accent-ink: #101418;
+  --live: #5cff8a;
+  --live-glow: 0 0 8px rgba(92, 255, 138, 0.7);
+  --warn: #ffb454;
+  --warn-bg: rgba(255, 180, 84, 0.10);
+  --err: #ff5f56;
+  --err-bg: rgba(255, 95, 86, 0.12);
+  --rec: #ff5f56;
+  --font-ui: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --fs: 13px;
+  --space: 4px;
+  --radius: 3px;
+  --strip-w: 40px;
+  --rail-w: 300px;
+  --dock-h: 220px;
+  --topbar-h: 40px;
+  --statusbar-h: 28px;
+}
+
+@keyframes fri-glow { 0%, 100% { box-shadow: var(--live-glow); } 50% { box-shadow: 0 0 3px rgba(92, 255, 138, 0.4); } }
+@keyframes fri-blink { 0%, 60% { opacity: 1; } 61%, 100% { opacity: 0.25; } }
