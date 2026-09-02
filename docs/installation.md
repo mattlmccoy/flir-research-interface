@@ -16,6 +16,17 @@ Teledyne FLIR's and its official page is <https://www.teledynevisionsolutions.co
 asks for the camera credentials, and installs a background service (launchd / Task Scheduler /
 systemd --user). Set `FRI_SDK_BASE_URL` to use a different mirror.
 
+### Camera credentials the installer asks for
+
+| Value | Where it comes from |
+|---|---|
+| Camera IP | Setup → *Scan network* on the site (raw GigE Vision discovery); lab default 192.168.7.2. If the camera announces 0.0.0.0 after a re-plug, *Force IP* once. |
+| Admin password (to open the camera's web interface) | Printed on the **calibration certificate / card** shipped in the camera box (FLIR's initial password). FLIR support can reset it from the serial number. |
+| RTSP user + password | Camera web interface `http://<camera IP>` → log in as `admin` → **Settings → Users**. The RTSP account (usually `rtsp`) and its password are managed there and nowhere else. |
+
+They are written only to the git-ignored `backend/.env`; re-run `uv run fri-install --no-service`
+to change them. Without them the thermal side works fully; only the visible camera is disabled.
+
 Publishing the mirror (owner only, from a machine that has the artifacts):
 
 ```bash

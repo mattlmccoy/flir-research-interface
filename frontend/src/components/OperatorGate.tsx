@@ -1,3 +1,4 @@
+import { CredentialsHelp } from "./CredentialsHelp.tsx";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { SITE_MODE, api, operatorBase, setOperatorBase, type Health } from "../lib/api.ts";
@@ -71,6 +72,8 @@ export function OperatorGate({ children }: { children: ReactNode }) {
         <ol className="help" style={{ marginTop: 8 }}>
           {inst.steps.map((st, i) => <li key={i}>{st}</li>)}
         </ol>
+        <div className="hint" style={{ marginTop: 6 }}>The installer will ask for the camera IP and, for the visible camera, the RTSP user and password. Have them ready:</div>
+        <CredentialsHelp />
         <div className="row" style={{ marginTop: 6 }}>
           <a className="dl" href={DOCS} target="_blank" rel="noreferrer">full installation guide</a>
           <a className="dl" href={TELEDYNE_SDK} target="_blank" rel="noreferrer">Spinnaker SDK download page (Teledyne, free account)</a>
