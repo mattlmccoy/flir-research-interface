@@ -23,12 +23,18 @@ function Values({ r, s }: { r: Roi; s: RoiStats | undefined }) {
 }
 
 function where(r: Roi): string {
-  return r.kind === "spot" ? `x ${r.x} y ${r.y}` : `x ${r.x0}…${r.x1 - 1} y ${r.y0}…${r.y1 - 1} (${r.x1 - r.x0}×${r.y1 - r.y0} px)`;
+  switch (r.kind) {
+    case "spot": return `spot x ${r.x} y ${r.y}`;
+    case "rect": return `rect x ${r.x0}…${r.x1 - 1} y ${r.y0}…${r.y1 - 1} (${r.x1 - r.x0}×${r.y1 - r.y0} px)`;
+    case "circle": return `circle centre (${r.cx}, ${r.cy}) r ${r.r.toFixed(1)} px`;
+    case "line": return `line (${r.x0}, ${r.y0}) → (${r.x1}, ${r.y1})`;
+    case "polyline": return `connected lines through ${r.points.length} points`;
+  }
 }
 
 /** One row per ROI: colour swatch + label, current values (mean; min/max for rectangles), remove. */
 export function RoiRows({ rois, stats, selected, onSelect, onRemove, onClear }: Props) {
-  if (rois.length === 0) return <div className="hint">No ROIs. Use ◎ (spot) or ▭ (rectangle) in the tool strip, then click or drag on the image.</div>;
+  if (rois.length === 0) return <div className="hint">No ROIs yet. Pick a tool in the strip: ◎ spot (click), ▭ rectangle, ◯ circle or ╱ line (drag), ⟋ connected lines (click vertices, double-click to finish).</div>;
   return (
     <>
       <div className="roi-rows">

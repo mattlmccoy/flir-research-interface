@@ -1,5 +1,5 @@
 /** Studio layout state (spec §3): which panels are open, which rail sections, which tool. */
-export const TOOLS = ["select", "spot", "rect", "line", "display", "camera", "nuc"] as const;
+export const TOOLS = ["select", "spot", "rect", "circle", "line", "polyline"] as const;
 export const SECTIONS = ["measurements", "camera", "experiment", "recording", "display", "export"] as const;
 export type Tool = (typeof TOOLS)[number];
 export type Panel = "strip" | "rail" | "dock";

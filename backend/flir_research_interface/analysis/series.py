@@ -50,9 +50,78 @@ def parse_rois(raw: str) -> list[dict[str, Any]]:
             if r["x1"] <= r["x0"] or r["y1"] <= r["y0"]:
                 raise ValueError("rect must have x1 > x0 and y1 > y0")
             out.append({"id": rid, "kind": "rect", **r})
+        elif kind == "circle":
+            cx, cy = _int(it.get("cx"), "cx"), _int(it.get("cy"), "cy")
+            radius = it.get("r")
+            if isinstance(radius, bool) or not isinstance(radius, int | float) or radius < 1:
+                raise ValueError("circle r must be a number >= 1")
+            out.append({"id": rid, "kind": "circle", "cx": cx, "cy": cy, "r": float(radius)})
+        elif kind == "line":
+            r = {k: _int(it.get(k), k) for k in ("x0", "y0", "x1", "y1")}
+            if (r["x0"], r["y0"]) == (r["x1"], r["y1"]):
+                raise ValueError("line endpoints must differ")
+            out.append({"id": rid, "kind": "line", **r})
+        elif kind == "polyline":
+            pts = it.get("points")
+            if not isinstance(pts, list) or len(pts) < 2:
+                raise ValueError("polyline needs at least 2 points")
+            points = []
+            for p in pts:
+                if not isinstance(p, list | tuple) or len(p) != 2:
+                    raise ValueError("polyline points must be [x, y] pairs")
+                points.append([_int(p[0], "x"), _int(p[1], "y")])
+            out.append({"id": rid, "kind": "polyline", "points": points})
         else:
             raise ValueError(f"unknown roi kind {kind!r}")
     return out
+
+
+def _line_pixels(x0: int, y0: int, x1: int, y1: int) -> list[tuple[int, int]]:
+    """Bresenham, both endpoints inclusive (mirrors frontend lib/roi.ts linePixels)."""
+    out: list[tuple[int, int]] = []
+    dx, dy = abs(x1 - x0), -abs(y1 - y0)
+    sx, sy = (1 if x0 < x1 else -1), (1 if y0 < y1 else -1)
+    err, x, y = dx + dy, x0, y0
+    while True:
+        out.append((x, y))
+        if x == x1 and y == y1:
+            break
+        e2 = 2 * err
+        if e2 >= dy:
+            err += dy
+            x += sx
+        if e2 <= dx:
+            err += dx
+            y += sy
+    return out
+
+
+def roi_index(roi: dict[str, Any], w: int, h: int) -> tuple[np.ndarray, np.ndarray]:
+    """(ys, xs) of the pixels a non-rect ROI covers inside a w×h image (no duplicates)."""
+    kind = roi["kind"]
+    if kind == "spot":
+        pts = [(roi["x"], roi["y"])]
+    elif kind == "circle":
+        cx, cy, r = roi["cx"], roi["cy"], roi["r"]
+        ys, xs = np.mgrid[max(0, int(np.floor(cy - r))) : min(h, int(np.ceil(cy + r)) + 1),
+                          max(0, int(np.floor(cx - r))) : min(w, int(np.ceil(cx + r)) + 1)]
+        m = (xs - cx) ** 2 + (ys - cy) ** 2 <= r * r
+        return ys[m], xs[m]
+    elif kind == "line":
+        pts = _line_pixels(roi["x0"], roi["y0"], roi["x1"], roi["y1"])
+    else:  # polyline
+        seen: set[tuple[int, int]] = set()
+        pts = []
+        p = roi["points"]
+        for (ax, ay), (bx, by) in zip(p[:-1], p[1:], strict=True):
+            for q in _line_pixels(ax, ay, bx, by):
+                if q not in seen:
+                    seen.add(q)
+                    pts.append(q)
+    inside = [(x, y) for x, y in pts if 0 <= x < w and 0 <= y < h]
+    ys_ = np.array([y for _, y in inside], dtype=np.intp)
+    xs_ = np.array([x for x, _ in inside], dtype=np.intp)
+    return ys_, xs_
 
 
 def _clean(a: np.ndarray) -> list[float | None]:
@@ -90,11 +159,17 @@ def roi_series(
                 if 0 <= r["x"] < w and 0 <= r["y"] < h:
                     dst["value"][start:stop] = field[:, r["y"], r["x"]]
                 continue
-            x0, y0 = max(0, r["x0"]), max(0, r["y0"])
-            x1, y1 = min(w, r["x1"]), min(h, r["y1"])
-            if x1 <= x0 or y1 <= y0:
-                continue
-            sub = field[:, y0:y1, x0:x1].reshape(stop - start, -1)
+            if r["kind"] == "rect":
+                x0, y0 = max(0, r["x0"]), max(0, r["y0"])
+                x1, y1 = min(w, r["x1"]), min(h, r["y1"])
+                if x1 <= x0 or y1 <= y0:
+                    continue
+                sub = field[:, y0:y1, x0:x1].reshape(stop - start, -1)
+            else:
+                ys, xs = roi_index(r, w, h)
+                if len(ys) == 0:
+                    continue
+                sub = field[:, ys, xs]
             with np.errstate(all="ignore"):
                 dst["min"][start:stop] = np.nanmin(sub, axis=1)
                 dst["max"][start:stop] = np.nanmax(sub, axis=1)
@@ -108,4 +183,4 @@ def roi_series(
     }
 
 
-__all__ = ["MAX_ROIS", "parse_rois", "roi_series"]
+__all__ = ["MAX_ROIS", "parse_rois", "roi_index", "roi_series"]

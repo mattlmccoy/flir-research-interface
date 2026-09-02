@@ -11,6 +11,7 @@ interface Props {
 }
 
 type Case = { index: number; low_c?: number | null; high_c?: number | null; enabled?: boolean };
+const NUC_HELP = "Non-uniformity correction: the camera closes its shutter for ~1 s and re-measures every pixel's offset to remove fixed-pattern drift. The image freezes briefly. Automatic = camera decides when; Off = only when you press NUC now.";
 
 function Num({ label, unit, value, step, min, max, disabled, onChange }: { label: string; unit?: string; value: number | null; step: number; min?: number; max?: number; disabled: boolean; onChange: (v: number) => void }) {
   return (
@@ -71,7 +72,7 @@ export function CameraControls({ info, locked, onApplied }: Props) {
         <Num label="T atmosphere" unit="°C" value={form.atmospheric_c} step={0.5} disabled={dis} onChange={(v) => set("atmospheric_c", v)} />
         <Num label="distance" unit="m" value={form.distance_m} step={0.1} min={0} disabled={dis} onChange={(v) => set("distance_m", v)} />
         <Num label="humidity" unit="%" value={form.humidity_pct} step={1} min={0} max={100} disabled={dis} onChange={(v) => set("humidity_pct", v)} />
-        <span>NUC mode</span>
+        <span title={NUC_HELP}>NUC mode <span className="muted" aria-hidden="true">ⓘ</span></span>
         <span className="v plain" style={{ textAlign: "right" }}>
           <select value={form.nuc_mode ?? ""} disabled={dis || form.nuc_mode === null} onChange={(e) => set("nuc_mode", e.target.value)} aria-label="NUC mode">
             {(enums.NUCMode ?? (form.nuc_mode ? [form.nuc_mode] : [])).map((o) => <option key={o} value={o}>{o}</option>)}
@@ -88,7 +89,13 @@ export function CameraControls({ info, locked, onApplied }: Props) {
       <div className="row">
         <button className="primary" disabled={dis || !dirty} onClick={apply}>{busy ? "…" : "Apply"}</button>
         <button className="secondary" disabled={dis || !dirty} onClick={() => setForm(base)}>Revert</button>
-        <button className="secondary" disabled={busy || !info} onClick={nuc} title="Perform a non-uniformity correction now (logged if recording)">NUC now</button>
+        <button className="secondary" disabled={busy || !info} onClick={nuc} title={NUC_HELP}>NUC now</button>
+      </div>
+      <div className="hint">
+        <b>NUC</b> = non-uniformity correction. The camera closes its internal shutter for about a second and re-measures each
+        detector pixel's offset, which removes the fixed-pattern drift that builds up as the camera warms. The image freezes
+        while it happens. <b>Automatic</b>: the camera decides when (temperature drift and time). <b>Off</b>: only when you
+        press <b>NUC now</b>; do it right before a run so it does not fire during one. A NUC during a recording is logged as an event.
       </div>
       {okMsg && <div className="hint">{okMsg}</div>}
       {err && <div className="errbox">{err}</div>}

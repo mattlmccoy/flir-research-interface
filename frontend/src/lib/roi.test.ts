@@ -107,3 +107,61 @@ test("saveRois / loadRois round-trip and reject malformed storage", () => {
   assert.deepEqual(loadRois(storage), EMPTY);
   assert.deepEqual(loadRois(null), EMPTY);
 });
+
+// ---- new geometries (circle, line, polyline) --------------------------------------------------
+
+test("roiStats for a circle counts the pixels whose centres fall inside the disc", () => {
+  // 8x8 field of ones; circle centre (3,3) radius 2 → the classic 13-pixel disc
+  const f = new Float32Array(64).fill(1);
+  const s = roiStats(f, 8, 8, { id: 1, kind: "circle", cx: 3, cy: 3, r: 2 });
+  assert.equal(s.n, 13);
+  assert.equal(s.mean, 1);
+});
+
+test("roiStats for a line samples every pixel along the segment (both endpoints inclusive)", () => {
+  // 5x5 field where value = x + 10*y
+  const f = new Float32Array(25);
+  for (let y = 0; y < 5; y++) for (let x = 0; x < 5; x++) f[y * 5 + x] = x + 10 * y;
+  const s = roiStats(f, 5, 5, { id: 2, kind: "line", x0: 0, y0: 0, x1: 4, y1: 0 });
+  assert.equal(s.n, 5);
+  assert.equal(s.min, 0);
+  assert.equal(s.max, 4);
+  assert.equal(s.mean, 2);
+  const d = roiStats(f, 5, 5, { id: 3, kind: "line", x0: 0, y0: 0, x1: 4, y1: 4 }); // diagonal: 0,11,22,33,44
+  assert.equal(d.n, 5);
+  assert.equal(d.max, 44);
+});
+
+test("roiStats for a polyline walks all segments without double-counting the joints", () => {
+  const f = new Float32Array(25).fill(2);
+  const s = roiStats(f, 5, 5, { id: 4, kind: "polyline", points: [[0, 0], [4, 0], [4, 4]] });
+  assert.equal(s.n, 9); // 5 + 5 - 1 shared corner
+  assert.equal(s.mean, 2);
+});
+
+test("roiStats clips circles and lines to the image and reports out-of-image parts as absent", () => {
+  const f = new Float32Array(16).fill(5);
+  const c = roiStats(f, 4, 4, { id: 5, kind: "circle", cx: 0, cy: 0, r: 1 }); // quarter disc: (0,0),(1,0),(0,1)
+  assert.equal(c.n, 3);
+  const l = roiStats(f, 4, 4, { id: 6, kind: "line", x0: 2, y0: 2, x1: 9, y1: 2 });
+  assert.equal(l.n, 2); // x=2,3 inside
+});
+
+test("roiLabel prefixes: circle C, line L, polyline P", () => {
+  assert.equal(roiLabel({ id: 1, kind: "circle", cx: 0, cy: 0, r: 1 }), "C1");
+  assert.equal(roiLabel({ id: 2, kind: "line", x0: 0, y0: 0, x1: 1, y1: 1 }), "L2");
+  assert.equal(roiLabel({ id: 3, kind: "polyline", points: [[0, 0], [1, 1]] }), "P3");
+});
+
+test("loadRois accepts the new kinds and rejects malformed ones", () => {
+  const store = new Map<string, string>();
+  const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); } } as unknown as Storage;
+  store.set("fri.rois.v1", JSON.stringify({ rois: [
+    { id: 1, kind: "circle", cx: 5, cy: 5, r: 3 },
+    { id: 2, kind: "circle", cx: 5, cy: 5, r: 0 },
+    { id: 3, kind: "line", x0: 0, y0: 0, x1: 3, y1: 3 },
+    { id: 4, kind: "polyline", points: [[0, 0], [1, 1], [2, 0]] },
+    { id: 5, kind: "polyline", points: [[0, 0]] },
+  ], nextId: 6 }));
+  assert.deepEqual(loadRois(storage).rois.map((r) => r.id), [1, 3, 4]);
+});

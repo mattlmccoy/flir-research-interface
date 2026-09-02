@@ -3,13 +3,12 @@ import { TOOLS, type Tool } from "../../lib/layout.ts";
 
 /** Presentation for each tool id (ids come from TOOLS in lib/layout.ts). */
 const TOOL_META: Record<Tool, { glyph: string; title: string; enabled: boolean }> = {
-  select: { glyph: "↖", title: "Select / hover readout", enabled: true },
-  spot: { glyph: "◎", title: "Spot: click to place a point measurement", enabled: true },
-  rect: { glyph: "▭", title: "Rectangle ROI: drag to draw", enabled: true },
-  line: { glyph: "╱", title: "Line profile (later)", enabled: false },
-  display: { glyph: "▤", title: "Palette & range", enabled: true },
-  camera: { glyph: "⚙", title: "Camera controls (opens the camera section)", enabled: true },
-  nuc: { glyph: "N", title: "NUC (opens the camera section)", enabled: true },
+  select: { glyph: "↖", title: "Select: click an ROI to select it (Delete removes it)", enabled: true },
+  spot: { glyph: "◎", title: "Spot: click to place a single-pixel measurement", enabled: true },
+  rect: { glyph: "▭", title: "Rectangle: drag corner to corner", enabled: true },
+  circle: { glyph: "◯", title: "Circle: drag from the centre outwards", enabled: true },
+  line: { glyph: "╱", title: "Line: drag from one end to the other (pixels along the segment)", enabled: true },
+  polyline: { glyph: "⟋", title: "Connected lines: click each vertex; double-click places the last point and finishes (Enter finishes, Esc cancels)", enabled: true },
 };
 
 interface Props {

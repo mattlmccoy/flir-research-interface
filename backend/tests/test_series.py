@@ -108,3 +108,40 @@ def test_series_endpoint(tmp_path: Path) -> None:
         assert bad.status_code == 400
         missing = c.get("/api/experiments/nope/series", params={"rois": rois})
         assert missing.status_code == 404
+
+
+def test_parse_rois_accepts_circle_line_polyline() -> None:
+    rois = parse_rois(
+        json.dumps(
+            [
+                {"id": 1, "kind": "circle", "cx": 3, "cy": 2, "r": 1},
+                {"id": 2, "kind": "line", "x0": 0, "y0": 0, "x1": 5, "y1": 0},
+                {"id": 3, "kind": "polyline", "points": [[0, 0], [3, 0], [3, 3]]},
+            ]
+        )
+    )
+    assert [r["kind"] for r in rois] == ["circle", "line", "polyline"]
+    with pytest.raises(ValueError):
+        parse_rois(json.dumps([{"id": 1, "kind": "circle", "cx": 3, "cy": 2, "r": 0}]))
+    with pytest.raises(ValueError):
+        parse_rois(json.dumps([{"id": 1, "kind": "polyline", "points": [[0, 0]]}]))
+
+
+def test_roi_series_circle_line_polyline_match_pixel_enumeration(tmp_path: Path) -> None:
+    d = _make_experiment(tmp_path, n=2)
+    r = ExperimentReader(d)
+    out = roi_series(
+        r,
+        [
+            {"id": 1, "kind": "circle", "cx": 2, "cy": 1, "r": 1},  # 5-pixel plus at the block edge
+            {"id": 2, "kind": "line", "x0": 0, "y0": 1, "x1": 7, "y1": 1},  # row 1: 2 hot of 8
+            {"id": 3, "kind": "polyline", "points": [[0, 0], [7, 0], [7, 5]]},  # all background
+        ],
+    )
+    s1, s2, s3 = (out["series"][k] for k in ("1", "2", "3"))
+    # frame 0: hot block 26 °C at x 2..3, y 1..2; the circle covers 3 hot + 2 cold pixels
+    assert s1["max"][0] == pytest.approx(26.0, abs=1e-3)
+    assert s1["min"][0] == pytest.approx(25.0, abs=1e-3)
+    assert s1["mean"][0] == pytest.approx((3 * 26 + 2 * 25) / 5, abs=1e-3)
+    assert s2["mean"][0] == pytest.approx((2 * 26 + 6 * 25) / 8, abs=1e-3)
+    assert s3["max"][1] == pytest.approx(25.0, abs=1e-3)

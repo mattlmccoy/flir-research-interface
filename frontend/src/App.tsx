@@ -160,7 +160,7 @@ export function App() {
   return (
     <StudioFrame layout={layout} topbar={topbar} statusbar={statusbar}
       strip={<ToolStrip tool={layout.tool} onCollapseAll={() => dispatch({ type: "collapseAll" })}
-        onTool={(t) => { if (t === "camera" || t === "nuc") dispatch({ type: "openSection", section: "camera" }); else dispatch({ type: "setTool", tool: t }); }} />}
+        onTool={(t) => dispatch({ type: "setTool", tool: t })} />}
       center={<ThermalView frame={frame} palette={palette} scaleMode={scaleMode} manual={manual} onScale={setShown}
         rois={rois.rois} selected={rois.selected} tool={layout.tool} onRoi={roiDispatch} onStats={onStats} />}
       dock={

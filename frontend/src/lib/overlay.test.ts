@@ -29,3 +29,18 @@ test("traceColor cycles through the token list deterministically", () => {
   assert.equal(traceColor(1), "var(--accent)");
   assert.equal(traceColor(6), traceColor(0));
 });
+
+test("hitTest handles circles (inside), lines and polylines (within tolerance of a segment)", () => {
+  const rois: Roi[] = [
+    { id: 1, kind: "circle", cx: 50, cy: 50, r: 10 },
+    { id: 2, kind: "line", x0: 100, y0: 100, x1: 200, y1: 100 },
+    { id: 3, kind: "polyline", points: [[300, 300], [300, 400], [400, 400]] },
+  ];
+  assert.equal(hitTest(rois, 55, 52, 6), 1);
+  assert.equal(hitTest(rois, 70, 50, 6), null);
+  assert.equal(hitTest(rois, 150, 103, 6), 2);
+  assert.equal(hitTest(rois, 150, 120, 6), null);
+  assert.equal(hitTest(rois, 302, 350, 6), 3);
+  assert.equal(hitTest(rois, 350, 396, 6), 3);
+  assert.equal(hitTest(rois, 350, 350, 6), null);
+});

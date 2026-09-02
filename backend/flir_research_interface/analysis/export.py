@@ -48,9 +48,17 @@ def _linear_format(reader: ExperimentReader) -> IRFormat | None:
 
 
 def _roi_desc(r: dict[str, Any]) -> str:
-    if r["kind"] == "spot":
+    k = r["kind"]
+    if k == "spot":
         return f"S{r['id']}: spot x={r['x']} y={r['y']}"
-    return f"R{r['id']}: rect x0={r['x0']} y0={r['y0']} x1={r['x1']} y1={r['y1']} (half-open)"
+    if k == "rect":
+        return f"R{r['id']}: rect x0={r['x0']} y0={r['y0']} x1={r['x1']} y1={r['y1']} (half-open)"
+    if k == "circle":
+        return f"C{r['id']}: circle cx={r['cx']} cy={r['cy']} r={r['r']} (pixel centres within r)"
+    if k == "line":
+        seg = f"x0={r['x0']} y0={r['y0']} x1={r['x1']} y1={r['y1']}"
+        return f"L{r['id']}: line {seg} (Bresenham, inclusive)"
+    return f"P{r['id']}: polyline points={r['points']} (Bresenham per segment, joints once)"
 
 
 def series_csv(reader: ExperimentReader, rois: list[dict[str, Any]]) -> str:
@@ -67,12 +75,13 @@ def series_csv(reader: ExperimentReader, rois: list[dict[str, Any]]) -> str:
     cols: list[list[float | None]] = []
     for r in rois:
         s = data["series"][str(r["id"])]
+        prefix = {"spot": "S", "rect": "R", "circle": "C", "line": "L", "polyline": "P"}[r["kind"]]
         if r["kind"] == "spot":
             header.append(f"S{r['id']}_value")
             cols.append(s["value"])
         else:
             for k in ("mean", "min", "max"):
-                header.append(f"R{r['id']}_{k}")
+                header.append(f"{prefix}{r['id']}_{k}")
                 cols.append(s[k])
     w = csv.writer(buf, lineterminator="\n")
     w.writerow(header)

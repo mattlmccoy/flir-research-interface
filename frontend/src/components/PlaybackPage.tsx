@@ -34,8 +34,6 @@ interface Props {
   onBack: () => void;
 }
 
-const PLAYBACK_DISABLED_TOOLS = ["camera", "nuc"] as const;
-
 function seriesTraces(series: RoiSeries | null, rois: RoiState): Trace[] {
   if (!series) return [];
   return rois.rois.flatMap((r, i) => {
@@ -148,7 +146,6 @@ export function PlaybackPage(p: Props) {
   return (
     <StudioFrame layout={p.layout} topbar={p.topbar}
       strip={<ToolStrip tool={p.layout.tool} onTool={(tool) => p.dispatch({ type: "setTool", tool })} onCollapseAll={() => p.dispatch({ type: "collapseAll" })}
-        disabledTools={PLAYBACK_DISABLED_TOOLS}
         leading={<button title="Back to experiments" aria-label="Back to experiments" onClick={p.onBack}>←</button>} />}
       center={<ThermalView frame={frame} palette={p.palette} scaleMode={p.scaleMode} manual={p.manual} onScale={setShown}
         rois={p.rois.rois} selected={p.rois.selected} tool={p.layout.tool} onRoi={p.roiDispatch} onStats={onStats} />}

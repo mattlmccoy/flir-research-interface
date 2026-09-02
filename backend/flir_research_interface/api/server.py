@@ -26,6 +26,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument("--viz-fps", type=float, default=15.0, help="max WebSocket frame rate")
     p.add_argument("--sim-fps", type=float, default=30.0)
+    p.add_argument(
+        "--site-origin",
+        default="https://mattlmccoy.github.io",
+        help="origin of the GitHub Pages site allowed to drive this operator (CORS); '' to disable",
+    )
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args(argv)
     logging.basicConfig(
@@ -38,6 +43,7 @@ def main(argv: list[str] | None = None) -> int:
         sim_fps=args.sim_fps,
         viz_fps=args.viz_fps,
         visible_factory=default_visible_factory(dotenv),
+        site_origin=args.site_origin or None,
     )
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     return 0
