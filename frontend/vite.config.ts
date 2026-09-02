@@ -2,7 +2,9 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 // Dev server proxies API + WebSocket to the Python service on :8000.
+// VITE_BASE="/flir-research-interface/" for the GitHub Pages build; default "/" for the operator.
 export default defineConfig({
+  base: process.env.VITE_BASE ?? "/",
   plugins: [react()],
   server: {
     port: 5173,

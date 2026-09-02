@@ -1,3 +1,21 @@
+import { apiUrl, loadOperatorBase, saveOperatorBase } from "./operator.ts";
+
+/** Site mode: the UI is served from GitHub Pages and talks to a local operator (spec §6.3). */
+export const SITE_MODE = import.meta.env.VITE_SITE_MODE === "1";
+const storage = (() => { try { return typeof localStorage !== "undefined" ? localStorage : null; } catch { return null; } })();
+let BASE = loadOperatorBase(storage, { siteMode: SITE_MODE });
+export function operatorBase(): string { return BASE; }
+export function setOperatorBase(base: string): void { saveOperatorBase(storage, base); BASE = loadOperatorBase(storage, { siteMode: SITE_MODE }); }
+const u = (path: string) => apiUrl(BASE, path);
+
+/** fetch against the operator; cross-origin writes carry X-FRI-Client so the operator's preflight guard passes. */
+function req(path: string, init: RequestInit = {}): Promise<Response> {
+  const method = (init.method ?? "GET").toUpperCase();
+  const headers = new Headers(init.headers ?? {});
+  if (method !== "GET" && method !== "HEAD") headers.set("X-FRI-Client", "1");
+  return fetch(u(path), { ...init, headers });
+}
+
 export interface Device { backend: string; model: string; serial: string; ip_address: string | null; mac_address: string | null; firmware: string | null; interface: string; }
 export interface Status { state: string; backend?: string | null; device?: Device | null; frames_received?: number; viz_dropped?: number; camera_fps?: number | null; last_error?: string | null; }
 
@@ -26,6 +44,7 @@ export interface Previews {
   keyframes: { file: string; count: number; indices: number[]; t_s: number[]; tile?: [number, number]; vmin: number; vmax: number; units?: string; sha256: string };
 }
 export interface RevealResult { ok: boolean; path: string; error?: string; }
+export interface Health { status: string; version: string; app_version?: string; api_version?: string; platform?: string; }
 export interface Hdf5Export { path: string; size_bytes: number; sha256: string; n_frames: number; }
 
 export interface Experiment {
@@ -57,47 +76,47 @@ export interface RoiSeries {
 }
 
 export const api = {
-  experiment: (name: string) => j<ExperimentInfo>(fetch(`/api/experiments/${encodeURIComponent(name)}`)),
-  timeline: (name: string) => j<Timeline>(fetch(`/api/experiments/${encodeURIComponent(name)}/timeline`)),
+  experiment: (name: string) => j<ExperimentInfo>(req(`/api/experiments/${encodeURIComponent(name)}`)),
+  timeline: (name: string) => j<Timeline>(req(`/api/experiments/${encodeURIComponent(name)}/timeline`)),
   series: (name: string, rois: unknown[]) =>
-    j<RoiSeries>(fetch(`/api/experiments/${encodeURIComponent(name)}/series?rois=${encodeURIComponent(JSON.stringify(rois))}`)),
+    j<RoiSeries>(req(`/api/experiments/${encodeURIComponent(name)}/series?rois=${encodeURIComponent(JSON.stringify(rois))}`)),
   seriesCsvUrl: (name: string, rois: unknown[]) =>
-    `/api/experiments/${encodeURIComponent(name)}/export/series.csv?rois=${encodeURIComponent(JSON.stringify(rois))}`,
+    u(`/api/experiments/${encodeURIComponent(name)}/export/series.csv?rois=${encodeURIComponent(JSON.stringify(rois))}`),
   frameExportUrl: (name: string, index: number, format: "csv" | "tiff" | "png" | "npy") =>
-    `/api/experiments/${encodeURIComponent(name)}/frames/${index}/export?format=${format}`,
+    u(`/api/experiments/${encodeURIComponent(name)}/frames/${index}/export?format=${format}`),
   exportHdf5: (name: string) =>
-    j<Hdf5Export>(fetch(`/api/experiments/${encodeURIComponent(name)}/export/hdf5`, { method: "POST" })),
+    j<Hdf5Export>(req(`/api/experiments/${encodeURIComponent(name)}/export/hdf5`, { method: "POST" })),
   frameBuffer: async (name: string, index: number): Promise<ArrayBuffer> => {
-    const res = await fetch(`/api/experiments/${encodeURIComponent(name)}/frames/${index}`);
+    const res = await req(`/api/experiments/${encodeURIComponent(name)}/frames/${index}`);
     if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
     return res.arrayBuffer();
   },
   recordingStart: (name: string, metadata: Record<string, unknown>, visible = false) =>
-    j<{ state: string; experiment_dir: string; visible?: VisibleStatus }>(fetch("/api/recording/start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, metadata, visible }) })),
-  recordingStop: () => j<Record<string, unknown>>(fetch("/api/recording/stop", { method: "POST" })),
-  recordingStatus: () => j<RecordingStatus>(fetch("/api/recording/status")),
+    j<{ state: string; experiment_dir: string; visible?: VisibleStatus }>(req("/api/recording/start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, metadata, visible }) })),
+  recordingStop: () => j<Record<string, unknown>>(req("/api/recording/stop", { method: "POST" })),
+  recordingStatus: () => j<RecordingStatus>(req("/api/recording/status")),
   recordingEvent: (name: string, note?: string) =>
-    j<ExperimentEvent>(fetch("/api/recording/event", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, note: note || null }) })),
+    j<ExperimentEvent>(req("/api/recording/event", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, note: note || null }) })),
   patchMetadata: (name: string, experiment: Record<string, unknown>) =>
-    j<{ experiment: Record<string, unknown> }>(fetch(`/api/experiments/${encodeURIComponent(name)}/metadata`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ experiment }) })),
-  experiments: () => j<Experiment[]>(fetch("/api/experiments")),
-  previewUrl: (name: string) => `/api/experiments/${encodeURIComponent(name)}/preview.png`,
-  keyframesUrl: (name: string) => `/api/experiments/${encodeURIComponent(name)}/keyframes.png`,
-  regeneratePreviews: (name: string) => j<Previews>(fetch(`/api/experiments/${encodeURIComponent(name)}/previews`, { method: "POST" })),
-  reveal: (name: string) => j<RevealResult>(fetch(`/api/experiments/${encodeURIComponent(name)}/reveal`, { method: "POST" })),
-  revealRoot: () => j<RevealResult>(fetch("/api/experiments/reveal-root", { method: "POST" })),
-  health: () => j<{ status: string; version: string }>(fetch("/api/health")),
-  sdk: () => j<Record<string, unknown>>(fetch("/api/setup/sdk")),
-  discovery: () => j<Record<string, unknown>>(fetch("/api/setup/discovery")),
+    j<{ experiment: Record<string, unknown> }>(req(`/api/experiments/${encodeURIComponent(name)}/metadata`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ experiment }) })),
+  experiments: () => j<Experiment[]>(req("/api/experiments")),
+  previewUrl: (name: string) => u(`/api/experiments/${encodeURIComponent(name)}/preview.png`),
+  keyframesUrl: (name: string) => u(`/api/experiments/${encodeURIComponent(name)}/keyframes.png`),
+  regeneratePreviews: (name: string) => j<Previews>(req(`/api/experiments/${encodeURIComponent(name)}/previews`, { method: "POST" })),
+  reveal: (name: string) => j<RevealResult>(req(`/api/experiments/${encodeURIComponent(name)}/reveal`, { method: "POST" })),
+  revealRoot: () => j<RevealResult>(req("/api/experiments/reveal-root", { method: "POST" })),
+  health: () => j<Health>(req("/api/health")),
+  sdk: () => j<Record<string, unknown>>(req("/api/setup/sdk")),
+  discovery: () => j<Record<string, unknown>>(req("/api/setup/discovery")),
   forceIp: (mac: string, ip: string, subnet_mask: string, gateway = "0.0.0.0") =>
-    j<{ acked: boolean; camera_ip: string | null; reachable_by_sdk: boolean }>(fetch("/api/setup/force-ip", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mac, ip, subnet_mask, gateway }) })),
-  devices: (backend: string) => j<Device[]>(fetch(`/api/camera/devices?backend=${encodeURIComponent(backend)}`)),
-  status: () => j<Status>(fetch("/api/camera/status")),
-  info: () => j<Record<string, unknown>>(fetch("/api/camera/info")),
+    j<{ acked: boolean; camera_ip: string | null; reachable_by_sdk: boolean }>(req("/api/setup/force-ip", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mac, ip, subnet_mask, gateway }) })),
+  devices: (backend: string) => j<Device[]>(req(`/api/camera/devices?backend=${encodeURIComponent(backend)}`)),
+  status: () => j<Status>(req("/api/camera/status")),
+  info: () => j<Record<string, unknown>>(req("/api/camera/info")),
   setParameters: (values: Record<string, unknown>) =>
-    j<{ applied: Record<string, unknown> }>(fetch("/api/camera/parameters", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ values }) })),
-  nuc: () => j<{ ok: boolean }>(fetch("/api/camera/nuc", { method: "POST" })),
+    j<{ applied: Record<string, unknown> }>(req("/api/camera/parameters", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ values }) })),
+  nuc: () => j<{ ok: boolean }>(req("/api/camera/nuc", { method: "POST" })),
   connect: (backend: string, serial?: string) =>
-    j<{ state: string }>(fetch("/api/camera/connect", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ backend, serial }) })),
-  disconnect: () => j<{ state: string }>(fetch("/api/camera/disconnect", { method: "POST" })),
+    j<{ state: string }>(req("/api/camera/connect", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ backend, serial }) })),
+  disconnect: () => j<{ state: string }>(req("/api/camera/disconnect", { method: "POST" })),
 };

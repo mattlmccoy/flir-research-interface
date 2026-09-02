@@ -1,0 +1,41 @@
+# GitHub Pages site (spec §6.1): the same UI built in site mode, talking to a local operator.
+# Note: Pages on a private repository needs GitHub Pro/Team/Enterprise; on Free make the repo
+# public first (it never contains FLIR SDK binaries or credentials).
+name: pages
+on:
+  push:
+    branches: [main]
+    paths: ["frontend/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency: { group: pages, cancel-in-progress: true }
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: frontend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "23" }
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+        env:
+          VITE_SITE_MODE: "1"
+          VITE_BASE: "/flir-research-interface/"
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: frontend/dist }
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: { name: github-pages, url: "${{ steps.deployment.outputs.page_url }}" }
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

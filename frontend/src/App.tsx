@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { api, type RecordingStatus, type Status } from "./lib/api.ts";
+import { api, operatorBase, type RecordingStatus, type Status } from "./lib/api.ts";
+import { wsUrl } from "./lib/operator.ts";
 import { decodeFrameMessage, type FrameMessage } from "./lib/protocol.ts";
 import type { PaletteName } from "./lib/palette.ts";
 import type { Range, ScaleMode } from "./lib/scale.ts";
@@ -78,8 +79,7 @@ export function App() {
   useEffect(() => {
     if (status.state !== "acquiring") return;
     let alive = true;
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${proto}://${location.host}/ws/frames`);
+    const ws = new WebSocket(wsUrl(operatorBase(), "/ws/frames"));
     ws.binaryType = "arraybuffer";
     ws.onmessage = (ev) => {
       if (!alive || typeof ev.data === "string") return;

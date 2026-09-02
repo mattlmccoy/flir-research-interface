@@ -37,3 +37,4 @@ vendor/
 
 # brainstorming visual companion sessions
 .superpowers/
+frontend/dist-site/

@@ -1,0 +1,31 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: backend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: uv sync --extra dev
+      - run: uv run ruff check .
+      - run: uv run mypy flir_research_interface
+      - run: uv run pytest -p no:warnings   # hardware tests are skipped without --hardware
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: frontend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "23" }
+      - run: npm ci
+      - run: npm test
+      - run: npx tsc --noEmit -p .
+      - run: npm run build
