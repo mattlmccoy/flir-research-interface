@@ -31,15 +31,21 @@ export function eventsToMarkers(events: ExperimentEvent[], tl: Timeline, started
   for (const ev of events) {
     const type = typeof ev.type === "string" ? ev.type : "event";
     if (BOOKKEEPING.has(type)) continue;
+    const label = typeof ev.name === "string" ? ev.name : type;
     if (type === "frame_gap" && typeof ev.after_frame_id === "number") {
       const i = tl.frame_id.findIndex((id) => id > (ev.after_frame_id as number));
       if (i >= 0) out.push({ t: tl.t_s[i], label: `gap ${typeof ev.missing === "number" ? ev.missing : "?"}` });
       continue;
     }
+    if (typeof ev.frame_id === "number") {
+      // exact: the recorder stamped the last frame it had accepted when the event happened
+      const i = tl.frame_id.findIndex((id) => id >= (ev.frame_id as number));
+      if (i >= 0) { out.push({ t: tl.t_s[i], label }); continue; }
+    }
     if (typeof ev.t_utc !== "string" || Number.isNaN(start)) continue;
     const t = (Date.parse(ev.t_utc) - start) / 1000;
     if (!Number.isFinite(t) || t < 0 || t > tEnd) continue;
-    out.push({ t, label: typeof ev.name === "string" ? ev.name : type });
+    out.push({ t, label });
   }
   return out;
 }

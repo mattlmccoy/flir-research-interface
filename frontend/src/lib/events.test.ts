@@ -36,3 +36,11 @@ test("nearestIndex finds the closest sample time", () => {
   assert.equal(nearestIndex(TL.t_s, 9), 4);
   assert.equal(nearestIndex([], 1), 0);
 });
+
+test("annotation events with a frame_id are placed exactly at that frame and labelled by name", () => {
+  const m = eventsToMarkers([
+    { t_utc: "2026-09-02T10:00:00.700+00:00", type: "annotation", name: "RF ON", frame_id: 104 },
+    { t_utc: "2026-09-02T10:00:00.050+00:00", type: "annotation", name: "late but exact", frame_id: 101 },
+  ], TL, START);
+  assert.deepEqual(m, [{ t: 0.3, label: "RF ON" }, { t: 0.1, label: "late but exact" }]);
+});

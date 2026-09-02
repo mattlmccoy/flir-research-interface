@@ -74,3 +74,11 @@ from events.json as markers. Camera-controls rail section follows as its own ste
 - [x] 7 Wire playback: per-frame stats, series fetch, cursor, events
 - [x] 8 Gate (frontend tests, backend tests, ruff, mypy, browser check), commit
 - [x] 9 Camera controls section (case, object params, NUC, frame rate) with recording lock
+
+## M7 exports (DONE 2026-09-02): analysis/export.py + endpoints + playback export section + card export; docs/data_format.md.
+## M8 metadata & events (started 2026-09-02)
+- [x] 1 Recorder.note_event stamps frame_id; POST /api/recording/event (409 unless recording) — TDD
+- [x] 2 PATCH /api/experiments/{name}/metadata merges `experiment` keys atomically, keeps an edit log — TDD
+- [x] 3 eventsToMarkers uses frame_id when present (exact placement) — TDD
+- [x] 4 UI: RECORDING section "mark event" (RF ON / RF OFF / custom + note); playback experiment section editable
+- [ ] 5 Gate + browser check + commit

@@ -162,6 +162,7 @@ class Recorder:
         self._queue_dropped = 0
         self._gap_events: list[dict[str, int]] = []
         self._last_frame_id: int | None = None
+        self._last_submitted_id: int | None = None
         self._first_ts: int | None = None
         self._last_ts: int | None = None
         self._error: str | None = None
@@ -303,6 +304,8 @@ class Recorder:
             self._frames_received += 1
         try:
             self._queue.put_nowait(frame)
+            with self._lock:
+                self._last_submitted_id = frame.frame_id
         except queue.Full:
             with self._lock:
                 self._queue_dropped += 1
@@ -443,9 +446,19 @@ class Recorder:
         with self._lock:
             self._frames_written += n
 
-    def note_event(self, kind: str, data: dict[str, Any] | None = None) -> None:
-        """Append a timestamped event (e.g. a NUC request) to this recording's events.json."""
-        self._event(kind, dict(data or {}))
+    def note_event(self, kind: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Append a timestamped event (NUC request, operator mark) to this recording's events.json.
+
+        The id of the last frame accepted so far is stamped in as ``frame_id`` so playback can
+        place the mark exactly; before the first frame there is no frame_id.
+        """
+        payload = dict(data or {})
+        with self._lock:
+            if self._last_submitted_id is not None and "frame_id" not in payload:
+                payload["frame_id"] = self._last_submitted_id
+        self._event(kind, payload)
+        with self._lock:
+            return dict(self._events[-1])
 
     def _event(self, kind: str, data: dict[str, Any]) -> None:
         with self._lock:

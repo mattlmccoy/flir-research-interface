@@ -75,6 +75,10 @@ export const api = {
     j<{ state: string; experiment_dir: string }>(fetch("/api/recording/start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, metadata }) })),
   recordingStop: () => j<Record<string, unknown>>(fetch("/api/recording/stop", { method: "POST" })),
   recordingStatus: () => j<RecordingStatus>(fetch("/api/recording/status")),
+  recordingEvent: (name: string, note?: string) =>
+    j<ExperimentEvent>(fetch("/api/recording/event", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, note: note || null }) })),
+  patchMetadata: (name: string, experiment: Record<string, unknown>) =>
+    j<{ experiment: Record<string, unknown> }>(fetch(`/api/experiments/${encodeURIComponent(name)}/metadata`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ experiment }) })),
   experiments: () => j<Experiment[]>(fetch("/api/experiments")),
   previewUrl: (name: string) => `/api/experiments/${encodeURIComponent(name)}/preview.png`,
   keyframesUrl: (name: string) => `/api/experiments/${encodeURIComponent(name)}/keyframes.png`,

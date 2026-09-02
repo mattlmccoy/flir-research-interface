@@ -14,6 +14,7 @@ import { ThermalView, type StatsMap } from "./ThermalView.tsx";
 import { DisplayControls } from "./DisplayControls.tsx";
 import { RoiRows } from "./RoiRows.tsx";
 import { ExportSection } from "./ExportSection.tsx";
+import { MetadataEditor } from "./MetadataEditor.tsx";
 import { TimePlot, type Trace } from "./TimePlot.tsx";
 import { StudioFrame } from "./studio/StudioFrame.tsx";
 import { ToolStrip } from "./studio/ToolStrip.tsx";
@@ -169,11 +170,8 @@ export function PlaybackPage(p: Props) {
               <span>format</span><span className="v plain">{info?.ir_format ?? "—"}</span>
               <span>case</span><span className="v">{active ? `${active.low_c?.toFixed(0)}…${active.high_c?.toFixed(0)} °C` : "—"}</span>
               <span>emissivity</span><span className="v">{fmtAny((cam.object_parameters as Record<string, unknown> | undefined)?.ObjectEmissivity)}</span>
-              {Object.entries(exp).filter(([k]) => k !== "name").map(([k, v]) => [
-                <span key={`k-${k}`}>{k}</span>,
-                <span key={`v-${k}`} className="v plain">{String(v)}</span>,
-              ])}
             </div>
+            <MetadataEditor name={p.name} experiment={exp} onSaved={() => { api.experiment(p.name).then(setInfo).catch((e) => setErr(String(e))); }} />
           </RailSection>
           <RailSection title="measurements" open={p.layout.sections.measurements} onToggle={() => p.dispatch({ type: "toggleSection", section: "measurements" })} tag="this frame">
             {hdr ? (

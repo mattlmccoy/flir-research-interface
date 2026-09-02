@@ -49,6 +49,20 @@ export function RecordPanel({ acquiring }: { acquiring: boolean }) {
 
   const low = (status.free_space_gb ?? Infinity) < (status.min_free_gb ?? 2);
 
+  const [markName, setMarkName] = useState("");
+  const [markNote, setMarkNote] = useState("");
+  const [lastMark, setLastMark] = useState<string | null>(null);
+  async function mark(label: string) {
+    const nm = label.trim();
+    if (!nm) return;
+    setErr(null);
+    try {
+      const ev = await api.recordingEvent(nm, markNote.trim() || undefined);
+      setLastMark(`${nm} @ frame ${ev.frame_id ?? "?"}`);
+      setMarkName(""); setMarkNote("");
+    } catch (e) { setErr(String(e)); }
+  }
+
   return (
     <>
       <div className="row">
@@ -62,6 +76,21 @@ export function RecordPanel({ acquiring }: { acquiring: boolean }) {
           <button className="danger" disabled={busy} onClick={stop}>■ Stop</button>
         )}
       </div>
+      {recording && (
+        <>
+          <div className="row" aria-label="event marks">
+            <button className="secondary" onClick={() => mark("RF ON")}>RF ON</button>
+            <button className="secondary" onClick={() => mark("RF OFF")}>RF OFF</button>
+            <input type="text" value={markName} placeholder="custom mark" style={{ width: 110 }} onChange={(e) => setMarkName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") void mark(markName); }} />
+            <button className="secondary" disabled={!markName.trim()} onClick={() => mark(markName)}>mark</button>
+          </div>
+          <div className="row">
+            <input type="text" value={markNote} placeholder="note (optional)" style={{ flex: 1, minWidth: 120 }} onChange={(e) => setMarkNote(e.target.value)} />
+          </div>
+          {lastMark && <div className="hint">marked {lastMark}</div>}
+        </>
+      )}
       {showForm && !recording && (
         <div className="kv">
           {FIELDS.map((f) => (

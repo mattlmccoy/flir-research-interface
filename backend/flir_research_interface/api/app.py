@@ -51,6 +51,15 @@ class ParametersRequest(BaseModel):
     values: dict[str, Any]
 
 
+class EventRequest(BaseModel):
+    name: str
+    note: str | None = None
+
+
+class MetadataPatch(BaseModel):
+    experiment: Any
+
+
 def _make_backend(name: str, *, sim_fps: float) -> CameraBackend:
     if name not in CAMERA_BACKENDS:
         raise HTTPException(400, f"unknown backend {name!r}; known: {sorted(CAMERA_BACKENDS)}")
@@ -311,6 +320,20 @@ def create_app(
         manifest = await _finalize_recording()
         return manifest or {"state": RecorderState.IDLE.value}
 
+    @app.post("/api/recording/event")
+    def recording_event(req: EventRequest) -> dict[str, Any]:
+        """Operator mark (RF ON/OFF, note…) stamped with the last recorded frame id (§ M8)."""
+        rec = recorder()
+        if rec is None or rec.state != RecorderState.RECORDING:
+            raise HTTPException(409, "not recording")
+        name = req.name.strip()
+        if not name:
+            raise HTTPException(400, "event name is required")
+        data: dict[str, Any] = {"name": name}
+        if req.note:
+            data["note"] = req.note
+        return rec.note_event("annotation", data)
+
     @app.get("/api/recording/status")
     def recording_status() -> dict[str, Any]:
         rec = recorder()
@@ -380,6 +403,21 @@ def create_app(
     @app.get("/api/experiments/{name}/timeline")
     def experiment_timeline(name: str) -> dict[str, list[Any]]:
         return _open(name).timeline()
+
+    @app.patch("/api/experiments/{name}/metadata")
+    def experiment_metadata_patch(name: str, req: MetadataPatch) -> dict[str, Any]:
+        """Edit operator fields after the fact; camera/conversion blocks stay as recorded."""
+        from flir_research_interface.recording.metadata import patch_experiment_metadata
+
+        if not isinstance(req.experiment, dict):
+            raise HTTPException(400, "experiment must be an object of field: value")
+        d = _exp_dir(name)
+        try:
+            return patch_experiment_metadata(d, req.experiment)
+        except FileNotFoundError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     @app.get("/api/experiments/{name}/series")
     async def experiment_series(name: str, rois: str) -> dict[str, Any]:
