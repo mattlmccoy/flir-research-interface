@@ -358,7 +358,13 @@ class Recorder:
     def flush_for_test(self) -> None:
         """Drain the queue and flush buffered frames synchronously (no finalization)."""
         deadline = time.monotonic() + 5.0
-        while (self._queue.qsize() > 0 or self._buf) and time.monotonic() < deadline:
+
+        def _in_flight() -> bool:
+            # Not "queue empty and buffer empty": the writer holds a frame between the two.
+            with self._lock:
+                return self._frames_written + self._queue_dropped < self._frames_received
+
+        while _in_flight() and time.monotonic() < deadline:
             time.sleep(0.01)
             with self._lock:
                 pending = bool(self._buf)
