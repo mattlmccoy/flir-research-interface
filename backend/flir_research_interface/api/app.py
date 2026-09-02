@@ -312,10 +312,7 @@ def create_app(
         root: Path = app.state.experiments_root
         if not contained(root, path):
             raise HTTPException(400, "path is outside the experiments root")
-        kwargs: dict[str, Any] = {}
-        if app.state.reveal_runner is not None:
-            kwargs["runner"] = app.state.reveal_runner
-        res = reveal(path, **kwargs)
+        res = reveal(path.resolve(), runner=app.state.reveal_runner)
         if not res["ok"] and "no file manager" in res.get("error", ""):
             raise HTTPException(501, res["error"])
         return res
@@ -323,7 +320,10 @@ def create_app(
     @app.post("/api/experiments/reveal-root")
     def reveal_root() -> dict[str, Any]:
         root: Path = app.state.experiments_root
-        root.mkdir(parents=True, exist_ok=True)
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise HTTPException(500, f"cannot create experiments root: {exc}") from exc
         return _reveal(root)
 
     @app.post("/api/experiments/{name}/reveal")
