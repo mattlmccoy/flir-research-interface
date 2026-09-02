@@ -86,11 +86,22 @@ def ffprobe_facts(path: Path, *, ffprobe: str | None = None) -> dict[str, Any]:
         raise RuntimeError("ffprobe not found")
     out = subprocess.run(
         [
-            exe, "-v", "error", "-count_frames", "-select_streams", "v:0",
-            "-show_entries", "stream=codec_name,width,height,nb_read_frames:format=duration",
-            "-of", "json", str(path),
+            exe,
+            "-v",
+            "error",
+            "-count_frames",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=codec_name,width,height,nb_read_frames:format=duration",
+            "-of",
+            "json",
+            str(path),
         ],
-        capture_output=True, text=True, timeout=120, check=True,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=True,
     )
     j = json.loads(out.stdout)
     st = (j.get("streams") or [{}])[0]
@@ -108,19 +119,37 @@ def ffmpeg_command(ffmpeg: str, url: str, out: Path) -> list[str]:
     return [
         ffmpeg,
         "-hide_banner",
-        "-loglevel", "warning",
+        "-loglevel",
+        "warning",
         "-y",  # stdin stays open on purpose: 'q' is the graceful stop that finalises the MP4
-        "-rtsp_transport", "tcp",
-        "-timeout", str(SOCKET_TIMEOUT_US),
-        "-use_wallclock_as_timestamps", "1",
-        "-i", url,
-        "-map", "0:v:0",
-        "-an", "-dn", "-sn",
-        "-c", "copy",
-        "-movflags", "+faststart",
-        "-f", "mp4",
+        "-rtsp_transport",
+        "tcp",
+        "-timeout",
+        str(SOCKET_TIMEOUT_US),
+        "-use_wallclock_as_timestamps",
+        "1",
+        "-i",
+        url,
+        "-map",
+        "0:v:0",
+        "-an",
+        "-dn",
+        "-sn",
+        "-c",
+        "copy",
+        "-movflags",
+        "+faststart",
+        "-f",
+        "mp4",
         str(out),
     ]
+
+
+MAX_RESTARTS = 3
+"""Relaunch ffmpeg this many times when it dies before writing anything (RTSP open refused)."""
+RESTART_WINDOW_S = 15.0
+"""Only relaunch within this many seconds of the start: a later death is a real stream loss."""
+RESTART_DELAY_S = 1.0
 
 
 class VisibleRecorder:
@@ -133,7 +162,11 @@ class VisibleRecorder:
         url: str,
         popen: PopenFactory = subprocess.Popen,
         probe: Probe | None = ffprobe_facts,
+        restart_delay_s: float = RESTART_DELAY_S,
     ) -> None:
+        self._restart_delay_s = restart_delay_s
+        self._restarts = 0
+        self._launch_mono = 0.0
         self._ffmpeg = ffmpeg
         self._url = url
         self._popen = popen
@@ -167,10 +200,47 @@ class VisibleRecorder:
             if p is None or self._state is not VisibleState.RECORDING:
                 return
             rc = p.poll()
-            if rc is not None:
-                self._state = VisibleState.ERROR
-                self._error = f"ffmpeg exited with code {rc} while recording"
-                logger.error(self._error)
+            if rc is None:
+                return
+            if self._can_relaunch(rc):
+                self._restarts += 1
+                logger.warning(
+                    "ffmpeg exited with code %s before writing anything; relaunching (%d/%d)",
+                    rc,
+                    self._restarts,
+                    MAX_RESTARTS,
+                )
+                time.sleep(self._restart_delay_s)
+                self._launch()
+                return
+            self._state = VisibleState.ERROR
+            suffix = f" (after {self._restarts} retries)" if self._restarts else ""
+            self._error = f"ffmpeg exited with code {rc} while recording{suffix}"
+            logger.error(self._error)
+
+    def _can_relaunch(self, rc: int) -> bool:
+        """Only a start-up failure is retried: nonzero exit, nothing written, early in the run."""
+        if rc == 0 or self._restarts >= MAX_RESTARTS or self._out is None:
+            return False
+        if time.monotonic() - self._launch_mono > RESTART_WINDOW_S:
+            return False
+        return not self._out.is_file() or self._out.stat().st_size == 0
+
+    def _launch(self) -> None:
+        """Start ffmpeg (lock held by caller)."""
+        self._launch_mono = time.monotonic()
+        self._proc = self._popen(
+            self._cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+        stderr = getattr(self._proc, "stderr", None)
+        if stderr is not None:
+            self._stderr_thread = threading.Thread(
+                target=self._pump_stderr, args=(stderr,), name="ffmpeg-stderr", daemon=True
+            )
+            self._stderr_thread.start()
 
     def start(self, exp_dir: Path) -> dict[str, Any]:
         with self._lock:
@@ -180,19 +250,9 @@ class VisibleRecorder:
             self._cmd = ffmpeg_command(self._ffmpeg, self._url, out)
             self._started_ns = time.time_ns()
             self._stderr.clear()
-            self._proc = self._popen(
-                self._cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-            )
-            stderr = getattr(self._proc, "stderr", None)
-            if stderr is not None:
-                self._stderr_thread = threading.Thread(
-                    target=self._pump_stderr, args=(stderr,), name="ffmpeg-stderr", daemon=True
-                )
-                self._stderr_thread.start()
+            self._restarts = 0
             self._out = out
+            self._launch()
             self._state = VisibleState.RECORDING
             self._error = None
             logger.info("visible recorder started: %s", redact_url(self._url))
@@ -240,7 +300,11 @@ class VisibleRecorder:
                 self._error = error
                 logger.error("visible recorder: %s", error)
             facts: dict[str, Any] = {
-                "frames": None, "duration_s": None, "width": None, "height": None, "codec": None
+                "frames": None,
+                "duration_s": None,
+                "width": None,
+                "height": None,
+                "codec": None,
             }
             if size > 0 and self._probe is not None:
                 try:
@@ -262,6 +326,7 @@ class VisibleRecorder:
                 "started_host_ns": self._started_ns,
                 "stopped_host_ns": stopped_ns,
                 "returncode": rc,
+                "restarts": self._restarts,
                 "size_bytes": size,
                 "sha256": digest,
                 "sync": SYNC_NOTE,
@@ -283,6 +348,7 @@ class VisibleRecorder:
                 "started_host_ns": self._started_ns,
                 "url": redact_url(self._url),
                 "error": self._error,
+                "restarts": self._restarts,
                 "stderr_tail": list(self._stderr),
             }
 

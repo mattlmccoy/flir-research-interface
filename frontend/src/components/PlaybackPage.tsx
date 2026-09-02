@@ -39,6 +39,7 @@ interface Props {
 function seriesTraces(series: RoiSeries | null, rois: RoiState): Trace[] {
   if (!series) return [];
   return rois.rois.flatMap((r, i) => {
+    if (r.hidden) return []; // hidden on the image = hidden on the plot
     const s = series.series[String(r.id)];
     const raw = s?.value ?? s?.mean;
     if (!raw) return [];

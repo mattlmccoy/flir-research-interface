@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 
 from flir_research_interface.api.app import create_app
 from flir_research_interface.visible.recorder import (
+    MAX_RESTARTS,
     VisibleRecorder,
     VisibleState,
     ffmpeg_command,
@@ -111,10 +112,41 @@ def test_recorder_reports_ffmpeg_death_as_error(tmp_path: Path) -> None:
             self.returncode = 1
             return 1
 
-    rec = VisibleRecorder(ffmpeg="/opt/ffmpeg", url="rtsp://h/avc/ch1", popen=Dying)
+    rec = VisibleRecorder(
+        ffmpeg="/opt/ffmpeg", url="rtsp://h/avc/ch1", popen=Dying, restart_delay_s=0.0
+    )
     rec.start(tmp_path)
-    assert rec.stats()["state"] == "error"
-    assert "exited" in rec.stats()["error"]
+    for _ in range(10):  # each poll may relaunch once; it gives up after MAX_RESTARTS
+        if rec.stats()["state"] == "error":
+            break
+    st = rec.stats()
+    assert st["state"] == "error" and st["restarts"] == MAX_RESTARTS
+    assert "exited" in st["error"] and f"after {MAX_RESTARTS} retries" in st["error"]
+
+
+def test_recorder_relaunches_ffmpeg_when_the_rtsp_open_fails_at_start(tmp_path: Path) -> None:
+    """Seen on the A70 (2026-09-02 16:02): the camera refuses a new RTSP session for a moment
+    after the previous one closed; ffmpeg exits 183 within a second with nothing written."""
+    launches: list[FakeProc] = []
+
+    class FlakyOpen(FakeProc):
+        def __init__(self, args: list[str], **kwargs: Any) -> None:
+            super().__init__(args, **kwargs)
+            launches.append(self)
+            if len(launches) <= 2:
+                self.returncode = 183  # "Error opening input" before any packet
+
+    rec = VisibleRecorder(
+        ffmpeg="/opt/ffmpeg", url="rtsp://h/avc/ch1", popen=FlakyOpen, restart_delay_s=0.0
+    )
+    rec.start(tmp_path)
+    for _ in range(5):
+        rec.stats()
+    st = rec.stats()
+    assert st["state"] == "recording" and st["restarts"] == 2 and st["error"] is None
+    assert len(launches) == 3 and launches[2].args == launches[0].args
+    info = rec.stop()
+    assert info["restarts"] == 2 and info["returncode"] == 0
 
 
 def test_recorder_refuses_double_start(tmp_path: Path) -> None:

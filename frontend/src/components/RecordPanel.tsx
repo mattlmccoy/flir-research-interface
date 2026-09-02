@@ -124,6 +124,12 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: unk
         <span>Camera gaps</span><span className="v" style={{ color: (status.frame_id_gaps ?? 0) > 0 ? "var(--warn)" : undefined }}>{status.frame_id_gaps ?? 0}</span>
         <span>Free disk</span><span className="v" style={{ color: low ? "var(--err)" : undefined }}>{status.free_space_gb != null ? `${status.free_space_gb.toFixed(1)} GB` : "—"}</span>
       </div>
+      {recording && vis?.state === "error" && (
+        <div className="errbox" role="alert">
+          <b>Visible video failed</b> — {vis.error ?? "ffmpeg stopped"}. The thermal recording continues; this run will have no visible.mp4{(vis.restarts ?? 0) > 0 ? ` (retried ${vis.restarts}×)` : ""}.
+        </div>
+      )}
+      {recording && vis?.state === "recording" && (vis.restarts ?? 0) > 0 && <div className="warnbox">Visible stream needed {vis.restarts} retr{vis.restarts === 1 ? "y" : "ies"} to open; the first {vis.restarts} second{vis.restarts === 1 ? "" : "s"} may be missing from visible.mp4.</div>}
       {status.experiment_dir && <div className="muted" style={{ fontSize: 12, wordBreak: "break-all" }}>{status.experiment_dir}</div>}
       {status.error && <div className="errbox">{status.error}</div>}
       {err && <div className="errbox">{err}</div>}

@@ -36,7 +36,7 @@ async function j<T>(r: Promise<Response>): Promise<T> {
   }
   return (await res.json()) as T;
 }
-export interface VisibleStatus { state: string; file?: string | null; started_host_ns?: number | null; url?: string; error?: string | null; reason?: string; }
+export interface VisibleStatus { state: string; restarts?: number; file?: string | null; started_host_ns?: number | null; url?: string; error?: string | null; reason?: string; }
 export interface RecordingStatus { state: string; visible?: VisibleStatus; experiment_dir?: string | null; frames_received?: number; frames_written?: number; queue_depth?: number; queue_dropped?: number; frame_id_gaps?: number; repeated_frames?: number; duration_s?: number; recorded_fps?: number | null; free_space_gb?: number | null; min_free_gb?: number; error?: string | null; experiments_root?: string; }
 export interface Previews {
   units: "celsius" | "counts";

@@ -139,9 +139,10 @@ export function App() {
   const allHidden = !layout.strip && !layout.rail && !layout.dock;
 
   const nowT = hdr && t0Ref.current !== null ? (hdr.device_timestamp_ns - t0Ref.current) / 1e9 : 0;
-  const traces: Trace[] = rois.rois.map((r, i) => {
+  const traces: Trace[] = rois.rois.flatMap((r, i) => {
+    if (r.hidden) return []; // hidden on the image = hidden on the plot (still measured + recorded)
     const b = buffers.current.get(r.id);
-    return { id: r.id, label: roiLabel(r), color: roiColor(r, i), t: b?.t ?? [], v: b?.v ?? [] };
+    return [{ id: r.id, label: roiLabel(r), color: roiColor(r, i), t: b?.t ?? [], v: b?.v ?? [] }];
   });
 
   const topbar = (
