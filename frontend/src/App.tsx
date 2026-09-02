@@ -164,10 +164,11 @@ export function App() {
       strip={<ToolStrip tool={layout.tool} onCollapseAll={() => dispatch({ type: "collapseAll" })} zoom={layout.zoom} onZoom={(z) => dispatch({ type: "setZoom", zoom: z })}
         onTool={(t) => dispatch({ type: "setTool", tool: t })} />}
       center={
-        <div className={`center-split ${layout.visibleSide && visibleAvailable ? "on" : ""}`}>
+        <div className={`center-split ${layout.visibleMode === "side" && visibleAvailable ? "on" : ""}`}>
           <ThermalView frame={frame} palette={palette} scaleMode={scaleMode} manual={manual} onScale={setShown}
-            rois={rois.rois} selected={rois.selected} tool={layout.tool} zoom={layout.zoom} onRoi={roiDispatch} onStats={onStats} />
-          {layout.visibleSide && visibleAvailable && <VisibleLive big />}
+            rois={rois.rois} selected={rois.selected} tool={layout.tool} zoom={layout.zoom} onRoi={roiDispatch} onStats={onStats}
+            overlay={layout.visibleMode === "overlay" && visibleAvailable ? <VisibleLive plain /> : undefined} overlayStyle={layout.overlay} />
+          {layout.visibleMode === "side" && visibleAvailable && <VisibleLive big />}
         </div>
       }
       dock={
@@ -208,7 +209,7 @@ export function App() {
             <DisplayControls palette={palette} setPalette={setPalette} scaleMode={scaleMode} setScaleMode={setScaleMode} manual={manual} setManual={setManual} shown={shown} />
           </RailSection>
           <RailSection title="visible camera" open={layout.sections.visible} onToggle={() => dispatch({ type: "toggleSection", section: "visible" })} tag="preview only">
-            <VisiblePanel mode="live" available={visibleAvailable} reason={recording?.visible?.reason} side={layout.visibleSide} onSide={() => dispatch({ type: "toggleVisibleSide" })} />
+            <VisiblePanel mode="live" available={visibleAvailable} reason={recording?.visible?.reason} visibleMode={layout.visibleMode} overlay={layout.overlay} dispatch={dispatch} />
           </RailSection>
         </Rail>
       }

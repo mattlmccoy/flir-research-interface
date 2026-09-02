@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api.ts";
 import { streamMjpeg } from "../lib/mjpeg.ts";
+import { DEFAULT_OVERLAY, VISIBLE_MODES, type LayoutAction, type Overlay, type VisibleMode } from "../lib/layout.ts";
 
-/** Live MJPEG view: fetches the stream itself so unmounting aborts it (the operator's transcode ends at once). */
-export function VisibleLive({ big = false }: { big?: boolean }) {
+/** Live MJPEG view: fetches the stream itself so unmounting aborts it (the operator's transcode ends at once).
+ *  `plain` renders only the image (for the overlay). */
+export function VisibleLive({ big = false, plain = false }: { big?: boolean; plain?: boolean }) {
   const img = useRef<HTMLImageElement>(null);
   const [err, setErr] = useState<string | null>(null);
   const [fps, setFps] = useState<number | null>(null);
@@ -23,6 +25,7 @@ export function VisibleLive({ big = false }: { big?: boolean }) {
     }, (e) => { if (e) setErr(e); });
     return () => { stop(); if (url) URL.revokeObjectURL(url); };
   }, []);
+  if (plain) return <img ref={img} alt="visible camera overlay" className="fill" />;
   return (
     <div className={`visible-box ${big ? "big" : ""}`}>
       <img ref={img} alt="visible camera" />
@@ -32,10 +35,10 @@ export function VisibleLive({ big = false }: { big?: boolean }) {
   );
 }
 
-interface VideoProps { name: string; t: number; playing: boolean; speed: number; measuredFps?: number | null; big?: boolean; }
+interface VideoProps { name: string; t: number; playing: boolean; speed: number; measuredFps?: number | null; big?: boolean; plain?: boolean; }
 
 /** Recorded visible.mp4 kept in step with the thermal cursor (host-clock alignment, not frame-exact). */
-export function VisibleVideo({ name, t, playing, speed, measuredFps, big = false }: VideoProps) {
+export function VisibleVideo({ name, t, playing, speed, measuredFps, big = false, plain = false }: VideoProps) {
   const video = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     const v = video.current;
@@ -49,6 +52,7 @@ export function VisibleVideo({ name, t, playing, speed, measuredFps, big = false
       if (Math.abs(v.currentTime - t) > 0.02) v.currentTime = t;
     }
   }, [t, playing, speed]);
+  if (plain) return <video ref={video} src={api.visibleVideoUrl(name)} muted playsInline preload="auto" className="fill" />;
   return (
     <div className={`visible-box ${big ? "big" : ""}`}>
       <video ref={video} src={api.visibleVideoUrl(name)} muted playsInline preload="auto" />
@@ -57,36 +61,73 @@ export function VisibleVideo({ name, t, playing, speed, measuredFps, big = false
   );
 }
 
-type PanelProps =
-  | { mode: "live"; available: boolean; reason?: string; side: boolean; onSide: () => void }
-  | { mode: "playback"; name: string; hasVideo: boolean; t: number; playing: boolean; speed: number; measuredFps?: number | null; side: boolean; onSide: () => void };
+interface Placement { visibleMode: VisibleMode; overlay: Overlay; dispatch: (a: LayoutAction) => void; }
+type PanelProps = Placement & (
+  | { mode: "live"; available: boolean; reason?: string }
+  | { mode: "playback"; name: string; hasVideo: boolean; t: number; playing: boolean; speed: number; measuredFps?: number | null });
 
-/** Rail section body: placement toggle plus the small in-rail view when not side by side. */
+function Slider({ label, value, min, max, step, unit, onChange }: { label: string; value: number; min: number; max: number; step: number; unit?: string; onChange: (v: number) => void }) {
+  return (
+    <label style={{ display: "contents" }}>
+      <span>{label}</span>
+      <span className="v plain" style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "flex-end" }}>
+        <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} style={{ width: 110 }} aria-label={label} />
+        <span style={{ minWidth: 44, textAlign: "right" }}>{value.toFixed(step < 1 ? 2 : 0)}{unit ?? ""}</span>
+      </span>
+    </label>
+  );
+}
+
+/** Rail section body: placement (rail / side by side / overlay), overlay registration sliders, in-rail view. */
 export function VisiblePanel(p: PanelProps) {
   const [on, setOn] = useState(false);
-  const sideToggle = (
-    <label className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-      <input type="checkbox" checked={p.side} onChange={p.onSide} /> side by side with the thermal image
-    </label>
+  const mode = p.visibleMode;
+  const placement = (
+    <div className="row" role="radiogroup" aria-label="visible camera placement">
+      {VISIBLE_MODES.map((m) => (
+        <label key={m} className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <input type="radio" name="visible-mode" checked={mode === m} onChange={() => p.dispatch({ type: "setVisibleMode", mode: m })} />
+          {m === "rail" ? "in the rail" : m === "side" ? "side by side" : "overlay on IR"}
+        </label>
+      ))}
+    </div>
+  );
+  const registration = mode === "overlay" && (
+    <>
+      <div className="kv">
+        <Slider label="opacity" value={p.overlay.opacity} min={0} max={1} step={0.05} onChange={(v) => p.dispatch({ type: "setOverlay", patch: { opacity: v } })} />
+        <Slider label="scale" value={p.overlay.scale} min={0.5} max={2} step={0.01} unit="×" onChange={(v) => p.dispatch({ type: "setOverlay", patch: { scale: v } })} />
+        <Slider label="shift x" value={p.overlay.dx} min={-50} max={50} step={0.5} unit="%" onChange={(v) => p.dispatch({ type: "setOverlay", patch: { dx: v } })} />
+        <Slider label="shift y" value={p.overlay.dy} min={-50} max={50} step={0.5} unit="%" onChange={(v) => p.dispatch({ type: "setOverlay", patch: { dy: v } })} />
+      </div>
+      <div className="row">
+        <button className="secondary" onClick={() => p.dispatch({ type: "setOverlay", patch: DEFAULT_OVERLAY })}>reset alignment</button>
+        <span className="hint">The visible lens sees a wider field than the IR lens; scale and shift until edges line up. Alignment is remembered.</span>
+      </div>
+    </>
   );
   if (p.mode === "live") {
     if (!p.available) return <div className="hint">Visible camera preview unavailable: {p.reason ?? "ffmpeg or RTSP credentials not configured"}.</div>;
     return (
       <>
-        <div className="row">
-          {!p.side && <button className={on ? "danger" : "secondary"} onClick={() => setOn(!on)}>{on ? "stop preview" : "show visible camera"}</button>}
-          {sideToggle}
-        </div>
+        {placement}
+        {registration}
+        {mode === "rail" && (
+          <div className="row">
+            <button className={on ? "danger" : "secondary"} onClick={() => setOn(!on)}>{on ? "stop preview" : "show visible camera"}</button>
+          </div>
+        )}
         <div className="hint">RTSP /avc/ch1 → MJPEG 640 px; the camera limits it to ~8 fps while the thermal stream runs, about a second of encoder delay.</div>
-        {!p.side && on && <VisibleLive />}
+        {mode === "rail" && on && <VisibleLive />}
       </>
     );
   }
   if (!p.hasVideo) return <div className="hint">This recording has no visible video.</div>;
   return (
     <>
-      <div className="row">{sideToggle}</div>
-      {!p.side && <VisibleVideo name={p.name} t={p.t} playing={p.playing} speed={p.speed} measuredFps={p.measuredFps} />}
+      {placement}
+      {registration}
+      {mode === "rail" && <VisibleVideo name={p.name} t={p.t} playing={p.playing} speed={p.speed} measuredFps={p.measuredFps} />}
     </>
   );
 }

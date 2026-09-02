@@ -118,15 +118,25 @@ test("layout carries a zoom (fit by default), setZoom changes it, loadLayout rej
   assert.equal(loadLayout(storage).zoom, 1);
 });
 
-test("visibleSide: off by default, toggled by an action, validated on load", () => {
-  assert.equal(DEFAULT_LAYOUT.visibleSide, false);
-  const on = layoutReducer(DEFAULT_LAYOUT, { type: "toggleVisibleSide" });
-  assert.equal(on.visibleSide, true);
-  assert.equal(layoutReducer(on, { type: "toggleVisibleSide" }).visibleSide, false);
+test("visibleMode: rail by default; side / overlay set by action; legacy visibleSide migrates; junk rejected", () => {
+  assert.equal(DEFAULT_LAYOUT.visibleMode, "rail");
+  assert.equal(layoutReducer(DEFAULT_LAYOUT, { type: "setVisibleMode", mode: "overlay" }).visibleMode, "overlay");
   const st = new Map<string, string>();
   const storage = { getItem: (k: string) => st.get(k) ?? null, setItem: (k: string, v: string) => { st.set(k, v); } } as unknown as Storage;
-  st.set("fri.layout.v1", JSON.stringify({ visibleSide: "yes" }));
-  assert.equal(loadLayout(storage).visibleSide, false);
+  st.set("fri.layout.v1", JSON.stringify({ visibleMode: "sideways" }));
+  assert.equal(loadLayout(storage).visibleMode, "rail");
   st.set("fri.layout.v1", JSON.stringify({ visibleSide: true }));
-  assert.equal(loadLayout(storage).visibleSide, true);
+  assert.equal(loadLayout(storage).visibleMode, "side");
+  st.set("fri.layout.v1", JSON.stringify({ visibleMode: "overlay" }));
+  assert.equal(loadLayout(storage).visibleMode, "overlay");
+});
+
+test("overlay registration: defaults, partial updates are clamped, persisted values validated", () => {
+  assert.deepEqual(DEFAULT_LAYOUT.overlay, { opacity: 0.5, scale: 1, dx: 0, dy: 0 });
+  const s1 = layoutReducer(DEFAULT_LAYOUT, { type: "setOverlay", patch: { opacity: 1.7, scale: 0.1, dx: -80, dy: 12 } });
+  assert.deepEqual(s1.overlay, { opacity: 1, scale: 0.5, dx: -50, dy: 12 });
+  const st = new Map<string, string>();
+  const storage = { getItem: (k: string) => st.get(k) ?? null, setItem: (k: string, v: string) => { st.set(k, v); } } as unknown as Storage;
+  st.set("fri.layout.v1", JSON.stringify({ overlay: { opacity: "x", scale: 1.25, dx: 3 } }));
+  assert.deepEqual(loadLayout(storage).overlay, { opacity: 0.5, scale: 1.25, dx: 3, dy: 0 });
 });

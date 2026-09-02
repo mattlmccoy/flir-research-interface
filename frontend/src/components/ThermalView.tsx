@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { KeyboardEvent as RKeyboardEvent, PointerEvent as RPointerEvent } from "react";
+import type { KeyboardEvent as RKeyboardEvent, PointerEvent as RPointerEvent, ReactNode } from "react";
 import type { FrameMessage } from "../lib/protocol.ts";
 import { countsToCelsius } from "../lib/radiometry.ts";
 import { buildLut, mapToRgba, type PaletteName } from "../lib/palette.ts";
@@ -27,6 +27,9 @@ interface Props {
   /** "fit" scales the image to the cell (up or down); 1 / 2 are exact pixel factors (scrollable). */
   zoom?: Zoom;
   onRoi?: (a: RoiAction) => void;
+  /** Visible-camera element blended over the image (positioned to the image box, below the ROI layer). */
+  overlay?: ReactNode;
+  overlayStyle?: { opacity: number; scale: number; dx: number; dy: number };
   /** Called with per-ROI statistics every time a frame or the ROI set changes. */
   onStats?: (stats: StatsMap, frame: FrameMessage) => void;
 }
@@ -48,7 +51,7 @@ export function dragShape(tool: Tool, a: Pt, b: Pt, w: number, h: number): RoiIn
 }
 
 /** Renders raw counts -> °C -> palette on a canvas, with an ROI overlay layer. Data arrays are never mutated. */
-export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois = NO_ROIS, selected = null, tool = "select", zoom = "fit", onRoi, onStats }: Props) {
+export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois = NO_ROIS, selected = null, tool = "select", zoom = "fit", onRoi, overlay, overlayStyle, onStats }: Props) {
   const viewRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const celsiusRef = useRef<Float32Array | null>(null);
@@ -184,6 +187,11 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
   return (
     <div className={`view ${zoom === "fit" ? "" : "scroll"}`} ref={viewRef}>
       <canvas ref={canvasRef} style={size ? { width: size.width, height: size.height } : undefined} />
+      {overlay && box && (
+        <div className="visible-overlay" style={{ left: box.left, top: box.top, width: box.width, height: box.height, opacity: overlayStyle?.opacity ?? 0.5 }}>
+          <div className="visible-overlay-inner" style={{ transform: `translate(${overlayStyle?.dx ?? 0}%, ${overlayStyle?.dy ?? 0}%) scale(${overlayStyle?.scale ?? 1})` }}>{overlay}</div>
+        </div>
+      )}
       {hdr && box && (
         <RoiOverlay box={box} width={hdr.width} height={hdr.height} rois={rois} selected={selected} stats={stats} draft={draft} cursor={drawing ? "crosshair" : selected !== null ? "move" : "default"}
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => { setHover(null); moving.current = null; }} onKeyDown={onKey}

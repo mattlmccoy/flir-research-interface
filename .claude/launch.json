@@ -38,6 +38,18 @@
         "frontend/dist-site"
       ],
       "port": 5174
+    },
+    {
+      "name": "staged",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5175",
+        "--directory",
+        "frontend/dist-staged"
+      ],
+      "port": 5175
     }
   ]
 }

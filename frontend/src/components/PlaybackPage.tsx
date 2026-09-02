@@ -150,10 +150,11 @@ export function PlaybackPage(p: Props) {
       strip={<ToolStrip tool={p.layout.tool} onTool={(tool) => p.dispatch({ type: "setTool", tool })} onCollapseAll={() => p.dispatch({ type: "collapseAll" })} zoom={p.layout.zoom} onZoom={(z) => p.dispatch({ type: "setZoom", zoom: z })}
         leading={<button title="Back to experiments" aria-label="Back to experiments" onClick={p.onBack}>←</button>} />}
       center={
-        <div className={`center-split ${p.layout.visibleSide && hasVideo ? "on" : ""}`}>
+        <div className={`center-split ${p.layout.visibleMode === "side" && hasVideo ? "on" : ""}`}>
           <ThermalView frame={frame} palette={p.palette} scaleMode={p.scaleMode} manual={p.manual} onScale={setShown}
-            rois={p.rois.rois} selected={p.rois.selected} tool={p.layout.tool} zoom={p.layout.zoom} onRoi={p.roiDispatch} onStats={onStats} />
-          {p.layout.visibleSide && hasVideo && <VisibleVideo big name={p.name} t={t} playing={playing} speed={speed} measuredFps={info?.visible?.measured_fps} />}
+            rois={p.rois.rois} selected={p.rois.selected} tool={p.layout.tool} zoom={p.layout.zoom} onRoi={p.roiDispatch} onStats={onStats}
+            overlay={p.layout.visibleMode === "overlay" && hasVideo ? <VisibleVideo plain name={p.name} t={t} playing={playing} speed={speed} /> : undefined} overlayStyle={p.layout.overlay} />
+          {p.layout.visibleMode === "side" && hasVideo && <VisibleVideo big name={p.name} t={t} playing={playing} speed={speed} measuredFps={info?.visible?.measured_fps} />}
         </div>
       }
       dock={
@@ -195,7 +196,7 @@ export function PlaybackPage(p: Props) {
             <DisplayControls palette={p.palette} setPalette={p.setPalette} scaleMode={p.scaleMode} setScaleMode={p.setScaleMode} manual={p.manual} setManual={p.setManual} shown={shown} />
           </RailSection>
           <RailSection title="visible camera" open={p.layout.sections.visible} onToggle={() => p.dispatch({ type: "toggleSection", section: "visible" })} tag="recorded video">
-            <VisiblePanel mode="playback" name={p.name} hasVideo={hasVideo} t={t} playing={playing} speed={speed} measuredFps={info?.visible?.measured_fps} side={p.layout.visibleSide} onSide={() => p.dispatch({ type: "toggleVisibleSide" })} />
+            <VisiblePanel mode="playback" name={p.name} hasVideo={hasVideo} t={t} playing={playing} speed={speed} measuredFps={info?.visible?.measured_fps} visibleMode={p.layout.visibleMode} overlay={p.layout.overlay} dispatch={p.dispatch} />
           </RailSection>
           <RailSection title="export" open={p.layout.sections.export} onToggle={() => p.dispatch({ type: "toggleSection", section: "export" })} tag="derived files">
             <ExportSection name={p.name} index={index} nFrames={n} rois={p.rois.rois} celsius={hdr?.kelvin_per_count != null} />

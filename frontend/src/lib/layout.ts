@@ -12,9 +12,19 @@ export interface LayoutState {
   dock: boolean;
   tool: Tool;
   zoom: Zoom;
-  /** Show the visible camera beside the thermal image in the centre cell (live preview / recorded video). */
-  visibleSide: boolean;
+  /** Where the visible camera shows: small in the rail, beside the thermal image, or blended over it. */
+  visibleMode: VisibleMode;
+  /** Overlay registration: opacity 0–1, scale 0.5–2 and offsets in % of the image (visible lens ≠ IR lens). */
+  overlay: Overlay;
   sections: Record<Section, boolean>;
+}
+export const VISIBLE_MODES = ["rail", "side", "overlay"] as const;
+export type VisibleMode = (typeof VISIBLE_MODES)[number];
+export interface Overlay { opacity: number; scale: number; dx: number; dy: number; }
+export const DEFAULT_OVERLAY: Overlay = Object.freeze({ opacity: 0.5, scale: 1, dx: 0, dy: 0 }) as Overlay;
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+export function clampOverlay(o: Overlay): Overlay {
+  return { opacity: clamp(o.opacity, 0, 1), scale: clamp(o.scale, 0.5, 2), dx: clamp(o.dx, -50, 50), dy: clamp(o.dy, -50, 50) };
 }
 
 /**
@@ -41,7 +51,8 @@ export const DEFAULT_LAYOUT: LayoutState = {
   dock: true,
   tool: "select",
   zoom: "fit",
-  visibleSide: false,
+  visibleMode: "rail",
+  overlay: DEFAULT_OVERLAY,
   sections: { measurements: true, camera: true, experiment: true, recording: true, display: true, export: true, visible: true },
 };
 Object.freeze(DEFAULT_LAYOUT.sections);
@@ -53,7 +64,8 @@ export type LayoutAction =
   | { type: "openSection"; section: Section }
   | { type: "setTool"; tool: Tool }
   | { type: "setZoom"; zoom: Zoom }
-  | { type: "toggleVisibleSide" }
+  | { type: "setVisibleMode"; mode: VisibleMode }
+  | { type: "setOverlay"; patch: Partial<Overlay> }
   | { type: "collapseAll" }
   | { type: "restoreAll" };
 
@@ -65,7 +77,8 @@ export function layoutReducer(s: LayoutState, a: LayoutAction): LayoutState {
     case "openSection": return { ...s, rail: true, sections: { ...s.sections, [a.section]: true } };
     case "setTool": return { ...s, tool: a.tool };
     case "setZoom": return { ...s, zoom: a.zoom };
-    case "toggleVisibleSide": return { ...s, visibleSide: !s.visibleSide };
+    case "setVisibleMode": return { ...s, visibleMode: a.mode };
+    case "setOverlay": return { ...s, overlay: clampOverlay({ ...s.overlay, ...a.patch }) };
     case "collapseAll": return { ...s, strip: false, rail: false, dock: false };
     case "restoreAll": return { ...s, strip: true, rail: true, dock: true };
   }
@@ -81,6 +94,12 @@ function bool(v: unknown, fallback: boolean): boolean {
   return typeof v === "boolean" ? v : fallback;
 }
 
+function isVisibleMode(v: unknown): v is VisibleMode {
+  return typeof v === "string" && (VISIBLE_MODES as readonly string[]).includes(v);
+}
+function num(v: unknown, fallback: number): number {
+  return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+}
 function isTool(v: unknown): v is Tool {
   return typeof v === "string" && (TOOLS as readonly string[]).includes(v);
 }
@@ -92,13 +111,20 @@ export function loadLayout(storage: Storage | null): LayoutState {
     if (!raw) return DEFAULT_LAYOUT;
     const parsed = asRecord(JSON.parse(raw));
     const sec = asRecord(parsed.sections);
+    const ov = asRecord(parsed.overlay);
     return {
       strip: bool(parsed.strip, DEFAULT_LAYOUT.strip),
       rail: bool(parsed.rail, DEFAULT_LAYOUT.rail),
       dock: bool(parsed.dock, DEFAULT_LAYOUT.dock),
       tool: isTool(parsed.tool) ? parsed.tool : DEFAULT_LAYOUT.tool,
       zoom: isZoom(parsed.zoom) ? parsed.zoom : DEFAULT_LAYOUT.zoom,
-      visibleSide: bool(parsed.visibleSide, DEFAULT_LAYOUT.visibleSide),
+      visibleMode: isVisibleMode(parsed.visibleMode) ? parsed.visibleMode : parsed.visibleSide === true ? "side" : DEFAULT_LAYOUT.visibleMode,
+      overlay: clampOverlay({
+        opacity: num(ov.opacity, DEFAULT_OVERLAY.opacity),
+        scale: num(ov.scale, DEFAULT_OVERLAY.scale),
+        dx: num(ov.dx, DEFAULT_OVERLAY.dx),
+        dy: num(ov.dy, DEFAULT_OVERLAY.dy),
+      }),
       sections: Object.fromEntries(
         SECTIONS.map((k) => [k, bool(sec[k], DEFAULT_LAYOUT.sections[k])]),
       ) as Record<Section, boolean>,
