@@ -34,3 +34,6 @@ vendor/
 .env
 .env.*
 !.env.example
+
+# brainstorming visual companion sessions
+.superpowers/
