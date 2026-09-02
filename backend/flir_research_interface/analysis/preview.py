@@ -14,6 +14,7 @@ import hashlib
 import io
 import json
 import os
+import tempfile
 import warnings
 from collections.abc import Sequence
 from pathlib import Path
@@ -148,12 +149,16 @@ def _sha256(data: bytes) -> str:
 
 
 def _atomic_write(path: Path, data: bytes) -> None:
-    """Write ``data`` to a ``.tmp`` sibling then ``os.replace`` it into place, so a reader
-    (or a crash mid-write) never observes a partially written file.
+    """Write ``data`` to a uniquely named ``.tmp`` sibling then ``os.replace`` it into place,
+    so a reader (or a crash mid-write) never observes a partially written file, and concurrent
+    regenerations never collide on the same temp name.
     """
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_bytes(data)
-    os.replace(tmp, path)
+    with tempfile.NamedTemporaryFile(
+        dir=path.parent, prefix=path.name + ".", suffix=".tmp", delete=False
+    ) as f:
+        f.write(data)
+        tmp_name = f.name
+    os.replace(tmp_name, path)
 
 
 def generate_previews(exp_dir: Path) -> dict[str, Any]:
@@ -161,7 +166,10 @@ def generate_previews(exp_dir: Path) -> dict[str, Any]:
 
     Updates ``manifest.previews`` if a manifest exists.
     """
-    r = ExperimentReader(exp_dir)
+    try:
+        r = ExperimentReader(exp_dir)
+    except KeyError as exc:
+        raise ValueError("experiment has no frames") from exc
     n = r.n_frames
     if n == 0:
         raise ValueError("experiment has no frames")

@@ -7,6 +7,7 @@ and authentication are Milestone 10 concerns (brief §5).
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import platform
 import shutil
@@ -15,7 +16,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -288,17 +289,21 @@ def create_app(
     def experiments() -> list[dict[str, Any]]:
         return list_experiments(app.state.experiments_root)
 
-    def _open(name: str) -> ExperimentReader:
+    def _exp_dir(name: str) -> Path:
         root: Path = app.state.experiments_root
         if "/" in name or "\\" in name or name in ("", ".", ".."):
             raise HTTPException(400, "invalid experiment name")
         d = root / name
         if not d.is_dir():
             raise HTTPException(404, f"experiment {name!r} not found")
+        return d
+
+    def _open(name: str) -> ExperimentReader:
+        d = _exp_dir(name)
         try:
             return ExperimentReader(d)
-        except FileNotFoundError as exc:
-            raise HTTPException(404, str(exc)) from exc
+        except (FileNotFoundError, KeyError, ValueError) as exc:
+            raise HTTPException(404, f"experiment {name!r} is not readable: {exc}") from exc
 
     @app.get("/api/experiments/{name}")
     def experiment_info(name: str) -> dict[str, Any]:
@@ -329,22 +334,26 @@ def create_app(
         )
         return Response(content=payload, media_type="application/octet-stream")
 
-    def _png_response(path: Path) -> Response:
+    def _png_response(path: Path, request: Request) -> Response:
         if not path.is_file():
             raise HTTPException(404, f"{path.name} not generated yet")
+        data = path.read_bytes()
+        etag = f'"{hashlib.sha256(data).hexdigest()}"'
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers={"ETag": etag})
         return Response(
-            content=path.read_bytes(),
+            content=data,
             media_type="image/png",
-            headers={"Cache-Control": "public, max-age=86400"},
+            headers={"Cache-Control": "no-cache", "ETag": etag},
         )
 
     @app.get("/api/experiments/{name}/preview.png")
-    def experiment_preview(name: str) -> Response:
-        return _png_response(_open(name).path / "preview.png")
+    def experiment_preview(name: str, request: Request) -> Response:
+        return _png_response(_exp_dir(name) / "preview.png", request)
 
     @app.get("/api/experiments/{name}/keyframes.png")
-    def experiment_keyframes(name: str) -> Response:
-        return _png_response(_open(name).path / "keyframes.png")
+    def experiment_keyframes(name: str, request: Request) -> Response:
+        return _png_response(_exp_dir(name) / "keyframes.png", request)
 
     @app.post("/api/experiments/{name}/previews")
     async def experiment_regenerate_previews(name: str) -> dict[str, Any]:

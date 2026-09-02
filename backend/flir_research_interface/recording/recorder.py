@@ -480,16 +480,18 @@ class Recorder:
             "events.json": _sha256(self._exp_dir / "events.json"),
         }
         (self._exp_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
-        try:
-            from flir_research_interface.analysis import preview as _preview
+        from flir_research_interface.analysis import preview as _preview
 
+        try:
             manifest["previews"] = _preview.generate_previews(
                 self._exp_dir
             )  # also rewrites manifest.json
         except Exception as exc:  # noqa: BLE001 - previews must never fail finalization
-            logger.warning("preview generation failed: %s", exc)
+            logger.warning("%s: %s", type(exc).__name__, exc)
             manifest["previews"] = None
-            (self._exp_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
+            _preview._atomic_write(
+                self._exp_dir / "manifest.json", json.dumps(manifest, indent=2).encode()
+            )
         return manifest
 
 

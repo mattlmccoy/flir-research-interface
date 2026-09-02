@@ -25,6 +25,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     rc = 0
     for d in dirs:
+        if not (d / "metadata.json").is_file():
+            print(f"{d.name}: skipped (not an experiment)")
+            continue
         if not args.force and (d / "preview.png").is_file() and (d / "keyframes.png").is_file():
             print(f"{d.name}: up to date")
             continue
