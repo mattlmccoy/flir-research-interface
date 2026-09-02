@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
 
-interface Props { title?: string; onCollapse: () => void; controls?: ReactNode; children?: ReactNode; }
+interface Props { title?: string; onCollapse: () => void; controls?: ReactNode; children?: ReactNode; /** Full-width row under the plot (playback transport). */ foot?: ReactNode; }
 
 /** Bottom dock housing the temperature-vs-time plot; `controls` sit in the header (window, export). */
-export function PlotDock({ title = "temperature vs time", onCollapse, controls, children }: Props) {
+export function PlotDock({ title = "temperature vs time", onCollapse, controls, children, foot }: Props) {
   return (
     <div className="dock">
       <div className="dock-head">
@@ -14,6 +14,7 @@ export function PlotDock({ title = "temperature vs time", onCollapse, controls, 
         </span>
       </div>
       <div className={`dock-body ${children ? "plot-body" : ""}`}>{children ?? <span>no plot</span>}</div>
+      {foot && <div className="dock-foot">{foot}</div>}
     </div>
   );
 }

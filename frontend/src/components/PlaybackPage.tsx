@@ -162,7 +162,7 @@ export function PlaybackPage(p: Props) {
   );
 
   return (
-    <StudioFrame layout={p.layout} topbar={p.topbar}
+    <StudioFrame layout={p.layout} topbar={p.topbar} dispatch={p.dispatch}
       strip={<ToolStrip tool={p.layout.tool} onTool={(tool) => p.dispatch({ type: "setTool", tool })} onCollapseAll={() => p.dispatch({ type: "collapseAll" })} zoom={p.layout.zoom} onZoom={(z) => p.dispatch({ type: "setZoom", zoom: z })}
         leading={<button title="Back to experiments" aria-label="Back to experiments" onClick={p.onBack}>←</button>} />}
       center={
@@ -174,7 +174,7 @@ export function PlaybackPage(p: Props) {
         </div>
       }
       dock={
-        <PlotDock title="temperature vs time (whole recording)" onCollapse={() => p.dispatch({ type: "toggle", panel: "dock" })}>
+        <PlotDock title="temperature vs time (whole recording)" foot={transport} onCollapse={() => p.dispatch({ type: "toggle", panel: "dock" })}>
           <TimePlot traces={withDelta} markers={markers} window={{ t0: 0, t1: Math.max(info?.duration_s ?? 0, 0.001) }} cursorT={t}
             emptyText={p.rois.rois.length ? "loading series…" : "add a spot or rectangle ROI to plot it over the whole recording"}
             onSeek={(tt) => { if (tl) { setPlaying(false); setIndex(nearestIndex(tl.t_s, tt)); } }} />
@@ -182,10 +182,10 @@ export function PlaybackPage(p: Props) {
       }
       rail={
         <Rail>
-          <RailSection title="profile & histogram" open={p.layout.sections.profile} onToggle={() => p.dispatch({ type: "toggleSection", section: "profile" })} tag="current frame">
+          <RailSection id="profile" title="profile & histogram" open={p.layout.sections.profile} onToggle={() => p.dispatch({ type: "toggleSection", section: "profile" })} tag="current frame">
             <ProfilePanel field={field} rois={p.rois.rois} selected={p.rois.selected} shown={shown} />
           </RailSection>
-          <RailSection title="experiment" open={p.layout.sections.experiment} onToggle={() => p.dispatch({ type: "toggleSection", section: "experiment" })}>
+          <RailSection id="experiment" title="experiment" open={p.layout.sections.experiment} onToggle={() => p.dispatch({ type: "toggleSection", section: "experiment" })}>
             <div className="kv">
               <span>name</span><span className="v plain" style={{ fontSize: 11 }}>{p.name}</span>
               <span>frames</span><span className="v plain">{n}</span>
@@ -197,7 +197,7 @@ export function PlaybackPage(p: Props) {
             </div>
             <MetadataEditor name={p.name} experiment={exp} onSaved={() => { api.experiment(p.name).then(setInfo).catch((e) => setErr(String(e))); }} />
           </RailSection>
-          <RailSection title="measurements" open={p.layout.sections.measurements} onToggle={() => p.dispatch({ type: "toggleSection", section: "measurements" })} tag="this frame">
+          <RailSection id="measurements" title="measurements" open={p.layout.sections.measurements} onToggle={() => p.dispatch({ type: "toggleSection", section: "measurements" })} tag="this frame">
             {hdr ? (
               <div className="kv">
                 <span>center</span><span className="v">{fmtCelsius(hdr.center_c)}</span>
@@ -220,18 +220,18 @@ export function PlaybackPage(p: Props) {
             <DeltaPicker rois={p.rois.rois} delta={p.layout.delta} onChange={(delta) => p.dispatch({ type: "setDelta", delta })} />
             {err && <div className="errbox">{err}</div>}
           </RailSection>
-          <RailSection title="display" open={p.layout.sections.display} onToggle={() => p.dispatch({ type: "toggleSection", section: "display" })} tag="visualization only">
+          <RailSection id="display" title="display" open={p.layout.sections.display} onToggle={() => p.dispatch({ type: "toggleSection", section: "display" })} tag="visualization only">
             <DisplayControls palette={p.palette} setPalette={p.setPalette} scaleMode={p.scaleMode} setScaleMode={p.setScaleMode} manual={p.manual} setManual={p.setManual} shown={shown} isotherm={p.layout.isotherm} setIsotherm={(isotherm) => p.dispatch({ type: "setIsotherm", isotherm })} />
           </RailSection>
-          <RailSection title="visible camera" open={p.layout.sections.visible} onToggle={() => p.dispatch({ type: "toggleSection", section: "visible" })} tag="recorded video">
+          <RailSection id="visible" title="visible camera" open={p.layout.sections.visible} onToggle={() => p.dispatch({ type: "toggleSection", section: "visible" })} tag="recorded video">
             <VisiblePanel mode="playback" name={p.name} hasVideo={hasVideo} t={t} playing={playing} speed={speed} measuredFps={info?.visible?.measured_fps} visibleMode={p.layout.visibleMode} overlay={p.layout.overlay} dispatch={p.dispatch} aligned={!!overlayH} />
           </RailSection>
-          <RailSection title="export" open={p.layout.sections.export} onToggle={() => p.dispatch({ type: "toggleSection", section: "export" })} tag="derived files">
+          <RailSection id="export" title="export" open={p.layout.sections.export} onToggle={() => p.dispatch({ type: "toggleSection", section: "export" })} tag="derived files">
             <ExportSection name={p.name} index={index} nFrames={n} rois={p.rois.rois} celsius={hdr?.kelvin_per_count != null} thermalPreview={info?.thermal_preview} />
           </RailSection>
         </Rail>
       }
-      statusbar={<StatusBar status={p.status} recording={p.recording} left={transport} />}
+      statusbar={<StatusBar status={p.status} recording={p.recording} left={<span className="muted">playback</span>} />}
     />
   );
 }

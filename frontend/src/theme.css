@@ -42,8 +42,9 @@
   --space: 4px;
   --radius: 3px;
   --strip-w: 40px;
-  --rail-w: 300px;
-  --dock-h: 220px;
+  --rail-w: 400px;
+  --shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  --dock-h: 260px;
   --topbar-h: 40px;
   --statusbar-h: 28px;
 }

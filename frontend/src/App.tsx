@@ -194,7 +194,7 @@ export function App() {
   }
 
   return (
-    <StudioFrame layout={layout} topbar={topbar} statusbar={statusbar}
+    <StudioFrame layout={layout} topbar={topbar} dispatch={dispatch} statusbar={statusbar}
       strip={<ToolStrip tool={layout.tool} onCollapseAll={() => dispatch({ type: "collapseAll" })} zoom={layout.zoom} onZoom={(z) => dispatch({ type: "setZoom", zoom: z })}
         onTool={(t) => dispatch({ type: "setTool", tool: t })} />}
       center={
@@ -220,7 +220,7 @@ export function App() {
       }
       rail={
         <Rail>
-          <RailSection title="measurements" open={layout.sections.measurements} onToggle={() => dispatch({ type: "toggleSection", section: "measurements" })}>
+          <RailSection id="measurements" title="measurements" open={layout.sections.measurements} onToggle={() => dispatch({ type: "toggleSection", section: "measurements" })}>
             {hdr ? (
               <div className="kv">
                 <span>center</span><span className="v">{fmtCelsius(hdr.center_c)}</span>
@@ -237,19 +237,19 @@ export function App() {
               dispatch={roiDispatch} />
             <DeltaPicker rois={rois.rois} delta={layout.delta} onChange={(delta) => dispatch({ type: "setDelta", delta })} />
           </RailSection>
-          <RailSection title="profile & histogram" open={layout.sections.profile} onToggle={() => dispatch({ type: "toggleSection", section: "profile" })} tag="current frame">
+          <RailSection id="profile" title="profile & histogram" open={layout.sections.profile} onToggle={() => dispatch({ type: "toggleSection", section: "profile" })} tag="current frame">
             <ProfilePanel field={field} rois={rois.rois} selected={rois.selected} shown={shown} />
           </RailSection>
-          <RailSection title="camera" open={layout.sections.camera} onToggle={() => dispatch({ type: "toggleSection", section: "camera" })} tag={isRecording ? "locked during recording" : "writes camera nodes"}>
+          <RailSection id="camera" title="camera" open={layout.sections.camera} onToggle={() => dispatch({ type: "toggleSection", section: "camera" })} tag={isRecording ? "locked during recording" : "writes camera nodes"}>
             <CameraControls info={info} locked={isRecording} onApplied={refreshInfo} />
           </RailSection>
-          <RailSection title="recording" open={layout.sections.recording} onToggle={() => dispatch({ type: "toggleSection", section: "recording" })}>
+          <RailSection id="recording" title="recording" open={layout.sections.recording} onToggle={() => dispatch({ type: "toggleSection", section: "recording" })}>
             <RecordPanel acquiring={status.state === "acquiring"} rois={rois.rois} />
           </RailSection>
-          <RailSection title="display" open={layout.sections.display} onToggle={() => dispatch({ type: "toggleSection", section: "display" })} tag="visualization only">
+          <RailSection id="display" title="display" open={layout.sections.display} onToggle={() => dispatch({ type: "toggleSection", section: "display" })} tag="visualization only">
             <DisplayControls palette={palette} setPalette={setPalette} scaleMode={scaleMode} setScaleMode={setScaleMode} manual={manual} setManual={setManual} shown={shown} isotherm={layout.isotherm} setIsotherm={(isotherm) => dispatch({ type: "setIsotherm", isotherm })} />
           </RailSection>
-          <RailSection title="visible camera" open={layout.sections.visible} onToggle={() => dispatch({ type: "toggleSection", section: "visible" })} tag="preview only">
+          <RailSection id="visible" title="visible camera" open={layout.sections.visible} onToggle={() => dispatch({ type: "toggleSection", section: "visible" })} tag="preview only">
             <VisiblePanel mode="live" available={visibleAvailable} reason={recording?.visible?.reason} visibleMode={layout.visibleMode} overlay={layout.overlay} dispatch={dispatch} aligned={!!align.H} />
             {visibleAvailable && <AlignmentPanel state={align} dispatch={alignDispatch} calibrating={calibrating} onCalibrating={setCalibrating} irSize={hdr ? [hdr.width, hdr.height] : null} onSave={saveAlignmentToOperator} onFinishOverlay={() => { setCalibrating(false); dispatch({ type: "setVisibleMode", mode: "overlay" }); }} />}
           </RailSection>

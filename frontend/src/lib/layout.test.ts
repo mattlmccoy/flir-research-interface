@@ -174,3 +174,17 @@ test("delta pair (A − B) lives in the layout, persists, and clears with null",
   assert.deepEqual(loadLayout(storage).delta, { a: 2, b: 5 });
   assert.equal(layoutReducer(s1, { type: "setDelta", delta: null }).delta, null);
 });
+
+test("rail sections can pop out into floating windows, move/resize, and dock back; persisted", () => {
+  assert.deepEqual(DEFAULT_LAYOUT.floating, {});
+  const s1 = layoutReducer(DEFAULT_LAYOUT, { type: "popOut", section: "measurements" });
+  assert.ok(s1.floating.measurements && s1.floating.measurements.w >= 300);
+  const s2 = layoutReducer(s1, { type: "moveFloat", section: "measurements", rect: { x: 40, y: 50, w: 500, h: 400 } });
+  assert.deepEqual(s2.floating.measurements, { x: 40, y: 50, w: 500, h: 400 });
+  const store = new Map<string, string>();
+  const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); } } as unknown as Storage;
+  saveLayout(storage, s2);
+  assert.deepEqual(loadLayout(storage).floating.measurements, { x: 40, y: 50, w: 500, h: 400 });
+  const s3 = layoutReducer(s2, { type: "dockBack", section: "measurements" });
+  assert.equal(s3.floating.measurements, undefined);
+});

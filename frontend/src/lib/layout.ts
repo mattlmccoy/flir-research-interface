@@ -3,6 +3,20 @@ import { DEFAULT_ISOTHERM, parseIsotherm, type Isotherm } from "./isotherm.ts";
 import { isZoom, type Zoom } from "./zoom.ts";
 export const TOOLS = ["select", "spot", "rect", "circle", "line", "polygon"] as const;
 const isDelta = (v: unknown): v is { a: number; b: number } => !!v && typeof v === "object" && Number.isInteger((v as { a: unknown }).a) && Number.isInteger((v as { b: unknown }).b);
+export interface FloatRect { x: number; y: number; w: number; h: number; }
+const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+function clampRect(r: FloatRect): FloatRect {
+  return { x: Math.max(0, r.x), y: Math.max(0, r.y), w: Math.max(260, r.w), h: Math.max(160, r.h) };
+}
+function parseFloating(v: unknown): Partial<Record<Section, FloatRect>> {
+  const out: Partial<Record<Section, FloatRect>> = {};
+  if (!v || typeof v !== "object") return out;
+  for (const [k, r] of Object.entries(v as Record<string, unknown>)) {
+    const q = r as Record<string, unknown> | null;
+    if ((SECTIONS as readonly string[]).includes(k) && q && isNum(q.x) && isNum(q.y) && isNum(q.w) && isNum(q.h)) out[k as Section] = clampRect({ x: q.x, y: q.y, w: q.w, h: q.h });
+  }
+  return out;
+}
 export const SECTIONS = ["measurements", "profile", "camera", "experiment", "recording", "display", "export", "visible"] as const;
 export type Tool = (typeof TOOLS)[number];
 export type Panel = "strip" | "rail" | "dock";
@@ -22,6 +36,8 @@ export interface LayoutState {
   isotherm: Isotherm;
   /** Plot an extra trace A − B (ROI ids), or null. */
   delta: { a: number; b: number } | null;
+  /** Rail sections popped out into floating, resizable windows (viewport px). */
+  floating: Partial<Record<Section, FloatRect>>;
   /** Overlay registration: opacity 0–1, scale 0.5–2 and offsets in % of the image (visible lens ≠ IR lens). */
   overlay: Overlay;
   sections: Record<Section, boolean>;
@@ -63,6 +79,7 @@ export const DEFAULT_LAYOUT: LayoutState = {
   extremes: true,
   isotherm: DEFAULT_ISOTHERM,
   delta: null,
+  floating: {},
   overlay: DEFAULT_OVERLAY,
   sections: { measurements: true, profile: false, camera: true, experiment: true, recording: true, display: true, export: true, visible: true },
 };
@@ -78,6 +95,9 @@ export type LayoutAction =
   | { type: "setExtremes"; on: boolean }
   | { type: "setIsotherm"; isotherm: Isotherm }
   | { type: "setDelta"; delta: { a: number; b: number } | null }
+  | { type: "popOut"; section: Section }
+  | { type: "moveFloat"; section: Section; rect: FloatRect }
+  | { type: "dockBack"; section: Section }
   | { type: "setVisibleMode"; mode: VisibleMode }
   | { type: "setOverlay"; patch: Partial<Overlay> }
   | { type: "collapseAll" }
@@ -95,6 +115,12 @@ export function layoutReducer(s: LayoutState, a: LayoutAction): LayoutState {
     case "setExtremes": return { ...s, extremes: a.on };
     case "setIsotherm": return { ...s, isotherm: parseIsotherm(a.isotherm) };
     case "setDelta": return { ...s, delta: a.delta };
+    case "popOut": {
+      const n = Object.keys(s.floating).length;
+      return { ...s, floating: { ...s.floating, [a.section]: s.floating[a.section] ?? { x: 80 + n * 30, y: 80 + n * 30, w: 420, h: 360 } } };
+    }
+    case "moveFloat": return { ...s, floating: { ...s.floating, [a.section]: clampRect(a.rect) } };
+    case "dockBack": { const { [a.section]: _gone, ...rest } = s.floating; return { ...s, floating: rest }; }
     case "setOverlay": return { ...s, overlay: clampOverlay({ ...s.overlay, ...a.patch }) };
     case "collapseAll": return { ...s, strip: false, rail: false, dock: false };
     case "restoreAll": return { ...s, strip: true, rail: true, dock: true };
@@ -139,6 +165,7 @@ export function loadLayout(storage: Storage | null): LayoutState {
       extremes: typeof parsed.extremes === "boolean" ? parsed.extremes : DEFAULT_LAYOUT.extremes,
       isotherm: parseIsotherm(parsed.isotherm),
       delta: isDelta(parsed.delta) ? parsed.delta : null,
+      floating: parseFloating(parsed.floating),
       overlay: clampOverlay({
         opacity: num(ov.opacity, DEFAULT_OVERLAY.opacity),
         scale: num(ov.scale, DEFAULT_OVERLAY.scale),
