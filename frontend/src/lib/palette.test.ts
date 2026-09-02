@@ -37,3 +37,11 @@ test("mapToRgba handles a degenerate range without dividing by zero", () => {
   mapToRgba(new Float32Array([5]), 5, 5, buildLut("iron"), out);
   assert.equal(out[3], 255);
 });
+
+test("diverging palette is blue below, neutral at the centre, red above", () => {
+  const lut = buildLut("diverging");
+  assert.ok(lut[2] > lut[0], "index 0 is blue");
+  assert.ok(lut[255 * 4] > lut[255 * 4 + 2], "index 255 is red");
+  const c = 128 * 4;
+  assert.ok(Math.abs(lut[c] - lut[c + 2]) < 24, "centre is neutral");
+});

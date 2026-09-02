@@ -1,3 +1,4 @@
+import { subtractReference } from "../lib/reference.ts";
 import { applyIsotherm, type Isotherm } from "../lib/isotherm.ts";
 import type { Radiometry } from "../lib/emissivity.ts";
 import { useEffect, useRef, useState } from "react";
@@ -47,6 +48,8 @@ interface Props {
   isotherm?: Isotherm | null;
   /** The decoded °C field of the frame just drawn (for profiles / histograms). */
   onField?: (snap: { c: Float32Array; w: number; h: number }) => void;
+  /** Captured °C field: when set, the image shows (frame − reference) on a diverging scale. */
+  reference?: Float32Array | null;
 }
 
 /** The shape a drag from `a` to `b` produces for the active tool (null when degenerate). */
@@ -66,7 +69,9 @@ export function dragShape(tool: Tool, a: Pt, b: Pt, w: number, h: number): RoiIn
 }
 
 /** Renders raw counts -> °C -> palette on a canvas, with an ROI overlay layer. Data arrays are never mutated. */
-export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois = NO_ROIS, selected = null, tool = "select", zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField }: Props) {
+const divergingLut = buildLut("diverging");
+
+export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois = NO_ROIS, selected = null, tool = "select", zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null }: Props) {
   const viewRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const celsiusRef = useRef<Float32Array | null>(null);
@@ -105,7 +110,9 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
     const c = countsToCelsius(counts, header.kelvin_per_count, header.kelvin_offset);
     celsiusRef.current = c;
     onField?.({ c, w: header.width, h: header.height });
-    const range = resolveScale(scaleMode, manual, autoScale(c));
+    const sub = reference ? subtractReference(c, reference) : null;
+    const shownField = sub?.delta ?? c;
+    const range = sub?.delta ? sub.range : resolveScale(scaleMode, manual, autoScale(c));
     onScale(range);
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -116,10 +123,10 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     const img = ctx.createImageData(header.width, header.height);
-    mapToRgba(c, range.min, range.max, lutRef.current, img.data);
+    mapToRgba(shownField, range.min, range.max, sub?.delta ? divergingLut : lutRef.current, img.data);
     if (isotherm) applyIsotherm(c, img.data, isotherm);
     ctx.putImageData(img, 0, 0);
-  }, [frame, palette, scaleMode, manual.min, manual.max, isotherm]);
+  }, [frame, palette, scaleMode, manual.min, manual.max, isotherm, reference]);
 
   useEffect(() => {
     const c = celsiusRef.current;

@@ -2,8 +2,8 @@
  * Visualization-only color lookup tables. These are "-like" palettes designed here; they are
  * not FLIR's proprietary LUTs (brief §11). Applying a palette never changes the temperature data.
  */
-export type PaletteName = "iron" | "grayscale" | "blackhot" | "rainbow";
-export const PALETTE_NAMES: readonly PaletteName[] = ["iron", "grayscale", "blackhot", "rainbow"];
+export type PaletteName = "iron" | "grayscale" | "blackhot" | "rainbow" | "diverging";
+export const PALETTE_NAMES: readonly PaletteName[] = ["iron", "grayscale", "blackhot", "rainbow", "diverging"];
 
 type Stop = [t: number, r: number, g: number, b: number];
 
@@ -55,6 +55,8 @@ export function buildLut(name: PaletteName): Uint8ClampedArray {
       return interpolate([[0, 0, 0, 0], [1, 255, 255, 255]]);
     case "blackhot":
       return interpolate([[0, 255, 255, 255], [1, 0, 0, 0]]);
+    case "diverging": // blue − neutral − red, for reference-frame subtraction
+      return interpolate([[0, 40, 90, 220], [0.5, 235, 235, 235], [1, 220, 50, 40]]);
   }
 }
 

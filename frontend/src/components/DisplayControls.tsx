@@ -10,10 +10,12 @@ interface Props {
   shown: Range;
   /** Isotherm painting (optional: omitted hides the controls). */
   isotherm?: Isotherm; setIsotherm?: (iso: Isotherm) => void;
+  /** Reference-frame subtraction: capture the current frame, show frame − reference. */
+  hasReference?: boolean; onSetReference?: () => void; onClearReference?: () => void;
 }
 
 /** Palette + display-range controls shared by live view and playback. Visualization only. */
-export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, manual, setManual, shown, isotherm, setIsotherm }: Props) {
+export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, manual, setManual, shown, isotherm, setIsotherm, hasReference, onSetReference, onClearReference }: Props) {
   const iso = isotherm ?? DEFAULT_ISOTHERM;
   const upd = (patch: Partial<Isotherm>) => setIsotherm?.({ ...iso, ...patch });
   const isoRow = setIsotherm && (
@@ -28,8 +30,16 @@ export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, 
       {iso.mode !== "off" && <input type="color" value={iso.color} aria-label="isotherm colour" onChange={(e) => upd({ color: e.target.value })} />}
     </div>
   );
+  const refRow = onSetReference && (
+    <div className="row" aria-label="reference frame" title="Capture the current frame as the reference; the image then shows each pixel's change from it on a blue–neutral–red scale (display only: ROI values, plots and recordings stay absolute)">
+      <span className="hint">reference</span>
+      <button className="secondary" onClick={onSetReference}>{hasReference ? "re-capture" : "set from this frame"}</button>
+      {hasReference && <><span className="badge manual">frame − reference</span><button className="secondary" onClick={onClearReference}>clear</button></>}
+    </div>
+  );
   return (
     <>
+      {refRow}
       {isoRow}
       <div className="row">
         <select value={palette} onChange={(e) => setPalette(e.target.value as PaletteName)}>
