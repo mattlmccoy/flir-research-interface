@@ -1,4 +1,36 @@
-# Installation and running the camera probe
+# Installation
+
+## 0. Quick start (macOS, Apple Silicon) — one command
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mattlmccoy/flir-research-interface/main/install.sh | bash
+```
+
+It installs the tools with Homebrew (uv, ffmpeg@6, libomp, libusb), clones or updates the
+repository into `~/flir-research-interface`, builds the Python environment, checks for the
+Spinnaker SDK and names the exact Teledyne download if it is missing (that one download needs a
+free Teledyne login and cannot be automated), installs the bundled PySpin wheel once the SDK is
+present, asks for the camera IP and RTSP credentials (stored only in the git-ignored
+`backend/.env`, mode 600), and installs a login item (launchd LaunchAgent) that runs the operator
+on `http://127.0.0.1:8000` and restarts it if it dies. Then open
+<https://mattlmccoy.github.io/flir-research-interface/> in a browser on the same machine and
+enter that address once. Re-running the command updates everything.
+
+Useful afterwards:
+
+```bash
+cd ~/flir-research-interface/backend
+uv run fri-install --doctor      # prerequisite report (never reports unknown as OK)
+tail -f operator.log             # operator log
+launchctl kickstart -k gui/$(id -u)/io.github.mattlmccoy.flir-research-interface   # restart
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/io.github.mattlmccoy.flir-research-interface.plist  # uninstall the service
+```
+
+Linux: the same steps by hand, then a `systemd --user` unit running
+`uv run --directory <checkout>/backend fri-serve --port 8000`. Windows: not yet tested (the code
+is portable; PySpin has a Windows wheel); run `uv run fri-serve` from a terminal for now.
+
+## 1. Development toolchain (manual route)
 
 ## 1. Development toolchain
 

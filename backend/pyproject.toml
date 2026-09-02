@@ -33,6 +33,7 @@ fri-live = "flir_research_interface.validation:main"
 fri-rtsp-check = "flir_research_interface.visible.rtsp:main"
 fri-serve = "flir_research_interface.api.server:main"
 fri-thumbs = "flir_research_interface.thumbs:main"
+fri-install = "flir_research_interface.install:main"
 
 [build-system]
 requires = ["hatchling"]
