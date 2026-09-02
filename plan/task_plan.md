@@ -106,8 +106,13 @@ from events.json as markers. Camera-controls rail section follows as its own ste
 - [x] Operator: CORS (localhost + site origin), private-network preflight, X-FRI-Client on cross-origin writes, api_version handshake
 - [x] Site mode UI (VITE_SITE_MODE=1): operator base URL, OperatorGate first-run page, PWA shell, CI + Pages workflows
 - [x] Verified: site on :5174 drove the operator on :8000 with the real A70; 403 without the client header, 200 with it
-- [ ] Pages needs the repo public (or a paid plan); set `site_origin` in fri-serve to https://mattlmccoy.github.io once live
+- [x] Pages live at https://mattlmccoy.github.io/flir-research-interface/ (repo public, Pages source = Actions); fri-serve allows that origin by default; verified in real Chrome: the site drove the local operator with the A70 acquiring
 - [ ] Operator packaging: launchd (.pkg) / Windows service (.msi) / systemd unit; menu-bar item; release feed
 - [ ] SDK install job from the private artifact URL + sdk-manifest.json (spec §6.2 step 4)
 - [ ] Safari ws:// fallback (redirect to the local copy)
 - [ ] M9 follow-up: playback of visible.mp4 beside thermal; decide whether ~12 fps (throttled by the GigE stream) is acceptable or use /avc/ 640x480
+
+## 2026-09-02 (evening) UI feedback round
+- [x] Palette/range strip button removed (display lives in the rail); settings/NUC strip buttons removed (they duplicated the open camera section)
+- [x] NUC explained in the camera section (what it does, Automatic vs Off, logged as an event)
+- [x] ROI geometries: circle, line, connected lines (polyline) live + playback + series + CSV; verified on the A70
