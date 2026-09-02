@@ -114,6 +114,10 @@ class AcquisitionService:
         """Synchronous per-frame callback (used later by the recorder). Must be fast."""
         self._listeners.append(fn)
 
+    def remove_listener(self, fn: Callable[[Frame], None]) -> None:
+        with self._lock:
+            self._listeners = [f for f in self._listeners if f is not fn]
+
     def latest(self) -> Frame | None:
         with self._lock:
             self._latest_consumed = True

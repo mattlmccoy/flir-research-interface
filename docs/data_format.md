@@ -76,7 +76,9 @@ experiments/<YYYYMMDD_HHMMSS>_<name>/
                          software version + git commit + host, the operator's experiment fields,
                          the ROIs in force (`rois`, with names/colours) and the visible↔IR
                          alignment in force (`visible_alignment`); post-hoc edits append to `edits`
-  events.json            recording start/stop, frame gaps, NUCs, operator marks (RF ON/OFF,
+  events.json            recording start/stop, frame gaps, NUCs, `trigger` / `trigger_end` for
+                         armed recordings (the condition that fired, the watched value, the
+                         frame id, the number of pre-trigger frames), operator marks (RF ON/OFF,
                          custom) each with the frame id it happened at, and `frozen_frames`
                          runs: the A70 repeats its last image (new frame id and timestamp,
                          identical pixels) for ~2 s while it performs a NUC; those frames are

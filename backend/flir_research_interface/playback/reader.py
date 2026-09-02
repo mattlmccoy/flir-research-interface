@@ -19,7 +19,15 @@ from flir_research_interface.recording.recorder import STORE_NAME, inspect_exper
 
 
 class ExperimentReader:
-    """Open an experiment directory for playback."""
+    """Open an experiment directory for playback.
+
+    Empty recordings are valid: a ``Recorder`` that was started and stopped without a single
+    frame writes metadata, events and a manifest, but the ``counts`` array is created lazily on
+    the first frame and so never exists in the store. Such a directory opens as a reader with
+    ``n_frames == 0``, ``width == height == 0``, an empty timeline and frame accessors that raise
+    ``IndexError`` exactly as they do for any out-of-range index. ``FileNotFoundError`` is
+    reserved for directories that are not experiments at all (no metadata or no store).
+    """
 
     def __init__(self, exp_dir: Path) -> None:
         self.path = Path(exp_dir)
@@ -44,32 +52,38 @@ class ExperimentReader:
             json.loads(pv_path.read_text()) if pv_path.is_file() else None
         )
         self._group = zarr.open_group(str(self.path / STORE_NAME), mode="r")
-        self._counts = self._group["counts"]
+        # 'counts' is created by the recorder on the first frame; a zero-frame recording has none.
+        self._counts: zarr.Array | None = (
+            self._group["counts"] if "counts" in self._group else None
+        )
         self._frame_id = np.asarray(self._group["frame_id"][:], dtype=np.int64)
         self._dev_ts = np.asarray(self._group["device_timestamp_ns"][:], dtype=np.int64)
         self._host_ts = np.asarray(self._group["host_timestamp_ns"][:], dtype=np.int64)
-        n = min(
-            int(self._counts.shape[0]), len(self._frame_id), len(self._dev_ts), len(self._host_ts)
-        )
+        n_counts = int(self._counts.shape[0]) if self._counts is not None else 0
+        n = min(n_counts, len(self._frame_id), len(self._dev_ts), len(self._host_ts))
         self.n_frames = n  # tolerate a crash between array appends: use the common prefix
         self._t_s = (self._dev_ts[:n] - self._dev_ts[0]) / 1e9 if n else np.zeros(0)
 
     # -- metadata ------------------------------------------------------------------------------
 
     @property
+    def _counts_attrs(self) -> dict[str, Any]:
+        return dict(self._counts.attrs) if self._counts is not None else {}
+
+    @property
     def ir_format(self) -> str | None:
-        v = self.metadata.get("conversion", {}).get("ir_format") or self._counts.attrs.get(
+        v = self.metadata.get("conversion", {}).get("ir_format") or self._counts_attrs.get(
             "ir_format"
         )
         return str(v) if v is not None else None
 
     @property
     def pixel_format(self) -> str:
-        return str(self._counts.attrs.get("pixel_format", "Mono16"))
+        return str(self._counts_attrs.get("pixel_format", "Mono16"))
 
     def info(self) -> dict[str, Any]:
         insp = inspect_experiment(self.path)
-        _, h, w = self._counts.shape
+        _, h, w = self._counts.shape if self._counts is not None else (0, 0, 0)
         return {
             "name": self.path.name,
             "path": str(self.path),
@@ -119,7 +133,7 @@ class ExperimentReader:
     # -- frames --------------------------------------------------------------------------------
 
     def frame(self, index: int) -> Frame:
-        if not 0 <= index < self.n_frames:
+        if self._counts is None or not 0 <= index < self.n_frames:
             raise IndexError(f"frame index {index} out of range [0, {self.n_frames})")
         counts = np.asarray(self._counts[index], dtype=np.uint16)
         counts.setflags(write=False)
@@ -145,6 +159,8 @@ class ExperimentReader:
         """Frames ``[start, stop)`` as one read-only (n, h, w) uint16 array."""
         if not 0 <= start <= stop <= self.n_frames:
             raise IndexError(f"block [{start}, {stop}) out of range [0, {self.n_frames}]")
+        if self._counts is None:  # empty recording: only the empty block [0, 0) is reachable
+            return np.zeros((0, 0, 0), dtype=np.uint16)
         block = np.asarray(self._counts[start:stop], dtype=np.uint16)
         block.setflags(write=False)
         return block

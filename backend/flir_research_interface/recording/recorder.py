@@ -114,8 +114,11 @@ def inspect_experiment(exp_dir: Path) -> dict[str, Any]:
     if store.is_dir():
         try:
             g = zarr.open_group(str(store), mode="r")
-            info["frames_on_disk"] = int(g["counts"].shape[0])
-            info["shape"] = list(g["counts"].shape)
+            if "counts" in g:
+                info["frames_on_disk"] = int(g["counts"].shape[0])
+                info["shape"] = list(g["counts"].shape)
+            else:  # zero-frame recording: 'counts' is created on the first frame and never was
+                info["shape"] = [0, 0, 0]
         except Exception as exc:  # noqa: BLE001
             info["store_error"] = f"{type(exc).__name__}: {exc}"
     return info

@@ -1,6 +1,8 @@
 import { markForKey } from "../lib/delta.ts";
 import { useEffect, useState } from "react";
 import { api, type RecordingStatus } from "../lib/api.ts";
+import { ArmPanel } from "./ArmPanel.tsx";
+import type { Roi } from "../lib/roi.ts";
 
 const FIELDS: { key: string; label: string; type?: "number" }[] = [
   { key: "operator", label: "Operator" },
@@ -14,7 +16,7 @@ const FIELDS: { key: string; label: string; type?: "number" }[] = [
   { key: "notes", label: "Notes" },
 ];
 
-export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: unknown[] }) {
+export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: Roi[] }) {
   const [name, setName] = useState("Run");
   const [meta, setMeta] = useState<Record<string, string>>({ material: "PA12", rf_frequency_mhz: "13.56" });
   const [status, setStatus] = useState<RecordingStatus>({ state: "idle" });
@@ -31,6 +33,24 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: unk
   }, []);
 
   const recording = status.state === "recording";
+  const armed = status.armed ?? null;
+  async function arm(trigger: unknown) {
+    setBusy(true); setErr(null);
+    try {
+      const m: Record<string, unknown> = {};
+      for (const f of FIELDS) { const v = meta[f.key]; if (v !== undefined && v !== "") m[f.key] = f.type === "number" ? Number(v) : v; }
+      await api.recordingArm(name, m, withVisible && visibleAvailable, rois, trigger);
+      setStatus(await api.recordingStatus());
+    } catch (e) { setErr(String(e)); } finally { setBusy(false); }
+  }
+  async function disarm() {
+    setBusy(true); setErr(null);
+    try { await api.recordingDisarm(); setStatus(await api.recordingStatus()); } catch (e) { setErr(String(e)); } finally { setBusy(false); }
+  }
+  async function startNow() {
+    setBusy(true); setErr(null);
+    try { await api.recordingArmStart(); } catch (e) { setErr(String(e)); } finally { setBusy(false); }
+  }
   const vis = status.visible;
   const visibleAvailable = !!vis && vis.state !== "unavailable";
 
@@ -83,8 +103,9 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: unk
 
   return (
     <>
+      {(armed || !recording) && <ArmPanel rois={rois} armed={armed} recording={recording} disabled={!acquiring} busy={busy} onArm={arm} onDisarm={disarm} onStartNow={startNow} />}
       <div className="row">
-        {!recording ? (
+        {!recording && !armed ? (
           <>
             <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="experiment name" style={{ width: 140 }} />
             <button className="primary" disabled={!acquiring || busy} onClick={start} title={acquiring ? "" : "connect a camera first"}>● Record</button>
@@ -93,9 +114,9 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: unk
               <input type="checkbox" checked={withVisible && visibleAvailable} disabled={!visibleAvailable} onChange={(e) => setWithVisible(e.target.checked)} /> visible video
             </label>
           </>
-        ) : (
+        ) : recording && !armed ? (
           <button className="danger" disabled={busy} onClick={stop}>■ Stop</button>
-        )}
+        ) : null}
       </div>
       {recording && (
         <>

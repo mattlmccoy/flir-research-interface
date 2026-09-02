@@ -56,7 +56,7 @@ the probe output from the real A70 before touching radiometric node names.
 - [~] M10 Packaging (2026-09-02): `install.sh` one-liner (Homebrew tools, clone/update, uv sync, SDK check + bundled PySpin wheel, `fri-install` prompts for camera creds → .env 600, launchd LaunchAgent, doctor). Done for macOS Apple Silicon; NOT yet run end-to-end on a clean Mac; Linux systemd unit and Windows still manual.
 - [x] Research Studio parity, batch 1 (2026-09-02): delete run, hide ROIs (image + plot), per-ROI emissivity / reflected temperature (FLIR signal model with camera R,B,F; backend + browser), hot/cold pixel markers, std dev in stats/CSV, isotherms (above/below/between, persisted).
 - [ ] Parity batch 2: line profile plot, histogram, ROI delta (A−B) + reference-frame subtraction, pan when zoomed, NUC marks on plots (frozen runs ≥ 10 frames), RF ON keyboard shortcut, focus control (if FOL08 supports it), Research Studio validation table.
-- [ ] M11 Armed recording with triggers (user request 2026-09-02). Design, to be TDD'd as a pure
+- [~] M11 Armed recording with triggers (2026-09-02): backend done — `recording/trigger.py` state machine, `recording/arm.py` controller (pre-trigger ring, ordered flush), `POST /api/recording/arm|disarm|arm/start`, `armed` status, `trigger`/`trigger_end` events; verified on the simulated camera. Studio UI in progress. Hardware idea: a witness resistor on the RF keying line as the watched ROI. Design, to be TDD'd as a pure
   state machine in backend `recording/trigger.py` and evaluated on the acquisition thread's frames:
   - Arm: the operator sets everything up as for a normal record (name, metadata, visible, ROIs),
     picks a **start condition** and an **end condition**, and presses *Arm*. Recorder state

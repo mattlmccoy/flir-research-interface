@@ -103,6 +103,10 @@ class RecordingStartRequest(BaseModel):
     rois: list[dict[str, Any]] | None = None
 
 
+class ArmRequest(RecordingStartRequest):
+    trigger: dict[str, Any] = {}
+
+
 class ParametersRequest(BaseModel):
     values: dict[str, Any]
 
@@ -510,16 +514,7 @@ def create_app(
 
     # -- recording -------------------------------------------------------------------------
 
-    @app.post("/api/recording/start")
-    async def recording_start(req: RecordingStartRequest) -> dict[str, Any]:
-        svc = service()
-        if svc is None or svc.state != ServiceState.ACQUIRING:
-            raise HTTPException(409, "camera is not acquiring")
-        if recorder() is not None and recorder().state == RecorderState.RECORDING:  # type: ignore[union-attr]
-            raise HTTPException(409, "already recording")
-        rec = Recorder(
-            svc, experiments_root=app.state.experiments_root, min_free_gb=app.state.min_free_gb
-        )
+    def _recording_extra(req: RecordingStartRequest) -> dict[str, Any]:
         from flir_research_interface.analysis.calibration import load_alignment
         from flir_research_interface.analysis.series import parse_rois
 
@@ -541,10 +536,31 @@ def create_app(
                 if isinstance(src.get("color"), str):
                     r["color"] = src["color"]
             extra["rois"] = parsed
+        return extra
+
+    async def _start_recording(
+        req: RecordingStartRequest, *, attach_service: bool = True
+    ) -> tuple[Recorder, Path, dict[str, Any]]:
+        svc = service()
+        if svc is None or svc.state != ServiceState.ACQUIRING:
+            raise HTTPException(409, "camera is not acquiring")
+        if recorder() is not None and recorder().state == RecorderState.RECORDING:  # type: ignore[union-attr]
+            raise HTTPException(409, "already recording")
+        extra = _recording_extra(req)
+        rec = Recorder(
+            svc if attach_service else None,
+            experiments_root=app.state.experiments_root,
+            min_free_gb=app.state.min_free_gb,
+        )
+        kwargs: dict[str, Any] = {
+            "name": req.name,
+            "metadata": req.metadata,
+            "extra": extra or None,
+        }
+        if not attach_service:
+            kwargs["camera_info"] = await run_in_threadpool(svc.backend.camera_info)
         try:
-            exp_dir = await run_in_threadpool(
-                rec.start, name=req.name, metadata=req.metadata, extra=extra or None
-            )
+            exp_dir = await run_in_threadpool(rec.start, **kwargs)
         except RuntimeError as exc:
             raise HTTPException(507 if "free space" in str(exc) else 400, str(exc)) from exc
         app.state.recorder = rec
@@ -561,7 +577,131 @@ def create_app(
                     logger.exception("visible recorder failed to start")
                     visible = {"state": "error", "error": str(exc)}
                     rec.note_event("visible_error", {"error": str(exc)})
+        return rec, exp_dir, visible
+
+    @app.post("/api/recording/start")
+    async def recording_start(req: RecordingStartRequest) -> dict[str, Any]:
+        if app.state.armer is not None:
+            raise HTTPException(409, "a recording is armed; disarm it or let the trigger start it")
+        rec, exp_dir, visible = await _start_recording(req)
         return {"state": rec.state.value, "experiment_dir": str(exp_dir), "visible": visible}
+
+    # -- M11: armed recording ------------------------------------------------------------------
+
+    app.state.armer = None
+    app.state.arm_task = None
+    app.state.arm_req = None
+
+    async def _arm_loop() -> None:
+        from flir_research_interface.recording.arm import Armer
+
+        try:
+            while True:
+                await asyncio.sleep(0.05)
+                armer: Armer | None = app.state.armer
+                if armer is None:
+                    return
+                action = armer.take_pending()
+                if action == "start":
+                    req: ArmRequest = app.state.arm_req
+                    try:
+                        rec, _exp_dir, _vis = await _start_recording(req, attach_service=False)
+                    except HTTPException as exc:
+                        logger.error("armed start failed: %s", exc.detail)
+                        _disarm()
+                        return
+                    pre = armer.attach(rec)
+                    rec.note_event(
+                        "trigger",
+                        {
+                            "start": armer.spec.start.__dict__,
+                            "end": armer.spec.end.__dict__,
+                            "pretrigger_frames": pre,
+                            "watched_value": armer.last_value,
+                            "frame_id": armer.started_frame_id,
+                        },
+                    )
+                elif action == "stop":
+                    live = armer.detach()
+                    if live is not None:
+                        live.note_event(
+                            "trigger_end",
+                            {
+                                "reason": armer.machine.reason,
+                                "watched_value": armer.last_value,
+                                "frame_id": armer.ended_frame_id,
+                            },
+                        )
+                        await _finalize_recording()
+                    _disarm()
+                    return
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            logger.exception("arm loop failed")
+            _disarm()
+
+    def _disarm() -> None:
+        armer = app.state.armer
+        svc = service()
+        if armer is not None and svc is not None:
+            svc.remove_listener(armer.on_frame)
+        app.state.armer = None
+        app.state.arm_req = None
+
+    @app.post("/api/recording/arm")
+    async def recording_arm(req: ArmRequest) -> dict[str, Any]:
+        from flir_research_interface.analysis.series import parse_rois
+        from flir_research_interface.recording.arm import Armer
+        from flir_research_interface.recording.trigger import parse_trigger
+
+        svc = service()
+        if svc is None or svc.state != ServiceState.ACQUIRING:
+            raise HTTPException(409, "camera is not acquiring")
+        if app.state.armer is not None:
+            raise HTTPException(409, "already armed")
+        if recorder() is not None and recorder().state == RecorderState.RECORDING:  # type: ignore[union-attr]
+            raise HTTPException(409, "already recording")
+        try:
+            spec = parse_trigger(req.trigger)
+            rois = parse_rois(json.dumps(req.rois)) if req.rois else []
+        except ValueError as exc:
+            raise HTTPException(400, f"trigger: {exc}") from exc
+        _recording_extra(req)  # validate the rest now, not when the trigger fires
+        # Ring sizing: the measured rate is unreliable right after connect, so never assume
+        # fewer than 60 fps (A70 max is 30; 2 s at 60 fps of 640x480 uint16 is ~74 MB).
+        fps = float(svc.stats().get("camera_fps") or 0)
+        armer = Armer(spec, rois, fps_hint=max(fps, 60.0))
+        app.state.armer = armer
+        app.state.arm_req = req
+        svc.add_listener(armer.on_frame)
+        app.state.arm_task = asyncio.create_task(_arm_loop())
+        return {"state": "armed", "armed": armer.status()}
+
+    @app.post("/api/recording/disarm")
+    async def recording_disarm() -> dict[str, Any]:
+        armer = app.state.armer
+        if armer is None:
+            raise HTTPException(409, "not armed")
+        rec = armer.detach()
+        _disarm()
+        task = app.state.arm_task
+        if task is not None:
+            task.cancel()
+            app.state.arm_task = None
+        if rec is not None:  # disarmed mid-recording: finish the recording cleanly
+            rec.note_event("trigger_end", {"reason": "disarmed"})
+            manifest = await _finalize_recording()
+            return {"state": "idle", "manifest": manifest}
+        return {"state": "idle"}
+
+    @app.post("/api/recording/arm/start")
+    async def recording_arm_start() -> dict[str, Any]:
+        """Manual start of an armed recording (start kind 'manual', or to override a trigger)."""
+        armer = app.state.armer
+        if armer is None or not armer.manual_start():
+            raise HTTPException(409, "not armed, or already started")
+        return {"state": "starting"}
 
     @app.post("/api/recording/stop")
     async def recording_stop() -> dict[str, Any]:
@@ -589,6 +729,18 @@ def create_app(
     def recording_status() -> dict[str, Any]:
         rec = recorder()
         root: Path = app.state.experiments_root
+        armer = app.state.armer
+        if rec is None and armer is not None:
+            probe = root if root.exists() else root.parent
+            free = shutil.disk_usage(probe).free / 1e9 if probe.exists() else None
+            return {
+                "state": "armed",
+                "armed": armer.status(),
+                "experiments_root": str(root),
+                "free_space_gb": free,
+                "min_free_gb": app.state.min_free_gb,
+                "visible": _visible_status(),
+            }
         if rec is None:
             probe = root if root.exists() else root.parent
             free = shutil.disk_usage(probe).free / 1e9 if probe.exists() else None
