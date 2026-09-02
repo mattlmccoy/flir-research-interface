@@ -132,6 +132,13 @@ connections) while GigE streaming and the web UI kept working. The operator now 
 "show", closes the transcode when the viewer leaves, and caps the preview at 2 viewers. The RTSP
 server did not recover by itself within minutes; a camera power cycle restores it.
 
+Latency (measured 2026-09-02 after the fixes): ffmpeg runs with `-fflags nobuffer -flags
+low_delay -probesize 32 -analyzeduration 0 -max_delay 0`, the operator relays from an unbuffered
+pipe through a reader thread, and the page fetches the stream itself (so stopping aborts the
+request and the transcode ends within ~2 s). First image ~1.2–2.3 s after the click, then
+~7–9 fps. What remains is the camera's own H.264 encoder delay and GOP structure, roughly a
+second behind the radiometric stream; it is a preview, not a synchronised second channel.
+
 ## 3. The antenna (Wi-Fi)
 
 Manual §10.5.7.2: the camera radio can be **Off**, **Server mode** (camera is a hotspot at
