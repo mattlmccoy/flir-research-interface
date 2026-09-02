@@ -7,7 +7,7 @@ import type { Range, ScaleMode } from "../lib/scale.ts";
 import type { LayoutAction, LayoutState } from "../lib/layout.ts";
 import { SPEEDS, clampIndex, nextFrameDelayMs, speedLabel } from "../lib/playback.ts";
 import { roiLabel, type RoiAction, type RoiState } from "../lib/roi.ts";
-import { traceColor } from "../lib/overlay.ts";
+import { roiColor } from "../lib/overlay.ts";
 import { eventsToMarkers, nearestIndex } from "../lib/events.ts";
 import { fmtAny, fmtCelsius } from "../lib/format.ts";
 import { ThermalView, type StatsMap } from "./ThermalView.tsx";
@@ -40,7 +40,7 @@ function seriesTraces(series: RoiSeries | null, rois: RoiState): Trace[] {
     const s = series.series[String(r.id)];
     const raw = s?.value ?? s?.mean;
     if (!raw) return [];
-    return [{ id: r.id, label: roiLabel(r), color: traceColor(i), t: series.t_s, v: raw.map((v) => (v === null ? NaN : v)) }];
+    return [{ id: r.id, label: roiLabel(r), color: roiColor(r, i), t: series.t_s, v: raw.map((v) => (v === null ? NaN : v)) }];
   });
 }
 
@@ -181,7 +181,7 @@ export function PlaybackPage(p: Props) {
               </div>
             ) : <div className="muted">loading…</div>}
             <RoiRows rois={p.rois.rois} stats={stats} selected={p.rois.selected}
-              onSelect={(id) => p.roiDispatch({ type: "select", id })} onRemove={(id) => p.roiDispatch({ type: "remove", id })} onClear={() => p.roiDispatch({ type: "clear" })} />
+              dispatch={p.roiDispatch} />
             {err && <div className="errbox">{err}</div>}
           </RailSection>
           <RailSection title="display" open={p.layout.sections.display} onToggle={() => p.dispatch({ type: "toggleSection", section: "display" })} tag="visualization only">

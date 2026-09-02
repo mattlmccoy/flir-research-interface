@@ -61,16 +61,16 @@ def parse_rois(raw: str) -> list[dict[str, Any]]:
             if (r["x0"], r["y0"]) == (r["x1"], r["y1"]):
                 raise ValueError("line endpoints must differ")
             out.append({"id": rid, "kind": "line", **r})
-        elif kind == "polyline":
+        elif kind == "polygon":
             pts = it.get("points")
-            if not isinstance(pts, list) or len(pts) < 2:
-                raise ValueError("polyline needs at least 2 points")
+            if not isinstance(pts, list) or len(pts) < 3:
+                raise ValueError("polygon needs at least 3 points")
             points = []
             for p in pts:
                 if not isinstance(p, list | tuple) or len(p) != 2:
-                    raise ValueError("polyline points must be [x, y] pairs")
+                    raise ValueError("polygon points must be [x, y] pairs")
                 points.append([_int(p[0], "x"), _int(p[1], "y")])
-            out.append({"id": rid, "kind": "polyline", "points": points})
+            out.append({"id": rid, "kind": "polygon", "points": points})
         else:
             raise ValueError(f"unknown roi kind {kind!r}")
     return out
@@ -99,8 +99,9 @@ def _line_pixels(x0: int, y0: int, x1: int, y1: int) -> list[tuple[int, int]]:
 def roi_index(roi: dict[str, Any], w: int, h: int) -> tuple[np.ndarray, np.ndarray]:
     """(ys, xs) of the pixels a non-rect ROI covers inside a w×h image (no duplicates)."""
     kind = roi["kind"]
+    pts: list[tuple[int, int]]
     if kind == "spot":
-        pts = [(roi["x"], roi["y"])]
+        pts = [(int(roi["x"]), int(roi["y"]))]
     elif kind == "circle":
         cx, cy, r = roi["cx"], roi["cy"], roi["r"]
         ys, xs = np.mgrid[max(0, int(np.floor(cy - r))) : min(h, int(np.ceil(cy + r)) + 1),
@@ -109,15 +110,34 @@ def roi_index(roi: dict[str, Any], w: int, h: int) -> tuple[np.ndarray, np.ndarr
         return ys[m], xs[m]
     elif kind == "line":
         pts = _line_pixels(roi["x0"], roi["y0"], roi["x1"], roi["y1"])
-    else:  # polyline
+    else:  # polygon: even-odd interior on pixel centres plus the Bresenham boundary
+        p = [(int(x), int(y)) for x, y in roi["points"]]
+        n = len(p)
         seen: set[tuple[int, int]] = set()
         pts = []
-        p = roi["points"]
-        for (ax, ay), (bx, by) in zip(p[:-1], p[1:], strict=True):
+        for i in range(n):
+            (ax, ay), (bx, by) = p[i], p[(i + 1) % n]
             for q in _line_pixels(ax, ay, bx, by):
                 if q not in seen:
                     seen.add(q)
                     pts.append(q)
+        x_min, x_max = max(0, min(x for x, _ in p)), min(w - 1, max(x for x, _ in p))
+        y_min, y_max = max(0, min(y for _, y in p)), min(h - 1, max(y for _, y in p))
+        if x_max >= x_min and y_max >= y_min:
+            ys_g, xs_g = np.mgrid[y_min : y_max + 1, x_min : x_max + 1]
+            mask = np.zeros(ys_g.shape, dtype=bool)
+            j = n - 1
+            for i in range(n):
+                (xi, yi), (xj, yj) = p[i], p[j]
+                crosses = (yi > ys_g) != (yj > ys_g)
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    xcross = (xj - xi) * (ys_g - yi) / (yj - yi) + xi
+                mask ^= crosses & (xs_g < xcross)
+                j = i
+            for y, x in zip(ys_g[mask].tolist(), xs_g[mask].tolist(), strict=True):
+                if (x, y) not in seen:
+                    seen.add((x, y))
+                    pts.append((x, y))
     inside = [(x, y) for x, y in pts if 0 <= x < w and 0 <= y < h]
     ys_ = np.array([y for _, y in inside], dtype=np.intp)
     xs_ = np.array([x for x, _ in inside], dtype=np.intp)

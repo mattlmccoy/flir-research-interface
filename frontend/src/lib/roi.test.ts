@@ -132,11 +132,12 @@ test("roiStats for a line samples every pixel along the segment (both endpoints 
   assert.equal(d.max, 44);
 });
 
-test("roiStats for a polyline walks all segments without double-counting the joints", () => {
+test("roiStats for a polygon covers the enclosed pixels (even-odd fill, boundary inclusive)", () => {
   const f = new Float32Array(25).fill(2);
-  const s = roiStats(f, 5, 5, { id: 4, kind: "polyline", points: [[0, 0], [4, 0], [4, 4]] });
-  assert.equal(s.n, 9); // 5 + 5 - 1 shared corner
-  assert.equal(s.mean, 2);
+  const tri = roiStats(f, 5, 5, { id: 4, kind: "polygon", points: [[0, 0], [4, 0], [4, 4]] });
+  assert.equal(tri.n, 15); // right triangle incl. its edges: 5+4+3+2+1
+  const sq = roiStats(f, 5, 5, { id: 5, kind: "polygon", points: [[1, 1], [3, 1], [3, 3], [1, 3]] });
+  assert.equal(sq.n, 9);
 });
 
 test("roiStats clips circles and lines to the image and reports out-of-image parts as absent", () => {
@@ -150,7 +151,8 @@ test("roiStats clips circles and lines to the image and reports out-of-image par
 test("roiLabel prefixes: circle C, line L, polyline P", () => {
   assert.equal(roiLabel({ id: 1, kind: "circle", cx: 0, cy: 0, r: 1 }), "C1");
   assert.equal(roiLabel({ id: 2, kind: "line", x0: 0, y0: 0, x1: 1, y1: 1 }), "L2");
-  assert.equal(roiLabel({ id: 3, kind: "polyline", points: [[0, 0], [1, 1]] }), "P3");
+  assert.equal(roiLabel({ id: 3, kind: "polygon", points: [[0, 0], [1, 1], [0, 1]] }), "P3");
+  assert.equal(roiLabel({ id: 4, kind: "spot", x: 0, y: 0, name: "melt pool" }), "melt pool");
 });
 
 test("loadRois accepts the new kinds and rejects malformed ones", () => {
@@ -160,8 +162,37 @@ test("loadRois accepts the new kinds and rejects malformed ones", () => {
     { id: 1, kind: "circle", cx: 5, cy: 5, r: 3 },
     { id: 2, kind: "circle", cx: 5, cy: 5, r: 0 },
     { id: 3, kind: "line", x0: 0, y0: 0, x1: 3, y1: 3 },
-    { id: 4, kind: "polyline", points: [[0, 0], [1, 1], [2, 0]] },
-    { id: 5, kind: "polyline", points: [[0, 0]] },
-  ], nextId: 6 }));
-  assert.deepEqual(loadRois(storage).rois.map((r) => r.id), [1, 3, 4]);
+    { id: 4, kind: "polygon", points: [[0, 0], [1, 1], [2, 0]], name: "n", color: "#ff0000" },
+    { id: 5, kind: "polygon", points: [[0, 0], [1, 1]] },
+    { id: 6, kind: "spot", x: 1, y: 1, color: "red" },
+  ], nextId: 7 }));
+  const got = loadRois(storage).rois;
+  assert.deepEqual(got.map((r) => r.id), [1, 3, 4, 6]);
+  assert.equal(got[2].name, "n"); assert.equal(got[2].color, "#ff0000");
+  assert.equal(got[3].color, undefined); // only #rrggbb colours survive
+});
+
+
+test("roiReducer move shifts every coordinate of the shape (and never below zero)", () => {
+  const base = roiReducer(roiReducer(roiReducer(roiReducer(EMPTY,
+    { type: "add", roi: { kind: "rect", x0: 1, y0: 1, x1: 3, y1: 3 } }),
+    { type: "add", roi: { kind: "circle", cx: 5, cy: 5, r: 2 } }),
+    { type: "add", roi: { kind: "line", x0: 0, y0: 0, x1: 2, y1: 2 } }),
+    { type: "add", roi: { kind: "polygon", points: [[0, 0], [2, 0], [1, 2]] } });
+  const s = roiReducer(roiReducer(roiReducer(roiReducer(base,
+    { type: "move", id: 1, dx: 2, dy: -5 }), { type: "move", id: 2, dx: 1, dy: 1 }), { type: "move", id: 3, dx: 1, dy: 0 }), { type: "move", id: 4, dx: 3, dy: 3 });
+  assert.deepEqual(s.rois[0], { id: 1, kind: "rect", x0: 3, y0: 0, x1: 5, y1: 2 }); // clamped: keeps its size
+  assert.deepEqual(s.rois[1], { id: 2, kind: "circle", cx: 6, cy: 6, r: 2 });
+  assert.deepEqual(s.rois[2], { id: 3, kind: "line", x0: 1, y0: 0, x1: 3, y1: 2 });
+  assert.deepEqual(s.rois[3], { id: 4, kind: "polygon", points: [[3, 3], [5, 3], [4, 5]] });
+});
+
+test("roiReducer rename and recolor set or clear the optional fields", () => {
+  const s0 = roiReducer(EMPTY, { type: "add", roi: { kind: "spot", x: 1, y: 1 } });
+  const s1 = roiReducer(s0, { type: "rename", id: 1, name: "  core  " });
+  assert.equal(s1.rois[0].name, "core");
+  assert.equal(roiReducer(s1, { type: "rename", id: 1, name: "" }).rois[0].name, undefined);
+  const s2 = roiReducer(s1, { type: "recolor", id: 1, color: "#00ff00" });
+  assert.equal(s2.rois[0].color, "#00ff00");
+  assert.equal(roiReducer(s2, { type: "recolor", id: 1, color: null }).rois[0].color, undefined);
 });

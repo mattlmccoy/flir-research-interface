@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../lib/api.ts";
 import { formFromInfo, valuesFromForm, type CameraForm } from "../lib/camera.ts";
 import { fmtAny } from "../lib/format.ts";
+import { Disclosure } from "./Disclosure.tsx";
 
 interface Props {
   info: Record<string, unknown> | null;
@@ -91,12 +92,15 @@ export function CameraControls({ info, locked, onApplied }: Props) {
         <button className="secondary" disabled={dis || !dirty} onClick={() => setForm(base)}>Revert</button>
         <button className="secondary" disabled={busy || !info} onClick={nuc} title={NUC_HELP}>NUC now</button>
       </div>
-      <div className="hint">
-        <b>NUC</b> = non-uniformity correction. The camera closes its internal shutter for about a second and re-measures each
-        detector pixel's offset, which removes the fixed-pattern drift that builds up as the camera warms. The image freezes
-        while it happens. <b>Automatic</b>: the camera decides when (temperature drift and time). <b>Off</b>: only when you
-        press <b>NUC now</b>; do it right before a run so it does not fire during one. A NUC during a recording is logged as an event.
-      </div>
+      <Disclosure label="What NUC does" icon="info">
+        <ul className="help">
+          <li><b>NUC</b> = non-uniformity correction: the camera closes its internal shutter for about a second and re-measures each detector pixel's offset.</li>
+          <li>Removes the fixed-pattern drift that builds up as the camera warms. The image freezes while it happens.</li>
+          <li><b>Automatic</b>: the camera decides when (temperature drift and elapsed time).</li>
+          <li><b>Off</b>: only when you press <b>NUC now</b>. Do it right before a run so it does not fire during one.</li>
+          <li>A NUC during a recording is logged as an event and shows as a marker in playback.</li>
+        </ul>
+      </Disclosure>
       {okMsg && <div className="hint">{okMsg}</div>}
       {err && <div className="errbox">{err}</div>}
     </>

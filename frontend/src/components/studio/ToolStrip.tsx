@@ -8,7 +8,7 @@ const TOOL_META: Record<Tool, { glyph: string; title: string; enabled: boolean }
   rect: { glyph: "▭", title: "Rectangle: drag corner to corner", enabled: true },
   circle: { glyph: "◯", title: "Circle: drag from the centre outwards", enabled: true },
   line: { glyph: "╱", title: "Line: drag from one end to the other (pixels along the segment)", enabled: true },
-  polyline: { glyph: "⟋", title: "Connected lines: click each vertex; double-click places the last point and finishes (Enter finishes, Esc cancels)", enabled: true },
+  polygon: { glyph: "⬠", title: "Polygon: click each vertex; double-click places the last one and closes the shape (Enter closes, Esc cancels)", enabled: true },
 };
 
 interface Props {

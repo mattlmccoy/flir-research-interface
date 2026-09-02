@@ -7,7 +7,7 @@ import type { Range, ScaleMode } from "./lib/scale.ts";
 import { DEFAULT_LAYOUT, layoutReducer, loadLayout, saveLayout } from "./lib/layout.ts";
 import { EMPTY_ROIS, loadRois, roiLabel, roiReducer, saveRois } from "./lib/roi.ts";
 import { TraceBuffer, WINDOWS, visibleWindow, windowLabel } from "./lib/plot.ts";
-import { traceColor } from "./lib/overlay.ts";
+import { roiColor } from "./lib/overlay.ts";
 import { fmtCelsius } from "./lib/format.ts";
 import { ThermalView, type StatsMap } from "./components/ThermalView.tsx";
 import { DisplayControls } from "./components/DisplayControls.tsx";
@@ -118,7 +118,7 @@ export function App() {
   const nowT = hdr && t0Ref.current !== null ? (hdr.device_timestamp_ns - t0Ref.current) / 1e9 : 0;
   const traces: Trace[] = rois.rois.map((r, i) => {
     const b = buffers.current.get(r.id);
-    return { id: r.id, label: roiLabel(r), color: traceColor(i), t: b?.t ?? [], v: b?.v ?? [] };
+    return { id: r.id, label: roiLabel(r), color: roiColor(r, i), t: b?.t ?? [], v: b?.v ?? [] };
   });
 
   const topbar = (
@@ -189,7 +189,7 @@ export function App() {
             {hdr && hdr.kelvin_per_count === null && <div className="errbox">Stream is not temperature-linear; raw counts only.</div>}
             {nearLimit && <div className="warnbox">Max within 10 °C of the range limit ({active?.high_c} °C).</div>}
             <RoiRows rois={rois.rois} stats={liveStats} selected={rois.selected}
-              onSelect={(id) => roiDispatch({ type: "select", id })} onRemove={(id) => roiDispatch({ type: "remove", id })} onClear={() => roiDispatch({ type: "clear" })} />
+              dispatch={roiDispatch} />
           </RailSection>
           <RailSection title="camera" open={layout.sections.camera} onToggle={() => dispatch({ type: "toggleSection", section: "camera" })} tag={isRecording ? "locked during recording" : "writes camera nodes"}>
             <CameraControls info={info} locked={isRecording} onApplied={refreshInfo} />

@@ -54,7 +54,8 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
   const [hover, setHover] = useState<{ x: number; y: number; t: number } | null>(null);
   const [box, setBox] = useState<Box | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [vertices, setVertices] = useState<[number, number][]>([]); // polyline in progress
+  const [vertices, setVertices] = useState<[number, number][]>([]); // polygon in progress
+  const moving = useRef<{ id: number; last: Pt } | null>(null);
   const [stats, setStats] = useState<StatsMap>(new Map());
   const hdr = frame?.header;
 
@@ -108,9 +109,9 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
     if (!hdr) return null;
     return clientToImage(e.currentTarget.getBoundingClientRect(), e.clientX, e.clientY, hdr.width, hdr.height);
   }
-  function finishPolyline(pts: [number, number][]) {
+  function finishPolygon(pts: [number, number][]) {
     setVertices([]); setDraft(null);
-    if (pts.length >= 2 && onRoi) onRoi({ type: "add", roi: { kind: "polyline", points: pts } });
+    if (pts.length >= 3 && onRoi) onRoi({ type: "add", roi: { kind: "polygon", points: pts } });
   }
   function onDown(e: RPointerEvent<HTMLCanvasElement>) {
     const p = pix(e);
@@ -123,27 +124,36 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
       try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* synthetic or already-released pointer */ }
       return;
     }
-    if (tool === "polyline") {
-      if (e.detail >= 2) return; // the double-click handler finishes the shape
+    if (tool === "polygon") {
+      if (e.detail >= 2) return; // the double-click handler closes the shape
       const last = vertices[vertices.length - 1];
       if (last && last[0] === p.x && last[1] === p.y) return;
       const next: [number, number][] = [...vertices, [p.x, p.y]];
       setVertices(next);
-      setDraft(next.length >= 2 ? { kind: "polyline", points: next } : null);
+      setDraft(next.length >= 2 ? { kind: "polygon", points: next } : null);
       return;
     }
-    onRoi({ type: "select", id: hitTest(rois, p.x, p.y, HIT_TOL_PX) });
+    const hit = hitTest(rois, p.x, p.y, HIT_TOL_PX);
+    onRoi({ type: "select", id: hit });
+    if (hit !== null) { moving.current = { id: hit, last: p }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ } }
   }
   function onMove(e: RPointerEvent<HTMLCanvasElement>) {
     const p = pix(e);
     const c = celsiusRef.current;
     if (!p || !hdr) return setHover(null);
     setHover({ x: p.x, y: p.y, t: c ? c[p.y * hdr.width + p.x] : NaN });
+    const mv = moving.current;
+    if (mv && onRoi) {
+      const dx = p.x - mv.last.x, dy = p.y - mv.last.y;
+      if (dx || dy) { onRoi({ type: "move", id: mv.id, dx, dy }); mv.last = p; }
+      return;
+    }
     const s = dragStart.current;
     if (s && (tool === "rect" || tool === "circle" || tool === "line")) setDraft(dragShape(tool, s, p, hdr.width, hdr.height));
-    else if (tool === "polyline" && vertices.length >= 1) setDraft({ kind: "polyline", points: [...vertices, [p.x, p.y]] });
+    else if (tool === "polygon" && vertices.length >= 1) setDraft({ kind: "polygon", points: [...vertices, [p.x, p.y]] });
   }
   function onUp(e: RPointerEvent<HTMLCanvasElement>) {
+    if (moving.current) { moving.current = null; return; }
     const s = dragStart.current;
     if (!s || !hdr) return;
     dragStart.current = null;
@@ -153,10 +163,10 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
     if (shape && onRoi) onRoi({ type: "add", roi: shape });
   }
   function onKey(e: RKeyboardEvent<HTMLCanvasElement>) {
-    if (tool === "polyline" && vertices.length) {
-      if (e.key === "Enter") { e.preventDefault(); finishPolyline(vertices); return; }
+    if (tool === "polygon" && vertices.length) {
+      if (e.key === "Enter") { e.preventDefault(); finishPolygon(vertices); return; }
       if (e.key === "Escape") { setVertices([]); setDraft(null); return; }
-      if (e.key === "Backspace") { e.preventDefault(); const v = vertices.slice(0, -1); setVertices(v); setDraft(v.length >= 2 ? { kind: "polyline", points: v } : null); return; }
+      if (e.key === "Backspace") { e.preventDefault(); const v = vertices.slice(0, -1); setVertices(v); setDraft(v.length >= 2 ? { kind: "polygon", points: v } : null); return; }
     }
     if (!onRoi || selected === null) return;
     if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); onRoi({ type: "remove", id: selected }); }
@@ -164,14 +174,14 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
   }
 
   const drawing = tool !== "select";
-  const help = tool === "polyline" && vertices.length ? `${vertices.length} point${vertices.length > 1 ? "s" : ""} · double-click or Enter to finish · Esc cancels` : null;
+  const help = tool === "polygon" && vertices.length ? `${vertices.length} point${vertices.length > 1 ? "s" : ""} · double-click or Enter closes the polygon · Esc cancels` : null;
   return (
     <div className="view" ref={viewRef}>
       <canvas ref={canvasRef} />
       {hdr && box && (
-        <RoiOverlay box={box} width={hdr.width} height={hdr.height} rois={rois} selected={selected} stats={stats} draft={draft} cursor={drawing ? "crosshair" : "default"}
-          onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => setHover(null)} onKeyDown={onKey}
-          onDoubleClick={() => { if (tool === "polyline") finishPolyline(vertices); }} />
+        <RoiOverlay box={box} width={hdr.width} height={hdr.height} rois={rois} selected={selected} stats={stats} draft={draft} cursor={drawing ? "crosshair" : selected !== null ? "move" : "default"}
+          onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => { setHover(null); moving.current = null; }} onKeyDown={onKey}
+          onDoubleClick={() => { if (tool === "polygon") finishPolygon(vertices); }} />
       )}
       {hover && (
         <div className="readout">{`x ${hover.x}   y ${hover.y}\nT ${Number.isNaN(hover.t) ? "n/a (not temperature-linear)" : `${hover.t.toFixed(2)} °C`}${help ? `\n${help}` : ""}`}</div>

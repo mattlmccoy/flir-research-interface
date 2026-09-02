@@ -116,15 +116,15 @@ def test_parse_rois_accepts_circle_line_polyline() -> None:
             [
                 {"id": 1, "kind": "circle", "cx": 3, "cy": 2, "r": 1},
                 {"id": 2, "kind": "line", "x0": 0, "y0": 0, "x1": 5, "y1": 0},
-                {"id": 3, "kind": "polyline", "points": [[0, 0], [3, 0], [3, 3]]},
+                {"id": 3, "kind": "polygon", "points": [[0, 0], [3, 0], [3, 3]]},
             ]
         )
     )
-    assert [r["kind"] for r in rois] == ["circle", "line", "polyline"]
+    assert [r["kind"] for r in rois] == ["circle", "line", "polygon"]
     with pytest.raises(ValueError):
         parse_rois(json.dumps([{"id": 1, "kind": "circle", "cx": 3, "cy": 2, "r": 0}]))
     with pytest.raises(ValueError):
-        parse_rois(json.dumps([{"id": 1, "kind": "polyline", "points": [[0, 0]]}]))
+        parse_rois(json.dumps([{"id": 1, "kind": "polygon", "points": [[0, 0], [1, 1]]}]))
 
 
 def test_roi_series_circle_line_polyline_match_pixel_enumeration(tmp_path: Path) -> None:
@@ -144,4 +144,8 @@ def test_roi_series_circle_line_polyline_match_pixel_enumeration(tmp_path: Path)
     assert s1["min"][0] == pytest.approx(25.0, abs=1e-3)
     assert s1["mean"][0] == pytest.approx((3 * 26 + 2 * 25) / 5, abs=1e-3)
     assert s2["mean"][0] == pytest.approx((2 * 26 + 6 * 25) / 8, abs=1e-3)
-    assert s3["max"][1] == pytest.approx(25.0, abs=1e-3)
+    # the triangle x>=y covers hot pixels (3,1),(3,2),(2,1) but not (2,2)
+    assert s3["max"][1] == pytest.approx(27.0, abs=1e-3)
+    assert s3["min"][1] == pytest.approx(25.0, abs=1e-3)
+    sq = roi_series(r, [{"id": 4, "kind": "polygon", "points": [[2, 1], [3, 1], [3, 2], [2, 2]]}])
+    assert sq["series"]["4"]["min"][0] == pytest.approx(26.0, abs=1e-3)  # exactly the 2x2 hot block

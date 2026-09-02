@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { KeyboardEvent as RKeyboardEvent, MouseEvent as RMouseEvent, PointerEvent as RPointerEvent } from "react";
 import { roiLabel, type Roi, type RoiInput, type RoiStats } from "../lib/roi.ts";
-import { TRACE_TOKENS, type Box } from "../lib/overlay.ts";
+import { roiColor, type Box } from "../lib/overlay.ts";
 
 /** In-progress shape while the pointer is down / vertices are being placed. */
 export type Draft = RoiInput;
@@ -19,6 +19,12 @@ interface Props {
 function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || "#ffffff";
 }
+/** Resolves "var(--x)" to its value; plain colours pass through. */
+function resolve(color: string): string {
+  const m = /^var\((--[a-z0-9-]+)\)$/i.exec(color);
+  return m ? cssVar(m[1]) : color;
+}
+const FILL_ALPHA = 0.14;
 
 function drawLabel(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, color: string, scrim: string, box: Box) {
   const w = ctx.measureText(text).width + 8;
@@ -37,12 +43,13 @@ function statText(r: Roi, s: RoiStats | undefined): string {
   return ` ${s.mean.toFixed(2)}  ${(s.min as number).toFixed(1)}…${(s.max as number).toFixed(1)}`;
 }
 
-/** Strokes one shape in canvas pixels; returns where its label goes. */
-function drawShape(ctx: CanvasRenderingContext2D, r: RoiInput, sx: number, sy: number): [number, number] {
+/** Strokes one shape in canvas pixels (filled shapes get a translucent tint); returns where its label goes. */
+function drawShape(ctx: CanvasRenderingContext2D, r: RoiInput, sx: number, sy: number, fill: boolean): [number, number] {
+  const tint = () => { if (!fill) return; ctx.save(); ctx.globalAlpha = FILL_ALPHA; ctx.fillStyle = ctx.strokeStyle; ctx.fill(); ctx.restore(); };
   switch (r.kind) {
     case "rect": {
-      const x = r.x0 * sx, y = r.y0 * sy;
-      ctx.strokeRect(x + 0.5, y + 0.5, (r.x1 - r.x0) * sx, (r.y1 - r.y0) * sy);
+      const x = r.x0 * sx, y = r.y0 * sy, w = (r.x1 - r.x0) * sx, h = (r.y1 - r.y0) * sy;
+      ctx.beginPath(); ctx.rect(x + 0.5, y + 0.5, w, h); tint(); ctx.stroke();
       return [x, y - 3];
     }
     case "spot": {
@@ -53,7 +60,7 @@ function drawShape(ctx: CanvasRenderingContext2D, r: RoiInput, sx: number, sy: n
     }
     case "circle": {
       const x = (r.cx + 0.5) * sx, y = (r.cy + 0.5) * sy;
-      ctx.beginPath(); ctx.ellipse(x, y, r.r * sx, r.r * sy, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(x, y, r.r * sx, r.r * sy, 0, 0, Math.PI * 2); tint(); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(x - 4, y); ctx.lineTo(x + 4, y); ctx.moveTo(x, y - 4); ctx.lineTo(x, y + 4); ctx.stroke();
       return [x - r.r * sx, y - r.r * sy - 3];
     }
@@ -63,9 +70,10 @@ function drawShape(ctx: CanvasRenderingContext2D, r: RoiInput, sx: number, sy: n
       for (const [px, py] of [[ax, ay], [bx, by]]) { ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI * 2); ctx.stroke(); }
       return [Math.min(ax, bx), Math.min(ay, by) - 3];
     }
-    case "polyline": {
+    case "polygon": {
       ctx.beginPath();
       r.points.forEach(([px, py], i) => { const x = (px + 0.5) * sx, y = (py + 0.5) * sy; if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
+      if (r.points.length >= 3) { ctx.closePath(); tint(); }
       ctx.stroke();
       for (const [px, py] of r.points) { ctx.beginPath(); ctx.arc((px + 0.5) * sx, (py + 0.5) * sy, 3, 0, Math.PI * 2); ctx.stroke(); }
       const [fx, fy] = r.points[0];
@@ -95,17 +103,18 @@ export function RoiOverlay(p: Props) {
     const accent = cssVar("--accent");
     ctx.font = `11px ${cssVar("--font-mono")}`;
     p.rois.forEach((r, i) => {
-      const color = cssVar(TRACE_TOKENS[i % TRACE_TOKENS.length]);
+      const color = resolve(roiColor(r, i));
       const sel = r.id === p.selected;
-      ctx.strokeStyle = sel ? accent : color;
-      ctx.lineWidth = sel ? 2 : 1;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = sel ? 2.5 : 1;
       ctx.setLineDash([]);
-      const [lx, ly] = drawShape(ctx, r, sx, sy);
-      drawLabel(ctx, `${roiLabel(r)}${statText(r, p.stats.get(r.id))}`, lx, ly, sel ? accent : color, scrim, p.box);
+      const [lx, ly] = drawShape(ctx, r, sx, sy, true);
+      if (sel) { ctx.strokeStyle = accent; ctx.lineWidth = 1; ctx.setLineDash([3, 3]); drawShape(ctx, r, sx, sy, false); ctx.setLineDash([]); }
+      drawLabel(ctx, `${roiLabel(r)}${statText(r, p.stats.get(r.id))}`, lx, ly, color, scrim, p.box);
     });
     if (p.draft) {
       ctx.strokeStyle = accent; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
-      drawShape(ctx, p.draft, sx, sy);
+      drawShape(ctx, p.draft, sx, sy, false);
     }
   });
 

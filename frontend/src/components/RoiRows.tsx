@@ -1,13 +1,13 @@
-import { roiLabel, type Roi, type RoiStats } from "../lib/roi.ts";
-import { traceColor } from "../lib/overlay.ts";
+import { useState } from "react";
+import { roiId, roiLabel, type Roi, type RoiAction, type RoiStats } from "../lib/roi.ts";
+import { COLOR_PRESETS, roiColor } from "../lib/overlay.ts";
+import { Disclosure } from "./Disclosure.tsx";
 
 interface Props {
   rois: Roi[];
   stats: Map<number, RoiStats>;
   selected: number | null;
-  onSelect: (id: number | null) => void;
-  onRemove: (id: number) => void;
-  onClear: () => void;
+  dispatch: (a: RoiAction) => void;
 }
 
 function Values({ r, s }: { r: Roi; s: RoiStats | undefined }) {
@@ -17,7 +17,7 @@ function Values({ r, s }: { r: Roi; s: RoiStats | undefined }) {
   return (
     <span className="vals">
       {s.mean.toFixed(2)} °C
-      <small>min {(s.min as number).toFixed(2)} · max {(s.max as number).toFixed(2)}</small>
+      <small>min {(s.min as number).toFixed(2)} · max {(s.max as number).toFixed(2)} · {s.n} px</small>
     </span>
   );
 }
@@ -28,28 +28,71 @@ function where(r: Roi): string {
     case "rect": return `rect x ${r.x0}…${r.x1 - 1} y ${r.y0}…${r.y1 - 1} (${r.x1 - r.x0}×${r.y1 - r.y0} px)`;
     case "circle": return `circle centre (${r.cx}, ${r.cy}) r ${r.r.toFixed(1)} px`;
     case "line": return `line (${r.x0}, ${r.y0}) → (${r.x1}, ${r.y1})`;
-    case "polyline": return `connected lines through ${r.points.length} points`;
+    case "polygon": return `polygon with ${r.points.length} vertices`;
   }
 }
 
-/** One row per ROI: colour swatch + label, current values (mean; min/max for rectangles), remove. */
-export function RoiRows({ rois, stats, selected, onSelect, onRemove, onClear }: Props) {
-  if (rois.length === 0) return <div className="hint">No ROIs yet. Pick a tool in the strip: ◎ spot (click), ▭ rectangle, ◯ circle or ╱ line (drag), ⟋ connected lines (click vertices, double-click to finish).</div>;
+function ColorPicker({ r, i, dispatch, onDone }: { r: Roi; i: number; dispatch: (a: RoiAction) => void; onDone: () => void }) {
+  const current = roiColor(r, i);
+  return (
+    <div className="swatches" role="group" aria-label={`colour of ${roiLabel(r)}`}>
+      {COLOR_PRESETS.map((c) => (
+        <button key={c} type="button" className={current.toLowerCase() === c ? "on" : ""} style={{ background: c }} title={c}
+          onClick={() => { dispatch({ type: "recolor", id: r.id, color: c }); onDone(); }} />
+      ))}
+      <input type="color" aria-label="custom colour" value={r.color ?? "#ffffff"} title="any colour"
+        onChange={(e) => dispatch({ type: "recolor", id: r.id, color: e.target.value })} />
+    </div>
+  );
+}
+
+/** One row per ROI: colour swatch (click to change), editable name, current values, remove. */
+export function RoiRows({ rois, stats, selected, dispatch }: Props) {
+  const [editing, setEditing] = useState<number | null>(null);
+  const [picking, setPicking] = useState<number | null>(null);
+  const help = (
+    <Disclosure label="How to draw and edit ROIs">
+      <ul className="help">
+        <li>◎ Spot: click a pixel.</li>
+        <li>▭ Rectangle: drag corner to corner.</li>
+        <li>◯ Circle: drag from the centre outwards.</li>
+        <li>╱ Line: drag from one end to the other; the pixels along it are measured.</li>
+        <li>⬠ Polygon: click each vertex; double-click places the last one and closes the shape (Enter closes, Esc cancels, Backspace undoes a vertex).</li>
+        <li>↖ Select: click an ROI, then drag to move it; Delete removes it.</li>
+        <li>Click the colour square to recolour; double-click the name to rename.</li>
+      </ul>
+    </Disclosure>
+  );
+  if (rois.length === 0) return <><div className="hint">No ROIs yet.</div>{help}</>;
   return (
     <>
       <div className="roi-rows">
         {rois.map((r, i) => (
           [
-            <button key={`l${r.id}`} className={`lbl ${selected === r.id ? "sel" : ""}`} type="button"
-              onClick={() => onSelect(selected === r.id ? null : r.id)} aria-pressed={selected === r.id} title={where(r)}>
-              <span className="sw" style={{ background: traceColor(i) }} />{roiLabel(r)}
-            </button>,
+            <span key={`l${r.id}`} className={`lbl ${selected === r.id ? "sel" : ""}`} title={where(r)}>
+              <button type="button" className="sw" style={{ background: roiColor(r, i), border: "none" }} aria-label={`colour of ${roiLabel(r)}`}
+                onClick={() => setPicking(picking === r.id ? null : r.id)} />
+              {editing === r.id ? (
+                <input autoFocus type="text" defaultValue={r.name ?? ""} placeholder={roiId(r)} aria-label="ROI name" maxLength={40}
+                  onBlur={(e) => { dispatch({ type: "rename", id: r.id, name: e.target.value }); setEditing(null); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setEditing(null); }} />
+              ) : (
+                <button type="button" className="lbl" style={{ border: "none", padding: 0 }} aria-pressed={selected === r.id}
+                  onClick={() => dispatch({ type: "select", id: selected === r.id ? null : r.id })} onDoubleClick={() => setEditing(r.id)} title={`${where(r)} · double-click to rename`}>
+                  {roiLabel(r)}{r.name ? <small className="muted"> {roiId(r)}</small> : null}
+                </button>
+              )}
+            </span>,
             <Values key={`v${r.id}`} r={r} s={stats.get(r.id)} />,
-            <button key={`x${r.id}`} className="secondary" type="button" onClick={() => onRemove(r.id)} aria-label={`Remove ${roiLabel(r)}`} title="Remove">×</button>,
+            <button key={`x${r.id}`} className="secondary" type="button" onClick={() => dispatch({ type: "remove", id: r.id })} aria-label={`Remove ${roiLabel(r)}`} title="Remove">×</button>,
+            picking === r.id ? <div key={`c${r.id}`} style={{ gridColumn: "1 / -1" }}><ColorPicker r={r} i={i} dispatch={dispatch} onDone={() => setPicking(null)} /></div> : null,
           ]
         ))}
       </div>
-      <div className="row"><button className="secondary" type="button" onClick={onClear}>clear all</button><span className="hint">Delete removes the selected ROI.</span></div>
+      <div className="row">
+        <button className="secondary" type="button" onClick={() => dispatch({ type: "clear" })}>clear all</button>
+      </div>
+      {help}
     </>
   );
 }

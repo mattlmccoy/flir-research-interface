@@ -30,19 +30,31 @@ export function hitTest(rois: Roi[], x: number, y: number, tol: number): number 
     const r = rois[i];
     if (r.kind === "spot" && Math.abs(r.x - x) <= tol && Math.abs(r.y - y) <= tol) return r.id;
     if (r.kind === "line" && segmentDistance(x, y, r.x0, r.y0, r.x1, r.y1) <= tol) return r.id;
-    if (r.kind === "polyline") {
-      for (let k = 1; k < r.points.length; k++) {
-        const [ax, ay] = r.points[k - 1], [bx, by] = r.points[k];
-        if (segmentDistance(x, y, ax, ay, bx, by) <= tol) return r.id;
-      }
-    }
   }
   for (let i = rois.length - 1; i >= 0; i--) {
     const r = rois[i];
     if (r.kind === "rect" && x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1) return r.id;
     if (r.kind === "circle" && Math.hypot(x - r.cx, y - r.cy) <= r.r) return r.id;
+    if (r.kind === "polygon" && pointInPolygon(x, y, r.points)) return r.id;
   }
   return null;
+}
+
+export function pointInPolygon(x: number, y: number, pts: [number, number][]): boolean {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i], [xj, yj] = pts[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** Nine preset ROI colours (phosphor, amber, sky, pink, lime, violet, white, coral, cyan). */
+export const COLOR_PRESETS = ["#5cff8a", "#ffb454", "#6ec3ff", "#ff8ad8", "#c9d64f", "#b48cff", "#f5f7fa", "#ff5f56", "#3ee6d6"] as const;
+
+/** The ROI's own colour when set, else its trace token by index. */
+export function roiColor(roi: Roi, index: number): string {
+  return roi.color ?? traceColor(index);
 }
 
 /** Trace colours as CSS variables from theme.css; the first trace is phosphor green (spec §2). */

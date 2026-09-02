@@ -58,7 +58,7 @@ def _roi_desc(r: dict[str, Any]) -> str:
     if k == "line":
         seg = f"x0={r['x0']} y0={r['y0']} x1={r['x1']} y1={r['y1']}"
         return f"L{r['id']}: line {seg} (Bresenham, inclusive)"
-    return f"P{r['id']}: polyline points={r['points']} (Bresenham per segment, joints once)"
+    return f"P{r['id']}: polygon points={r['points']} (even-odd interior + boundary)"
 
 
 def series_csv(reader: ExperimentReader, rois: list[dict[str, Any]]) -> str:
@@ -75,7 +75,7 @@ def series_csv(reader: ExperimentReader, rois: list[dict[str, Any]]) -> str:
     cols: list[list[float | None]] = []
     for r in rois:
         s = data["series"][str(r["id"])]
-        prefix = {"spot": "S", "rect": "R", "circle": "C", "line": "L", "polyline": "P"}[r["kind"]]
+        prefix = {"spot": "S", "rect": "R", "circle": "C", "line": "L", "polygon": "P"}[r["kind"]]
         if r["kind"] == "spot":
             header.append(f"S{r['id']}_value")
             cols.append(s["value"])

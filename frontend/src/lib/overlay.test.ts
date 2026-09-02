@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clientToImage, hitTest, traceColor } from "./overlay.ts";
+import { COLOR_PRESETS, clientToImage, hitTest, roiColor, traceColor } from "./overlay.ts";
 import type { Roi } from "./roi.ts";
 
 const RECT = { left: 100, top: 50, width: 320, height: 240 }; // canvas drawn at half size of 640x480
@@ -34,13 +34,20 @@ test("hitTest handles circles (inside), lines and polylines (within tolerance of
   const rois: Roi[] = [
     { id: 1, kind: "circle", cx: 50, cy: 50, r: 10 },
     { id: 2, kind: "line", x0: 100, y0: 100, x1: 200, y1: 100 },
-    { id: 3, kind: "polyline", points: [[300, 300], [300, 400], [400, 400]] },
+    { id: 3, kind: "polygon", points: [[300, 300], [300, 400], [400, 400]] },
   ];
   assert.equal(hitTest(rois, 55, 52, 6), 1);
   assert.equal(hitTest(rois, 70, 50, 6), null);
   assert.equal(hitTest(rois, 150, 103, 6), 2);
   assert.equal(hitTest(rois, 150, 120, 6), null);
-  assert.equal(hitTest(rois, 302, 350, 6), 3);
-  assert.equal(hitTest(rois, 350, 396, 6), 3);
-  assert.equal(hitTest(rois, 350, 350, 6), null);
+  assert.equal(hitTest(rois, 320, 380, 6), 3); // inside the triangle
+  assert.equal(hitTest(rois, 380, 320, 6), null); // outside (other half of the square)
+});
+
+
+test("roiColor: explicit colour wins, otherwise the trace token by index; presets are 9 hex colours", () => {
+  assert.equal(roiColor({ id: 1, kind: "spot", x: 0, y: 0, color: "#123456" }, 3), "#123456");
+  assert.equal(roiColor({ id: 1, kind: "spot", x: 0, y: 0 }, 1), "var(--accent)");
+  assert.equal(COLOR_PRESETS.length, 9);
+  for (const c of COLOR_PRESETS) assert.match(c, /^#[0-9a-f]{6}$/);
 });
