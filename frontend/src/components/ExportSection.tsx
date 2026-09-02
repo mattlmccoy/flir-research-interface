@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { api, type Hdf5Export } from "../lib/api.ts";
+import { api, type Hdf5Export, type ThermalVideoExport } from "../lib/api.ts";
 import type { Roi } from "../lib/roi.ts";
 
-interface Props { name: string; index: number; nFrames: number; rois: Roi[]; celsius: boolean; }
+interface Props { name: string; index: number; nFrames: number; rois: Roi[]; celsius: boolean; thermalPreview?: { bytes: number } | null; onThermalPreview?: () => void; }
 
 const FRAME_FORMATS = [
   { f: "csv", label: "CSV", title: "°C grid (raw counts if not temperature-linear)" },
@@ -16,11 +16,18 @@ function fmtBytes(n: number): string {
 }
 
 /** Playback rail section: downloads derived from the recording (the store itself is never touched). */
-export function ExportSection({ name, index, nFrames, rois, celsius }: Props) {
+export function ExportSection({ name, index, nFrames, rois, celsius, thermalPreview, onThermalPreview }: Props) {
   const [busy, setBusy] = useState(false);
   const [h5, setH5] = useState<Hdf5Export | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [tv, setTv] = useState<ThermalVideoExport | null>(null);
+  const [tvBusy, setTvBusy] = useState(false);
+  const haveVideo = !!thermalPreview || !!tv;
 
+  async function renderThermalVideo() {
+    setTvBusy(true); setErr(null);
+    try { setTv(await api.exportThermalVideo(name)); onThermalPreview?.(); } catch (e) { setErr(String(e)); } finally { setTvBusy(false); }
+  }
   async function exportHdf5() {
     setBusy(true); setErr(null);
     try { setH5(await api.exportHdf5(name)); } catch (e) { setErr(String(e)); } finally { setBusy(false); }
@@ -44,6 +51,11 @@ export function ExportSection({ name, index, nFrames, rois, celsius }: Props) {
         <span>whole run</span>
         <span className="v plain" style={{ textAlign: "right" }}>
           <button className="secondary" disabled={busy || nFrames === 0} onClick={exportHdf5} title="HDF5: uint16 counts + time axes + metadata, for MATLAB / Python">{busy ? "writing…" : "HDF5"}</button>
+        </span>
+        <span>thermal video</span>
+        <span className="v plain" style={{ textAlign: "right", display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
+          {haveVideo && <a className="dl" href={api.thermalVideoUrl(name)} download={`${name}_thermal_preview.mp4`} title="exports/thermal_preview.mp4: iron palette, fixed °C scale for the run, colour bar + time label. A viewing copy only; the raw counts stay in thermal.zarr">MP4{fmtBytes(tv?.bytes ?? thermalPreview?.bytes ?? 0) !== "0 kB" ? ` · ${fmtBytes(tv?.bytes ?? thermalPreview?.bytes ?? 0)}` : ""}</a>}
+          <button className="secondary" disabled={tvBusy || nFrames === 0} onClick={renderThermalVideo} title="Render (or re-render) the small H.264 viewing copy of the thermal run">{tvBusy ? "rendering…" : haveVideo ? "re-render" : "render"}</button>
         </span>
       </div>
       {!celsius && <div className="warnbox">This recording is not temperature-linear: CSV and TIFF carry raw counts.</div>}

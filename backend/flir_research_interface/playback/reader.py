@@ -91,7 +91,13 @@ class ExperimentReader:
             "visible": self.visible,
             "rois": self.metadata.get("rois"),
             "visible_alignment": self.metadata.get("visible_alignment"),
+            "thermal_preview": self.thermal_preview(),
         }
+
+    def thermal_preview(self) -> dict[str, Any] | None:
+        """The derived viewing video (exports/thermal_preview.mp4) if it has been rendered."""
+        p = self.path / "exports" / "thermal_preview.mp4"
+        return {"path": str(p), "bytes": p.stat().st_size} if p.is_file() else None
 
     def timeline(self) -> dict[str, list[Any]]:
         return {

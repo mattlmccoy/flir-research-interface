@@ -50,8 +50,30 @@ the probe output from the real A70 before touching radiometric node names.
 - [x] M5 Playback (2026-09-01): ExperimentReader (read-only), experiments/timeline/frame endpoints, Experiments + Playback pages (scrub, play/pause, step, speed, keyboard), store hash unchanged after playback.
 - [x] UI plan 1 (2026-09-02, branch feat/ui-studio): tokens+fonts, layout reducer, Studio shell, live/playback in frame, previews (preview.png/keyframes.png/previews.json), reveal endpoint, experiments card grid with hover-scrub. Remaining plans: deployment (site + operator), camera controls.
 - [ ] M6 ROI/plots (+ camera-controls panel), M7 export, M8 experiment metadata/events.
-- [ ] M9 Visible camera recorder (RTSP /avc/ch1 H.264 1280x960 via ffmpeg -c copy; host-clock alignment).
+- [x] M9 Visible camera recorder (2026-09-02): RTSP /avc/ch1 stream copy, live MJPEG preview, side/overlay placement, homography alignment (10-pair fit verified on the A70), alignment + ROIs stamped into metadata.json, roi_series.csv auto-export.
+- [x] M9b Thermal preview video (2026-09-02): exports/thermal_preview.mp4 rendered in the background after every stop (iron palette, fixed run-wide °C scale, colour bar, time label); `POST …/export/thermal-video` re-renders; playback → export shows MP4 link + render button.
 - [ ] M10 Packaging + mDNS hostname + installer that prompts for the right Teledyne download.
+- [ ] M11 Armed recording with triggers (user request 2026-09-02). Design, to be TDD'd as a pure
+  state machine in backend `recording/trigger.py` and evaluated on the acquisition thread's frames:
+  - Arm: the operator sets everything up as for a normal record (name, metadata, visible, ROIs),
+    picks a **start condition** and an **end condition**, and presses *Arm*. Recorder state
+    `armed`; the studio shows a pulsing ARMED badge and the live value the condition watches.
+  - Start conditions: `manual` (as today), `time` (at a wall-clock instant or after N s),
+    `threshold` (an ROI statistic — spot value, or mean/max/min of any ROI — crosses a °C
+    level, rising or falling, sustained for ≥ k consecutive frames to reject noise).
+  - End conditions: `manual`, `frames N`, `duration N s/min`, `threshold` (same form as start,
+    e.g. max of ROI 2 rises above 180 °C, or falls back below 60 °C), plus a hard safety cap
+    (max duration, default 30 min) that always applies.
+  - Pre-trigger buffer: keep the last P seconds of frames in a ring so the recording starts
+    before the trigger fired (P default 2 s); the trigger frame is marked in events.json as
+    `trigger` with the condition that fired, and the end as `trigger_end`.
+  - Evaluation runs on the frames already flowing through AcquisitionService (no second
+    stream); threshold uses the same ROI pixel enumeration as analysis/series.py so live and
+    post-hoc numbers agree.
+  - API: `POST /api/recording/arm` {name, metadata, visible, rois, start, end}, `POST
+    /api/recording/disarm`; status gains `armed`, `trigger: {start, end, watched_value}`.
+  - Tests first: trigger state machine (rising/falling/sustain/time/frames/cap) with synthetic
+    frame streams; API arm→auto-start→auto-stop on the simulated camera with a ramping scene.
 
 ### Open technical unknowns (docs/radiometry.md s10)
 - [ ] Out-of-range/saturation encoding in temperature-linear counts.

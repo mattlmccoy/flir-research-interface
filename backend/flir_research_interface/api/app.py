@@ -193,6 +193,27 @@ def create_app(
         (out_dir / "roi_series.csv").write_text(series_csv(reader, rois))
         logger.info("wrote %s", out_dir / "roi_series.csv")
 
+    app.state.render_tasks = set()
+
+    def _render_thermal_video(exp_dir: Path) -> None:
+        """Write exports/thermal_preview.mp4 (a viewing copy; the store is never touched)."""
+        from flir_research_interface.analysis.thermal_video import render_thermal_video
+
+        render_thermal_video(ExperimentReader(exp_dir))
+
+    def _schedule_thermal_video(exp_dir: Path) -> None:
+        """Render after stop without holding the stop: an encode of a long run takes seconds."""
+
+        async def _job() -> None:
+            try:
+                await run_in_threadpool(_render_thermal_video, exp_dir)
+            except Exception:  # noqa: BLE001 - a convenience file must never surface as an error
+                logger.exception("thermal preview video render failed for %s", exp_dir)
+
+        task = asyncio.create_task(_job())
+        app.state.render_tasks.add(task)
+        task.add_done_callback(app.state.render_tasks.discard)
+
     def _visible_status() -> dict[str, Any]:
         vis = app.state.visible
         if vis is not None:
@@ -216,6 +237,7 @@ def create_app(
                     await run_in_threadpool(_export_roi_series, exp_dir)
                 except Exception:  # noqa: BLE001 - a convenience file must never fail the finalize
                     logger.exception("automatic ROI series export failed")
+                _schedule_thermal_video(exp_dir)
         vis = app.state.visible
         if vis is not None:
             app.state.visible = None
@@ -712,6 +734,26 @@ def create_app(
         from flir_research_interface.analysis.export import export_hdf5
 
         return await run_in_threadpool(export_hdf5, _open(name))
+
+    @app.post("/api/experiments/{name}/export/thermal-video")
+    async def export_thermal_video_route(name: str) -> dict[str, Any]:
+        from flir_research_interface.analysis.thermal_video import render_thermal_video
+
+        try:
+            return await run_in_threadpool(render_thermal_video, _open(name))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.get("/api/experiments/{name}/thermal_preview.mp4")
+    def experiment_thermal_video(name: str) -> Response:
+        from starlette.responses import FileResponse
+
+        path = _exp_dir(name) / "exports" / "thermal_preview.mp4"
+        if not path.is_file():
+            raise HTTPException(404, "thermal preview video not rendered yet")
+        return FileResponse(path, media_type="video/mp4", headers={"Accept-Ranges": "bytes"})
 
     def _png_response(path: Path, request: Request) -> Response:
         if not path.is_file():

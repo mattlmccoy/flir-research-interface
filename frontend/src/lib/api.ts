@@ -46,6 +46,7 @@ export interface Previews {
 export interface RevealResult { ok: boolean; path: string; error?: string; }
 export interface Health { status: string; version: string; app_version?: string; api_version?: string; platform?: string; }
 export interface Hdf5Export { path: string; size_bytes: number; sha256: string; n_frames: number; }
+export interface ThermalVideoExport { path: string; frames: number; fps: number; width: number; height: number; vmin: number; vmax: number; units: string; bytes: number; }
 
 export interface Experiment {
   name: string;
@@ -64,7 +65,7 @@ export interface Experiment {
   started_utc?: string | null;
 }
 
-export interface ExperimentInfo { name: string; path: string; n_frames: number; width: number; height: number; duration_s: number; complete: boolean; ir_format: string | null; conversion: Record<string, unknown> | null; experiment: Record<string, unknown> | null; camera: Record<string, unknown> | null; software: Record<string, unknown> | null; started_utc: string | null; events?: Record<string, unknown>[]; manifest: Record<string, unknown> | null; visible?: { file?: string | null; measured_fps?: number | null; error?: string | null } | null; visible_alignment?: Record<string, unknown> | null; rois?: Record<string, unknown>[] | null; }
+export interface ExperimentInfo { name: string; path: string; n_frames: number; width: number; height: number; duration_s: number; complete: boolean; ir_format: string | null; conversion: Record<string, unknown> | null; experiment: Record<string, unknown> | null; camera: Record<string, unknown> | null; software: Record<string, unknown> | null; started_utc: string | null; events?: Record<string, unknown>[]; manifest: Record<string, unknown> | null; visible?: { file?: string | null; measured_fps?: number | null; error?: string | null } | null; visible_alignment?: Record<string, unknown> | null; rois?: Record<string, unknown>[] | null; thermal_preview?: { path: string; bytes: number } | null; }
 export interface Timeline { t_s: number[]; frame_id: number[]; }
 export interface ExperimentEvent { t_s?: number; type?: string; name?: string; [k: string]: unknown; }
 export interface RoiSeries {
@@ -86,6 +87,9 @@ export const api = {
     u(`/api/experiments/${encodeURIComponent(name)}/frames/${index}/export?format=${format}`),
   exportHdf5: (name: string) =>
     j<Hdf5Export>(req(`/api/experiments/${encodeURIComponent(name)}/export/hdf5`, { method: "POST" })),
+  exportThermalVideo: (name: string) =>
+    j<ThermalVideoExport>(req(`/api/experiments/${encodeURIComponent(name)}/export/thermal-video`, { method: "POST" })),
+  thermalVideoUrl: (name: string) => u(`/api/experiments/${encodeURIComponent(name)}/thermal_preview.mp4`),
   frameBuffer: async (name: string, index: number): Promise<ArrayBuffer> => {
     const res = await req(`/api/experiments/${encodeURIComponent(name)}/frames/${index}`);
     if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);

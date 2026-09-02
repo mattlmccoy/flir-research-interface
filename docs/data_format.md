@@ -85,6 +85,11 @@ experiments/<YYYYMMDD_HHMMSS>_<name>/
   preview.png, keyframes.png, previews.json   thumbnails (visualization only)
   exports/roi_series.csv  written automatically at stop: every stored ROI evaluated on every
                          frame (mean/min/max, or value for spots), in °C
+  exports/thermal_preview.mp4  rendered automatically after stop (in the background, so the stop
+                         itself is instant): the whole run as a small H.264 video, iron palette,
+                         one °C scale fixed to the run's min/max, colour bar and elapsed-time
+                         label. For viewing and sharing only; re-render any time from playback
+                         → export, or `POST /api/experiments/<name>/export/thermal-video`
   exports/<name>.h5      on demand: the whole run as HDF5 for MATLAB / Python
 ```
 
@@ -103,6 +108,7 @@ All exports are derived from the read-only reader; the Zarr store is never modif
 | Frame TIFF | `format=tiff` | 32-bit float °C (uint16 counts if not temperature-linear) |
 | Frame PNG | `format=png` | 16-bit raw counts |
 | Frame NPY | `format=npy` | uint16 raw counts |
+| Thermal preview video | `POST …/export/thermal-video` → `exports/thermal_preview.mp4`; served at `GET …/thermal_preview.mp4` | H.264 (yuv420p, CRF 23, ≤30 fps) of every frame; iron palette on a fixed scale; not radiometric |
 | Whole run HDF5 | `POST …/export/hdf5` → `<experiment>/exports/<name>.h5` | `counts` (uint16, gzip, chunked by 32 frames), `t_s`, `frame_id`, `device_timestamp_ns`, `host_timestamp_ns`; attrs `ir_format`, `kelvin_per_count`, `kelvin_offset`, `conversion`, `metadata_json`, `events_json` |
 
 MATLAB:
