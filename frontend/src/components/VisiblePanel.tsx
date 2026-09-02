@@ -2,26 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api.ts";
 import { streamMjpeg } from "../lib/mjpeg.ts";
 
-type Props =
-  | { mode: "live"; available: boolean; reason?: string }
-  | { mode: "playback"; name: string; hasVideo: boolean; t: number; playing: boolean; speed: number; measuredFps?: number | null };
-
-/**
- * Visible camera (Milestone 9 view). Live: a low-rate MJPEG relay, off by default because each
- * viewer costs one ffmpeg on the operator. Playback: the recorded visible.mp4, kept in step with
- * the thermal cursor (host-clock alignment, ~tens of ms; not frame-exact).
- */
-export function VisiblePanel(p: Props) {
-  const [on, setOn] = useState(false);
+/** Live MJPEG view: fetches the stream itself so unmounting aborts it (the operator's transcode ends at once). */
+export function VisibleLive({ big = false }: { big?: boolean }) {
+  const img = useRef<HTMLImageElement>(null);
   const [err, setErr] = useState<string | null>(null);
   const [fps, setFps] = useState<number | null>(null);
-  const video = useRef<HTMLVideoElement>(null);
-  const img = useRef<HTMLImageElement>(null);
-
-  // Live: fetch the MJPEG stream ourselves so stopping (or unmounting) aborts the request at once,
-  // which ends the operator's transcode; an <img src> would keep the connection open on its own.
   useEffect(() => {
-    if (p.mode !== "live" || !on) return;
     let url: string | null = null;
     let n = 0;
     let t0 = performance.now();
@@ -35,45 +21,72 @@ export function VisiblePanel(p: Props) {
       const dt = performance.now() - t0;
       if (dt >= 2000) { setFps((n * 1000) / dt); n = 0; t0 = performance.now(); }
     }, (e) => { if (e) setErr(e); });
-    return () => { stop(); if (url) URL.revokeObjectURL(url); setFps(null); };
-  }, [p.mode, on]);
+    return () => { stop(); if (url) URL.revokeObjectURL(url); };
+  }, []);
+  return (
+    <div className={`visible-box ${big ? "big" : ""}`}>
+      <img ref={img} alt="visible camera" />
+      <span className="tag">visible · {fps ? `${fps.toFixed(1)} fps` : "connecting…"} · ~1 s behind thermal</span>
+      {err && <div className="errbox">{err}</div>}
+    </div>
+  );
+}
 
+interface VideoProps { name: string; t: number; playing: boolean; speed: number; measuredFps?: number | null; big?: boolean; }
+
+/** Recorded visible.mp4 kept in step with the thermal cursor (host-clock alignment, not frame-exact). */
+export function VisibleVideo({ name, t, playing, speed, measuredFps, big = false }: VideoProps) {
+  const video = useRef<HTMLVideoElement>(null);
   useEffect(() => {
-    if (p.mode !== "playback") return;
     const v = video.current;
-    if (!v || !p.hasVideo) return;
-    v.playbackRate = Number.isFinite(p.speed) ? Math.min(4, Math.max(0.25, p.speed)) : 4;
-    if (p.playing) {
-      if (Math.abs(v.currentTime - p.t) > 0.3) v.currentTime = p.t;
+    if (!v) return;
+    v.playbackRate = Number.isFinite(speed) ? Math.min(4, Math.max(0.25, speed)) : 4;
+    if (playing) {
+      if (Math.abs(v.currentTime - t) > 0.3) v.currentTime = t;
       if (v.paused) v.play().catch(() => undefined);
     } else {
       if (!v.paused) v.pause();
-      if (Math.abs(v.currentTime - p.t) > 0.02) v.currentTime = p.t;
+      if (Math.abs(v.currentTime - t) > 0.02) v.currentTime = t;
     }
-  }, [p]);
+  }, [t, playing, speed]);
+  return (
+    <div className={`visible-box ${big ? "big" : ""}`}>
+      <video ref={video} src={api.visibleVideoUrl(name)} muted playsInline preload="auto" />
+      <span className="tag">recorded visible{measuredFps ? ` · ${measuredFps.toFixed(1)} fps` : ""} · host-clock aligned</span>
+    </div>
+  );
+}
 
+type PanelProps =
+  | { mode: "live"; available: boolean; reason?: string; side: boolean; onSide: () => void }
+  | { mode: "playback"; name: string; hasVideo: boolean; t: number; playing: boolean; speed: number; measuredFps?: number | null; side: boolean; onSide: () => void };
+
+/** Rail section body: placement toggle plus the small in-rail view when not side by side. */
+export function VisiblePanel(p: PanelProps) {
+  const [on, setOn] = useState(false);
+  const sideToggle = (
+    <label className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <input type="checkbox" checked={p.side} onChange={p.onSide} /> side by side with the thermal image
+    </label>
+  );
   if (p.mode === "live") {
     if (!p.available) return <div className="hint">Visible camera preview unavailable: {p.reason ?? "ffmpeg or RTSP credentials not configured"}.</div>;
     return (
       <>
         <div className="row">
-          <button className={on ? "danger" : "secondary"} onClick={() => { setOn(!on); setErr(null); }}>{on ? "stop preview" : "show visible camera"}</button>
-          <span className="hint">RTSP /avc/ch1 → MJPEG 640 px{fps ? ` · ${fps.toFixed(1)} fps` : ""} (the camera limits it to ~8 fps while the thermal stream runs; expect about a second of encoder delay)</span>
+          {!p.side && <button className={on ? "danger" : "secondary"} onClick={() => setOn(!on)}>{on ? "stop preview" : "show visible camera"}</button>}
+          {sideToggle}
         </div>
-        {on && (
-          <div className="visible-box">
-            <img ref={img} alt="visible camera" />
-          </div>
-        )}
-        {err && <div className="errbox">{err}</div>}
+        <div className="hint">RTSP /avc/ch1 → MJPEG 640 px; the camera limits it to ~8 fps while the thermal stream runs, about a second of encoder delay.</div>
+        {!p.side && on && <VisibleLive />}
       </>
     );
   }
   if (!p.hasVideo) return <div className="hint">This recording has no visible video.</div>;
   return (
-    <div className="visible-box">
-      <video ref={video} src={api.visibleVideoUrl(p.name)} muted playsInline preload="auto" />
-      <div className="hint">recorded visible video{p.measuredFps ? ` · ${p.measuredFps.toFixed(1)} fps` : ""} · aligned by host clock</div>
-    </div>
+    <>
+      <div className="row">{sideToggle}</div>
+      {!p.side && <VisibleVideo name={p.name} t={p.t} playing={p.playing} speed={p.speed} measuredFps={p.measuredFps} />}
+    </>
   );
 }

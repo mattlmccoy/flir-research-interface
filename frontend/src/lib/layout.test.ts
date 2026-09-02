@@ -117,3 +117,16 @@ test("layout carries a zoom (fit by default), setZoom changes it, loadLayout rej
   st.set("fri.layout.v1", JSON.stringify({ zoom: 1 }));
   assert.equal(loadLayout(storage).zoom, 1);
 });
+
+test("visibleSide: off by default, toggled by an action, validated on load", () => {
+  assert.equal(DEFAULT_LAYOUT.visibleSide, false);
+  const on = layoutReducer(DEFAULT_LAYOUT, { type: "toggleVisibleSide" });
+  assert.equal(on.visibleSide, true);
+  assert.equal(layoutReducer(on, { type: "toggleVisibleSide" }).visibleSide, false);
+  const st = new Map<string, string>();
+  const storage = { getItem: (k: string) => st.get(k) ?? null, setItem: (k: string, v: string) => { st.set(k, v); } } as unknown as Storage;
+  st.set("fri.layout.v1", JSON.stringify({ visibleSide: "yes" }));
+  assert.equal(loadLayout(storage).visibleSide, false);
+  st.set("fri.layout.v1", JSON.stringify({ visibleSide: true }));
+  assert.equal(loadLayout(storage).visibleSide, true);
+});

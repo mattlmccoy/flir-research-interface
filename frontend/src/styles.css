@@ -160,4 +160,12 @@ ul.help li { line-height: 1.35; }
 .swatches input[type=color] { width: 22px; height: 18px; padding: 0; border: 1px solid var(--line-control); background: none; cursor: pointer; }
 
 /* ---- Visible camera --------------------------------------------------------------- */
+.visible-box { position: relative; }
 .visible-box img, .visible-box video { width: 100%; display: block; background: var(--image-bg); border: 1px solid var(--line); }
+.visible-box .tag { position: absolute; left: 8px; top: 8px; background: var(--scrim); color: var(--accent); padding: 2px 6px; font-family: var(--font-mono); font-size: 11px; }
+.visible-box.big { min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; background: var(--image-bg); overflow: hidden; }
+.visible-box.big img, .visible-box.big video { width: auto; height: auto; max-width: 100%; max-height: 100%; border: none; object-fit: contain; }
+/* centre cell: thermal alone, or thermal | visible side by side */
+.center-split { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; min-height: 0; }
+.center-split.on { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 2px; }
+.center-split > .view { min-height: 0; }

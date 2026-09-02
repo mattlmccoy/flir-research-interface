@@ -15,7 +15,7 @@ import { SetupPage } from "./components/SetupPage.tsx";
 import { RecordPanel } from "./components/RecordPanel.tsx";
 import { RoiRows } from "./components/RoiRows.tsx";
 import { CameraControls } from "./components/CameraControls.tsx";
-import { VisiblePanel } from "./components/VisiblePanel.tsx";
+import { VisibleLive, VisiblePanel } from "./components/VisiblePanel.tsx";
 import { TimePlot, type Trace } from "./components/TimePlot.tsx";
 import { ExperimentsPage } from "./components/ExperimentsPage.tsx";
 import { PlaybackPage } from "./components/PlaybackPage.tsx";
@@ -113,6 +113,7 @@ export function App() {
   const cam = info ?? {};
   const active = cam.active_case as { low_c?: number; high_c?: number } | undefined;
   const isRecording = recording?.state === "recording";
+  const visibleAvailable = recording?.visible?.state !== "unavailable";
   const nearLimit = hdr && active && hdr.max_c != null && active.high_c != null && hdr.max_c > active.high_c - 10;
   const allHidden = !layout.strip && !layout.rail && !layout.dock;
 
@@ -162,8 +163,13 @@ export function App() {
     <StudioFrame layout={layout} topbar={topbar} statusbar={statusbar}
       strip={<ToolStrip tool={layout.tool} onCollapseAll={() => dispatch({ type: "collapseAll" })} zoom={layout.zoom} onZoom={(z) => dispatch({ type: "setZoom", zoom: z })}
         onTool={(t) => dispatch({ type: "setTool", tool: t })} />}
-      center={<ThermalView frame={frame} palette={palette} scaleMode={scaleMode} manual={manual} onScale={setShown}
-        rois={rois.rois} selected={rois.selected} tool={layout.tool} zoom={layout.zoom} onRoi={roiDispatch} onStats={onStats} />}
+      center={
+        <div className={`center-split ${layout.visibleSide && visibleAvailable ? "on" : ""}`}>
+          <ThermalView frame={frame} palette={palette} scaleMode={scaleMode} manual={manual} onScale={setShown}
+            rois={rois.rois} selected={rois.selected} tool={layout.tool} zoom={layout.zoom} onRoi={roiDispatch} onStats={onStats} />
+          {layout.visibleSide && visibleAvailable && <VisibleLive big />}
+        </div>
+      }
       dock={
         <PlotDock onCollapse={() => dispatch({ type: "toggle", panel: "dock" })}
           controls={
@@ -202,7 +208,7 @@ export function App() {
             <DisplayControls palette={palette} setPalette={setPalette} scaleMode={scaleMode} setScaleMode={setScaleMode} manual={manual} setManual={setManual} shown={shown} />
           </RailSection>
           <RailSection title="visible camera" open={layout.sections.visible} onToggle={() => dispatch({ type: "toggleSection", section: "visible" })} tag="preview only">
-            <VisiblePanel mode="live" available={recording?.visible?.state !== "unavailable"} reason={recording?.visible?.reason} />
+            <VisiblePanel mode="live" available={visibleAvailable} reason={recording?.visible?.reason} side={layout.visibleSide} onSide={() => dispatch({ type: "toggleVisibleSide" })} />
           </RailSection>
         </Rail>
       }

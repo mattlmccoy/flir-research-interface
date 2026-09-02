@@ -15,7 +15,7 @@ import { DisplayControls } from "./DisplayControls.tsx";
 import { RoiRows } from "./RoiRows.tsx";
 import { ExportSection } from "./ExportSection.tsx";
 import { MetadataEditor } from "./MetadataEditor.tsx";
-import { VisiblePanel } from "./VisiblePanel.tsx";
+import { VisiblePanel, VisibleVideo } from "./VisiblePanel.tsx";
 import { TimePlot, type Trace } from "./TimePlot.tsx";
 import { StudioFrame } from "./studio/StudioFrame.tsx";
 import { ToolStrip } from "./studio/ToolStrip.tsx";
@@ -125,6 +125,7 @@ export function PlaybackPage(p: Props) {
   const cam = (info?.camera ?? {}) as Record<string, unknown>;
   const active = cam.active_case as { low_c?: number; high_c?: number } | undefined;
   const markers = info && tl ? eventsToMarkers(info.events ?? [], tl, info.started_utc) : [];
+  const hasVideo = !!info?.visible?.file;
   const traces = seriesTraces(series, p.rois);
 
   const transport = (
@@ -148,8 +149,13 @@ export function PlaybackPage(p: Props) {
     <StudioFrame layout={p.layout} topbar={p.topbar}
       strip={<ToolStrip tool={p.layout.tool} onTool={(tool) => p.dispatch({ type: "setTool", tool })} onCollapseAll={() => p.dispatch({ type: "collapseAll" })} zoom={p.layout.zoom} onZoom={(z) => p.dispatch({ type: "setZoom", zoom: z })}
         leading={<button title="Back to experiments" aria-label="Back to experiments" onClick={p.onBack}>←</button>} />}
-      center={<ThermalView frame={frame} palette={p.palette} scaleMode={p.scaleMode} manual={p.manual} onScale={setShown}
-        rois={p.rois.rois} selected={p.rois.selected} tool={p.layout.tool} zoom={p.layout.zoom} onRoi={p.roiDispatch} onStats={onStats} />}
+      center={
+        <div className={`center-split ${p.layout.visibleSide && hasVideo ? "on" : ""}`}>
+          <ThermalView frame={frame} palette={p.palette} scaleMode={p.scaleMode} manual={p.manual} onScale={setShown}
+            rois={p.rois.rois} selected={p.rois.selected} tool={p.layout.tool} zoom={p.layout.zoom} onRoi={p.roiDispatch} onStats={onStats} />
+          {p.layout.visibleSide && hasVideo && <VisibleVideo big name={p.name} t={t} playing={playing} speed={speed} measuredFps={info?.visible?.measured_fps} />}
+        </div>
+      }
       dock={
         <PlotDock title="temperature vs time (whole recording)" onCollapse={() => p.dispatch({ type: "toggle", panel: "dock" })}>
           <TimePlot traces={traces} markers={markers} window={{ t0: 0, t1: Math.max(info?.duration_s ?? 0, 0.001) }} cursorT={t}
@@ -189,7 +195,7 @@ export function PlaybackPage(p: Props) {
             <DisplayControls palette={p.palette} setPalette={p.setPalette} scaleMode={p.scaleMode} setScaleMode={p.setScaleMode} manual={p.manual} setManual={p.setManual} shown={shown} />
           </RailSection>
           <RailSection title="visible camera" open={p.layout.sections.visible} onToggle={() => p.dispatch({ type: "toggleSection", section: "visible" })} tag="recorded video">
-            <VisiblePanel mode="playback" name={p.name} hasVideo={!!info?.visible?.file} t={t} playing={playing} speed={speed} measuredFps={info?.visible?.measured_fps} />
+            <VisiblePanel mode="playback" name={p.name} hasVideo={hasVideo} t={t} playing={playing} speed={speed} measuredFps={info?.visible?.measured_fps} side={p.layout.visibleSide} onSide={() => p.dispatch({ type: "toggleVisibleSide" })} />
           </RailSection>
           <RailSection title="export" open={p.layout.sections.export} onToggle={() => p.dispatch({ type: "toggleSection", section: "export" })} tag="derived files">
             <ExportSection name={p.name} index={index} nFrames={n} rois={p.rois.rois} celsius={hdr?.kelvin_per_count != null} />

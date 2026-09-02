@@ -12,6 +12,8 @@ export interface LayoutState {
   dock: boolean;
   tool: Tool;
   zoom: Zoom;
+  /** Show the visible camera beside the thermal image in the centre cell (live preview / recorded video). */
+  visibleSide: boolean;
   sections: Record<Section, boolean>;
 }
 
@@ -39,6 +41,7 @@ export const DEFAULT_LAYOUT: LayoutState = {
   dock: true,
   tool: "select",
   zoom: "fit",
+  visibleSide: false,
   sections: { measurements: true, camera: true, experiment: true, recording: true, display: true, export: true, visible: true },
 };
 Object.freeze(DEFAULT_LAYOUT.sections);
@@ -50,6 +53,7 @@ export type LayoutAction =
   | { type: "openSection"; section: Section }
   | { type: "setTool"; tool: Tool }
   | { type: "setZoom"; zoom: Zoom }
+  | { type: "toggleVisibleSide" }
   | { type: "collapseAll" }
   | { type: "restoreAll" };
 
@@ -61,6 +65,7 @@ export function layoutReducer(s: LayoutState, a: LayoutAction): LayoutState {
     case "openSection": return { ...s, rail: true, sections: { ...s.sections, [a.section]: true } };
     case "setTool": return { ...s, tool: a.tool };
     case "setZoom": return { ...s, zoom: a.zoom };
+    case "toggleVisibleSide": return { ...s, visibleSide: !s.visibleSide };
     case "collapseAll": return { ...s, strip: false, rail: false, dock: false };
     case "restoreAll": return { ...s, strip: true, rail: true, dock: true };
   }
@@ -93,6 +98,7 @@ export function loadLayout(storage: Storage | null): LayoutState {
       dock: bool(parsed.dock, DEFAULT_LAYOUT.dock),
       tool: isTool(parsed.tool) ? parsed.tool : DEFAULT_LAYOUT.tool,
       zoom: isZoom(parsed.zoom) ? parsed.zoom : DEFAULT_LAYOUT.zoom,
+      visibleSide: bool(parsed.visibleSide, DEFAULT_LAYOUT.visibleSide),
       sections: Object.fromEntries(
         SECTIONS.map((k) => [k, bool(sec[k], DEFAULT_LAYOUT.sections[k])]),
       ) as Record<Section, boolean>,
