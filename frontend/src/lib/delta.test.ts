@@ -12,7 +12,7 @@ test("deltaTrace subtracts B from A sample by sample on A's time axis (nearest B
   assert.equal(d.id, -1, "virtual trace id never collides with an ROI id");
   const bShort = { ...b, t: [0, 2], v: [1, 3] };
   assert.deepEqual(deltaTrace(a, bShort).v, [9, 19, 27, 37], "uses the nearest B sample in time");
-  assert.ok(deltaTrace(a, { ...b, t: [], v: [] }).v.every(Number.isNaN), "no B samples → NaN");
+  assert.ok(Array.from(deltaTrace(a, { ...b, t: [], v: [] }).v).every(Number.isNaN), "no B samples → NaN");
 });
 
 test("markForKey maps r / f to RF marks and ignores everything else and inputs", () => {
