@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 from PIL import Image
 
 from flir_research_interface.analysis.preview import (
@@ -22,12 +23,14 @@ from flir_research_interface.recording.recorder import Recorder
 W, H = 32, 24
 
 
-def _exp(root: Path, n: int = 20, finalize: bool = True) -> Path:
+def _exp(
+    root: Path, n: int = 20, finalize: bool = True, ir_format: str = "TemperatureLinear10mK"
+) -> Path:
     rec = Recorder(None, experiments_root=root, chunk_frames=8)
     d = rec.start(
         name="pv",
         metadata={},
-        camera_info={"backend": "simulated", "ir_format": "TemperatureLinear10mK"},
+        camera_info={"backend": "simulated", "ir_format": ir_format},
     )
     for i in range(n):
         counts = np.full((H, W), 29815, dtype=np.uint16)
@@ -38,7 +41,7 @@ def _exp(root: Path, n: int = 20, finalize: bool = True) -> Path:
                 device_timestamp_ns=i * 33_000_000,
                 host_timestamp_ns=i,
                 pixel_format="Mono16",
-                ir_format="TemperatureLinear10mK",
+                ir_format=ir_format,
                 counts=counts,
                 incomplete=False,
             )
@@ -99,3 +102,71 @@ def test_generate_previews_on_incomplete_experiment(tmp_path: Path) -> None:
     assert (d / "preview.png").is_file()
     assert out["preview"]["frame_index"] == 2
     assert not (d / "manifest.json").exists()  # never fabricate a manifest
+
+
+def test_generate_previews_keyframe_indices_are_not_deduplicated(tmp_path: Path) -> None:
+    d = _exp(tmp_path, n=5)
+    out = generate_previews(d)
+    assert out["keyframes"]["indices"] == [0, 0, 1, 1, 1, 2, 2, 3, 3, 3, 4, 4]
+    assert len(out["keyframes"]["t_s"]) == 12
+
+
+def test_generate_previews_radiometric_fallback_uses_counts_units(tmp_path: Path) -> None:
+    d = _exp(tmp_path, n=10, ir_format="Radiometric")
+    out = generate_previews(d)
+    assert out["units"] == "counts"
+    assert out["keyframes"]["vmax"] >= out["keyframes"]["vmin"]
+
+
+def test_generate_previews_unknown_ir_format_does_not_raise(tmp_path: Path) -> None:
+    d = _exp(tmp_path, n=10, ir_format="Weird")
+    out = generate_previews(d)
+    assert out["units"] == "counts"
+
+
+def test_generate_previews_preserves_existing_manifest_fields(tmp_path: Path) -> None:
+    d = _exp(tmp_path)
+    generate_previews(d)
+    manifest = json.loads((d / "manifest.json").read_text())
+    assert manifest["complete"] is True
+    assert "checksums" in manifest
+    assert "gap_events" in manifest
+
+
+def test_render_preview_hotspot_survives_downscale() -> None:
+    frame = np.full((480, 640), 30.0, dtype=np.float32)
+    frame[241, 321] = 90.0
+    png = render_preview(frame)
+    img = Image.open(io.BytesIO(png))
+    rgb = np.asarray(img.convert("RGB"))
+    assert (rgb == IRON_LUT[255]).all(axis=-1).any()
+
+
+def test_render_preview_degenerate_span_is_mid_gray() -> None:
+    celsius = np.full((H, W), 25.0, dtype=np.float32)
+    png = render_preview(celsius)
+    img = Image.open(io.BytesIO(png))
+    rgb = np.asarray(img.convert("RGB"))
+    assert (rgb == IRON_LUT[128]).all()
+
+
+@pytest.mark.skip(
+    reason=(
+        "Cannot reach generate_previews's own n==0 guard through the public Recorder path: "
+        "Recorder.stop() succeeds with frames_written=0, but the 'counts' array is only "
+        "created lazily on the first submitted frame, so ExperimentReader(exp_dir) itself "
+        "raises KeyError('counts') before generate_previews can run its ValueError check. "
+        "This is a pre-existing gap in Recorder/ExperimentReader for zero-frame recordings, "
+        "out of scope for this preview-rendering fix."
+    )
+)
+def test_generate_previews_on_zero_frame_experiment_raises(tmp_path: Path) -> None:
+    rec = Recorder(None, experiments_root=tmp_path, chunk_frames=8)
+    d = rec.start(
+        name="empty",
+        metadata={},
+        camera_info={"backend": "simulated", "ir_format": "TemperatureLinear10mK"},
+    )
+    rec.stop()
+    with pytest.raises(ValueError, match="no frames"):
+        generate_previews(d)

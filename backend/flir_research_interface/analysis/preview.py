@@ -13,6 +13,9 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
+import warnings
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +29,8 @@ from flir_research_interface.radiometry.temperature_linear import IRFormat, coun
 PREVIEW_SIZE = (320, 240)
 KEYFRAME_TILE = (160, 120)
 KEYFRAME_COUNT = 12
+
+_TEMPERATURE_LINEAR_FORMATS = {IRFormat.TEMPERATURE_LINEAR_10MK, IRFormat.TEMPERATURE_LINEAR_100MK}
 
 # Same stops as frontend/src/lib/palette.ts (iron-like; not FLIR's LUT).
 _IRON_STOPS = [
@@ -53,12 +58,50 @@ IRON_LUT: npt.NDArray[np.uint8] = _build_lut()
 
 
 def _colorize(celsius: npt.NDArray[np.float32], vmin: float, vmax: float) -> npt.NDArray[np.uint8]:
+    """Map a float array to RGB via ``IRON_LUT``. NaN is treated as ``vmin``; callers need not
+    pre-clean their input. A degenerate (zero or negative) span renders as mid-gray (LUT index
+    128) rather than the LUT's black endpoint, so a flat scene is distinguishable from a failed
+    render.
+    """
+    celsius = np.nan_to_num(celsius, nan=vmin)
     span = vmax - vmin
     if span <= 0:
-        idx = np.zeros(celsius.shape, dtype=np.uint8)
+        idx = np.full(celsius.shape, 128, dtype=np.uint8)
     else:
         idx = np.clip(np.rint((celsius - vmin) * (255.0 / span)), 0, 255).astype(np.uint8)
     return IRON_LUT[idx]
+
+
+def _downsample_max(
+    celsius: npt.NDArray[np.float32], size: tuple[int, int]
+) -> npt.NDArray[np.float32]:
+    """Resize to ``size`` (PIL width, height convention), preserving hotspots.
+
+    Shrinking uses block max-pooling (NaN-padded to a multiple of the block size, then
+    ``nanmax`` per block) so a single hot pixel survives instead of being discarded or
+    blurred by ordinary resampling; the pooled result is then resized to exactly ``size``
+    with nearest-neighbour. Growing (or an exact match) uses nearest-neighbour directly.
+    """
+    h, w = celsius.shape
+    tw, th = size
+    if h <= th and w <= tw:
+        img = Image.fromarray(celsius, mode="F").resize(size, Image.Resampling.NEAREST)
+        return np.asarray(img, dtype=np.float32)
+
+    bh = -(-h // th)  # ceil division: source rows per pooled row
+    bw = -(-w // tw)  # ceil division: source cols per pooled col
+    ph = ((h + bh - 1) // bh) * bh
+    pw = ((w + bw - 1) // bw) * bw
+    padded = np.full((ph, pw), np.nan, dtype=np.float32)
+    padded[:h, :w] = celsius
+    blocks = padded.reshape(ph // bh, bh, pw // bw, bw)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)  # all-NaN block, if any
+        reduced = np.nanmax(blocks, axis=(1, 3))
+    img = Image.fromarray(reduced.astype(np.float32), mode="F").resize(
+        size, Image.Resampling.NEAREST
+    )
+    return np.asarray(img, dtype=np.float32)
 
 
 def _png(rgb: npt.NDArray[np.uint8], size: tuple[int, int] | None) -> bytes:
@@ -73,32 +116,44 @@ def _png(rgb: npt.NDArray[np.uint8], size: tuple[int, int] | None) -> bytes:
 def render_preview(
     celsius: npt.NDArray[np.float32], *, size: tuple[int, int] = PREVIEW_SIZE
 ) -> bytes:
-    """PNG of one frame, auto-scaled to its own finite min/max."""
+    """PNG of one frame, auto-scaled to its own finite min/max. Downsampled by max-pooling
+    (see :func:`_downsample_max`) so a small hotspot is not lost when shrinking.
+    """
     finite = celsius[np.isfinite(celsius)]
     vmin, vmax = (float(finite.min()), float(finite.max())) if finite.size else (0.0, 1.0)
-    return _png(_colorize(np.nan_to_num(celsius, nan=vmin), vmin, vmax), size)
+    downsampled = _downsample_max(celsius, size)
+    return _png(_colorize(downsampled, vmin, vmax), size)
 
 
 def render_keyframes(
-    frames: list[npt.NDArray[np.float32]],
+    frames: Sequence[npt.NDArray[np.float32]],
     *,
     tile: tuple[int, int] = KEYFRAME_TILE,
     vmin: float,
     vmax: float,
 ) -> bytes:
-    """Horizontal strip of frames on a shared scale."""
-    tiles = []
-    for f in frames:
-        rgb = _colorize(np.nan_to_num(f, nan=vmin), vmin, vmax)
-        tiles.append(
-            np.asarray(Image.fromarray(rgb, mode="RGB").resize(tile, Image.Resampling.NEAREST))
-        )
+    """Horizontal strip of frames on a shared scale.
+
+    ``vmin``/``vmax`` are expected to be computed from the full-resolution frames (as
+    :func:`generate_previews` does); that is always a safe bound here because max-pooling
+    a frame down to ``tile`` never produces a value outside that frame's own range.
+    """
+    tiles = [_colorize(_downsample_max(f, tile), vmin, vmax) for f in frames]
     strip = np.concatenate(tiles, axis=1)
     return _png(strip, None)
 
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _atomic_write(path: Path, data: bytes) -> None:
+    """Write ``data`` to a ``.tmp`` sibling then ``os.replace`` it into place, so a reader
+    (or a crash mid-write) never observes a partially written file.
+    """
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
 
 
 def generate_previews(exp_dir: Path) -> dict[str, Any]:
@@ -110,7 +165,11 @@ def generate_previews(exp_dir: Path) -> dict[str, Any]:
     n = r.n_frames
     if n == 0:
         raise ValueError("experiment has no frames")
-    fmt = IRFormat(r.ir_format) if r.ir_format else None
+    try:
+        fmt = IRFormat(r.ir_format) if r.ir_format else None
+    except ValueError:
+        fmt = None  # unknown/unsupported IRFormat string: fall back to raw-counts rendering
+    units = "celsius" if fmt in _TEMPERATURE_LINEAR_FORMATS else "counts"
 
     def celsius(i: int) -> npt.NDArray[np.float32]:
         counts = r.frame(i).counts
@@ -120,24 +179,25 @@ def generate_previews(exp_dir: Path) -> dict[str, Any]:
 
     mid = n // 2
     preview_png = render_preview(celsius(mid))
-    indices = sorted(
-        {int(round(k * (n - 1) / (KEYFRAME_COUNT - 1))) for k in range(KEYFRAME_COUNT)}
-    )
-    while len(indices) < KEYFRAME_COUNT:  # short runs: repeat last index
-        indices.append(indices[-1])
+    indices = [int(round(k * (n - 1) / (KEYFRAME_COUNT - 1))) for k in range(KEYFRAME_COUNT)]
     frames = [celsius(i) for i in indices]
-    vmin = float(min(np.nanmin(f) for f in frames))
-    vmax = float(max(np.nanmax(f) for f in frames))
+    stacked = np.stack(frames)
+    if not np.isfinite(stacked).any():
+        raise ValueError("no finite pixels")
+    vmin = float(np.nanmin(stacked))
+    vmax = float(np.nanmax(stacked))
     keyframes_png = render_keyframes(frames, vmin=vmin, vmax=vmax)
 
-    (exp_dir / "preview.png").write_bytes(preview_png)
-    (exp_dir / "keyframes.png").write_bytes(keyframes_png)
+    _atomic_write(exp_dir / "preview.png", preview_png)
+    _atomic_write(exp_dir / "keyframes.png", keyframes_png)
     out: dict[str, Any] = {
+        "units": units,
         "preview": {
             "file": "preview.png",
             "frame_index": mid,
             "t_s": r.t_s(mid),
             "size": list(PREVIEW_SIZE),
+            "units": units,
             "sha256": _sha256(preview_png),
         },
         "keyframes": {
@@ -146,8 +206,9 @@ def generate_previews(exp_dir: Path) -> dict[str, Any]:
             "indices": indices,
             "t_s": [r.t_s(i) for i in indices],
             "tile": list(KEYFRAME_TILE),
-            "vmin_c": vmin,
-            "vmax_c": vmax,
+            "units": units,
+            "vmin": vmin,
+            "vmax": vmax,
             "sha256": _sha256(keyframes_png),
         },
     }
@@ -155,8 +216,16 @@ def generate_previews(exp_dir: Path) -> dict[str, Any]:
     if man_path.is_file():
         man = json.loads(man_path.read_text())
         man["previews"] = out
-        man_path.write_text(json.dumps(man, indent=2))
+        _atomic_write(man_path, json.dumps(man, indent=2).encode())
     return out
 
 
-__all__ = ["IRON_LUT", "KEYFRAME_COUNT", "generate_previews", "render_keyframes", "render_preview"]
+__all__ = [
+    "IRON_LUT",
+    "KEYFRAME_COUNT",
+    "KEYFRAME_TILE",
+    "PREVIEW_SIZE",
+    "generate_previews",
+    "render_keyframes",
+    "render_preview",
+]
