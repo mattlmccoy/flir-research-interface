@@ -9,6 +9,7 @@ from pathlib import Path
 import uvicorn
 
 from flir_research_interface.api.app import create_app
+from flir_research_interface.visible.preview import default_preview_factory
 from flir_research_interface.visible.recorder import default_visible_factory
 
 
@@ -44,6 +45,7 @@ def main(argv: list[str] | None = None) -> int:
         viz_fps=args.viz_fps,
         visible_factory=default_visible_factory(dotenv),
         site_origin=args.site_origin or None,
+        preview_factory=default_preview_factory(dotenv),
     )
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     return 0

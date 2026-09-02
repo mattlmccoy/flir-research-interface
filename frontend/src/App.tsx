@@ -15,6 +15,7 @@ import { SetupPage } from "./components/SetupPage.tsx";
 import { RecordPanel } from "./components/RecordPanel.tsx";
 import { RoiRows } from "./components/RoiRows.tsx";
 import { CameraControls } from "./components/CameraControls.tsx";
+import { VisiblePanel } from "./components/VisiblePanel.tsx";
 import { TimePlot, type Trace } from "./components/TimePlot.tsx";
 import { ExperimentsPage } from "./components/ExperimentsPage.tsx";
 import { PlaybackPage } from "./components/PlaybackPage.tsx";
@@ -199,6 +200,9 @@ export function App() {
           </RailSection>
           <RailSection title="display" open={layout.sections.display} onToggle={() => dispatch({ type: "toggleSection", section: "display" })} tag="visualization only">
             <DisplayControls palette={palette} setPalette={setPalette} scaleMode={scaleMode} setScaleMode={setScaleMode} manual={manual} setManual={setManual} shown={shown} />
+          </RailSection>
+          <RailSection title="visible camera" open={layout.sections.visible} onToggle={() => dispatch({ type: "toggleSection", section: "visible" })} tag="preview only">
+            <VisiblePanel mode="live" available={recording?.visible?.state !== "unavailable"} reason={recording?.visible?.reason} />
           </RailSection>
         </Rail>
       }

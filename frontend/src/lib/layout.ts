@@ -1,6 +1,6 @@
 /** Studio layout state (spec §3): which panels are open, which rail sections, which tool. */
 export const TOOLS = ["select", "spot", "rect", "circle", "line", "polygon"] as const;
-export const SECTIONS = ["measurements", "camera", "experiment", "recording", "display", "export"] as const;
+export const SECTIONS = ["measurements", "camera", "experiment", "recording", "display", "export", "visible"] as const;
 export type Tool = (typeof TOOLS)[number];
 export type Panel = "strip" | "rail" | "dock";
 export type Section = (typeof SECTIONS)[number];
@@ -36,7 +36,7 @@ export const DEFAULT_LAYOUT: LayoutState = {
   rail: true,
   dock: true,
   tool: "select",
-  sections: { measurements: true, camera: true, experiment: true, recording: true, display: true, export: true },
+  sections: { measurements: true, camera: true, experiment: true, recording: true, display: true, export: true, visible: true },
 };
 Object.freeze(DEFAULT_LAYOUT.sections);
 Object.freeze(DEFAULT_LAYOUT);

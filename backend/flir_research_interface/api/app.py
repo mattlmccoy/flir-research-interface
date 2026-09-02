@@ -149,6 +149,7 @@ def create_app(
     reveal_runner: Runner | None = None,
     visible_factory: Callable[[], Any] | None = None,
     site_origin: str | None = None,
+    preview_factory: Callable[[], Any] | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
@@ -402,6 +403,22 @@ def create_app(
             rec.note_event("nuc", {"source": "operator"})
         return {"ok": True}
 
+    @app.get("/api/visible/live.mjpeg")
+    def visible_live() -> Response:
+        """Low-rate MJPEG of the visible camera; one ffmpeg per viewer, killed on disconnect."""
+        from starlette.responses import StreamingResponse
+
+        if preview_factory is None:
+            raise HTTPException(
+                503, "visible preview unavailable: ffmpeg or RTSP credentials not configured"
+            )
+        relay = preview_factory()
+        return StreamingResponse(
+            relay.stream(),
+            media_type=relay.content_type,
+            headers={"Cache-Control": "no-store"},
+        )
+
     # -- recording -------------------------------------------------------------------------
 
     @app.post("/api/recording/start")
@@ -629,6 +646,15 @@ def create_app(
             media_type="image/png",
             headers={"Cache-Control": "no-cache", "ETag": etag},
         )
+
+    @app.get("/api/experiments/{name}/visible.mp4")
+    def experiment_visible_video(name: str) -> Response:
+        from starlette.responses import FileResponse
+
+        path = _exp_dir(name) / "visible.mp4"
+        if not path.is_file():
+            raise HTTPException(404, "this recording has no visible video")
+        return FileResponse(path, media_type="video/mp4", headers={"Accept-Ranges": "bytes"})
 
     @app.get("/api/experiments/{name}/preview.png")
     def experiment_preview(name: str, request: Request) -> Response:

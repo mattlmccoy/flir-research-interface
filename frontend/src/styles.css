@@ -156,3 +156,6 @@ ul.help li { line-height: 1.35; }
 .swatches button { width: 16px; height: 16px; border-radius: 3px; border: 1px solid var(--line-control); padding: 0; cursor: pointer; }
 .swatches button.on { outline: 2px solid var(--fg-strong); outline-offset: 1px; }
 .swatches input[type=color] { width: 22px; height: 18px; padding: 0; border: 1px solid var(--line-control); background: none; cursor: pointer; }
+
+/* ---- Visible camera --------------------------------------------------------------- */
+.visible-box img, .visible-box video { width: 100%; display: block; background: var(--image-bg); border: 1px solid var(--line); }
