@@ -24,6 +24,7 @@ from pydantic import BaseModel
 from flir_research_interface import __version__
 from flir_research_interface.acquisition.service import AcquisitionService, ServiceState
 from flir_research_interface.api.frames import encode_frame_message
+from flir_research_interface.api.reveal import Runner, contained, reveal
 from flir_research_interface.camera import CAMERA_BACKENDS, create_backend
 from flir_research_interface.camera.base import CameraBackend, CameraError, DeviceDescriptor
 from flir_research_interface.camera.simulated import HotspotRampScene
@@ -72,6 +73,7 @@ def create_app(
     viz_fps: float = 15.0,
     experiments_root: Path | None = None,
     min_free_gb: float = 2.0,
+    reveal_runner: Runner | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
@@ -90,6 +92,7 @@ def create_app(
     app.state.viz_fps = viz_fps
     app.state.experiments_root = Path(experiments_root) if experiments_root else Path("experiments")
     app.state.min_free_gb = min_free_gb
+    app.state.reveal_runner = reveal_runner
 
     def service() -> AcquisitionService | None:
         return app.state.service  # type: ignore[no-any-return]
@@ -304,6 +307,28 @@ def create_app(
             return ExperimentReader(d)
         except (FileNotFoundError, KeyError, ValueError) as exc:
             raise HTTPException(404, f"experiment {name!r} is not readable: {exc}") from exc
+
+    def _reveal(path: Path) -> dict[str, Any]:
+        root: Path = app.state.experiments_root
+        if not contained(root, path):
+            raise HTTPException(400, "path is outside the experiments root")
+        kwargs: dict[str, Any] = {}
+        if app.state.reveal_runner is not None:
+            kwargs["runner"] = app.state.reveal_runner
+        res = reveal(path, **kwargs)
+        if not res["ok"] and "no file manager" in res.get("error", ""):
+            raise HTTPException(501, res["error"])
+        return res
+
+    @app.post("/api/experiments/reveal-root")
+    def reveal_root() -> dict[str, Any]:
+        root: Path = app.state.experiments_root
+        root.mkdir(parents=True, exist_ok=True)
+        return _reveal(root)
+
+    @app.post("/api/experiments/{name}/reveal")
+    def reveal_experiment(name: str) -> dict[str, Any]:
+        return _reveal(_exp_dir(name))
 
     @app.get("/api/experiments/{name}")
     def experiment_info(name: str) -> dict[str, Any]:
