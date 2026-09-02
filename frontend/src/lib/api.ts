@@ -80,6 +80,9 @@ export const api = {
   devices: (backend: string) => j<Device[]>(fetch(`/api/camera/devices?backend=${encodeURIComponent(backend)}`)),
   status: () => j<Status>(fetch("/api/camera/status")),
   info: () => j<Record<string, unknown>>(fetch("/api/camera/info")),
+  setParameters: (values: Record<string, unknown>) =>
+    j<{ applied: Record<string, unknown> }>(fetch("/api/camera/parameters", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ values }) })),
+  nuc: () => j<{ ok: boolean }>(fetch("/api/camera/nuc", { method: "POST" })),
   connect: (backend: string, serial?: string) =>
     j<{ state: string }>(fetch("/api/camera/connect", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ backend, serial }) })),
   disconnect: () => j<{ state: string }>(fetch("/api/camera/disconnect", { method: "POST" })),

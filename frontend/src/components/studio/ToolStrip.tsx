@@ -8,8 +8,8 @@ const TOOL_META: Record<Tool, { glyph: string; title: string; enabled: boolean }
   rect: { glyph: "▭", title: "Rectangle ROI: drag to draw", enabled: true },
   line: { glyph: "╱", title: "Line profile (later)", enabled: false },
   display: { glyph: "▤", title: "Palette & range", enabled: true },
-  camera: { glyph: "⚙", title: "Camera controls (Milestone 6)", enabled: false },
-  nuc: { glyph: "N", title: "NUC (Milestone 6)", enabled: false },
+  camera: { glyph: "⚙", title: "Camera controls (opens the camera section)", enabled: true },
+  nuc: { glyph: "N", title: "NUC (opens the camera section)", enabled: true },
 };
 
 interface Props {

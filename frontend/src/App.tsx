@@ -7,12 +7,13 @@ import { DEFAULT_LAYOUT, layoutReducer, loadLayout, saveLayout } from "./lib/lay
 import { EMPTY_ROIS, loadRois, roiLabel, roiReducer, saveRois } from "./lib/roi.ts";
 import { TraceBuffer, WINDOWS, visibleWindow, windowLabel } from "./lib/plot.ts";
 import { traceColor } from "./lib/overlay.ts";
-import { fmtAny, fmtCelsius, kelvinToCelsiusLabel } from "./lib/format.ts";
+import { fmtCelsius } from "./lib/format.ts";
 import { ThermalView, type StatsMap } from "./components/ThermalView.tsx";
 import { DisplayControls } from "./components/DisplayControls.tsx";
 import { SetupPage } from "./components/SetupPage.tsx";
 import { RecordPanel } from "./components/RecordPanel.tsx";
 import { RoiRows } from "./components/RoiRows.tsx";
+import { CameraControls } from "./components/CameraControls.tsx";
 import { TimePlot, type Trace } from "./components/TimePlot.tsx";
 import { ExperimentsPage } from "./components/ExperimentsPage.tsx";
 import { PlaybackPage } from "./components/PlaybackPage.tsx";
@@ -67,6 +68,7 @@ export function App() {
     setLiveStats(m);
   }, []);
 
+  const refreshInfo = useCallback(() => { api.info().then(setInfo).catch(() => undefined); }, []);
   const refresh = useCallback(async () => {
     try { setStatus(await api.status()); } catch { setStatus({ state: "unreachable" }); }
     try { setRecording(await api.recordingStatus()); } catch { /* keep last */ }
@@ -89,9 +91,9 @@ export function App() {
         if (dt >= 1000) { setWsFps((c.n * 1000) / dt); c.n = 0; c.t = performance.now(); }
       } catch (e) { console.error(e); }
     };
-    api.info().then(setInfo).catch(() => undefined);
+    refreshInfo();
     return () => { alive = false; ws.close(); };
-  }, [status.state]);
+  }, [status.state, refreshInfo]);
 
   const stale = status.state === "acquiring" && lastFrameAt > 0 && performance.now() - lastFrameAt > 2000;
   const dot = status.state === "acquiring" && !stale ? "live" : status.state === "error" ? "err"
@@ -109,7 +111,7 @@ export function App() {
   const hdr = frame?.header;
   const cam = info ?? {};
   const active = cam.active_case as { low_c?: number; high_c?: number } | undefined;
-  const obj = cam.object_parameters as Record<string, unknown> | undefined;
+  const isRecording = recording?.state === "recording";
   const nearLimit = hdr && active && hdr.max_c != null && active.high_c != null && hdr.max_c > active.high_c - 10;
   const allHidden = !layout.strip && !layout.rail && !layout.dock;
 
@@ -157,7 +159,8 @@ export function App() {
 
   return (
     <StudioFrame layout={layout} topbar={topbar} statusbar={statusbar}
-      strip={<ToolStrip tool={layout.tool} onTool={(t) => dispatch({ type: "setTool", tool: t })} onCollapseAll={() => dispatch({ type: "collapseAll" })} />}
+      strip={<ToolStrip tool={layout.tool} onCollapseAll={() => dispatch({ type: "collapseAll" })}
+        onTool={(t) => { if (t === "camera" || t === "nuc") dispatch({ type: "openSection", section: "camera" }); else dispatch({ type: "setTool", tool: t }); }} />}
       center={<ThermalView frame={frame} palette={palette} scaleMode={scaleMode} manual={manual} onScale={setShown}
         rois={rois.rois} selected={rois.selected} tool={layout.tool} onRoi={roiDispatch} onStats={onStats} />}
       dock={
@@ -188,15 +191,8 @@ export function App() {
             <RoiRows rois={rois.rois} stats={liveStats} selected={rois.selected}
               onSelect={(id) => roiDispatch({ type: "select", id })} onRemove={(id) => roiDispatch({ type: "remove", id })} onClear={() => roiDispatch({ type: "clear" })} />
           </RailSection>
-          <RailSection title="camera" open={layout.sections.camera} onToggle={() => dispatch({ type: "toggleSection", section: "camera" })} tag="read-only until M6">
-            <div className="kv">
-              <span>case</span><span className="v">{active ? `${active.low_c?.toFixed(0)}…${active.high_c?.toFixed(0)} °C` : "—"}</span>
-              <span>emissivity</span><span className="v">{fmtAny(obj?.ObjectEmissivity)}</span>
-              <span>T reflected</span><span className="v">{kelvinToCelsiusLabel(obj?.ReflectedTemperature)}</span>
-              <span>distance</span><span className="v">{obj?.ObjectDistance == null ? "—" : `${fmtAny(obj.ObjectDistance)} m`}</span>
-              <span>NUC</span><span className="v plain">{fmtAny(cam.nuc_mode)}</span>
-              <span>lens</span><span className="v plain">{fmtAny(cam.lens)}</span>
-            </div>
+          <RailSection title="camera" open={layout.sections.camera} onToggle={() => dispatch({ type: "toggleSection", section: "camera" })} tag={isRecording ? "locked during recording" : "writes camera nodes"}>
+            <CameraControls info={info} locked={isRecording} onApplied={refreshInfo} />
           </RailSection>
           <RailSection title="recording" open={layout.sections.recording} onToggle={() => dispatch({ type: "toggleSection", section: "recording" })}>
             <RecordPanel acquiring={status.state === "acquiring"} />

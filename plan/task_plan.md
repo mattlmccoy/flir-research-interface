@@ -72,5 +72,5 @@ from events.json as markers. Camera-controls rail section follows as its own ste
 - [x] 5 TimePlot component in PlotDock (traces, events, cursor, window select)
 - [x] 6 Wire live (App): rois state, per-frame stats, measurements rows, live traces
 - [x] 7 Wire playback: per-frame stats, series fetch, cursor, events
-- [ ] 8 Gate (frontend tests, backend tests, ruff, mypy, browser check), commit
-- [ ] 9 Camera controls section (case, object params, NUC, frame rate) with recording lock
+- [x] 8 Gate (frontend tests, backend tests, ruff, mypy, browser check), commit
+- [x] 9 Camera controls section (case, object params, NUC, frame rate) with recording lock

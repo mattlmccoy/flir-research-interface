@@ -44,6 +44,7 @@ Object.freeze(DEFAULT_LAYOUT);
 export type LayoutAction =
   | { type: "toggle"; panel: Panel }
   | { type: "toggleSection"; section: Section }
+  | { type: "openSection"; section: Section }
   | { type: "setTool"; tool: Tool }
   | { type: "collapseAll" }
   | { type: "restoreAll" };
@@ -53,6 +54,7 @@ export function layoutReducer(s: LayoutState, a: LayoutAction): LayoutState {
   switch (a.type) {
     case "toggle": return { ...s, [a.panel]: !s[a.panel] };
     case "toggleSection": return { ...s, sections: { ...s.sections, [a.section]: !s.sections[a.section] } };
+    case "openSection": return { ...s, rail: true, sections: { ...s.sections, [a.section]: true } };
     case "setTool": return { ...s, tool: a.tool };
     case "collapseAll": return { ...s, strip: false, rail: false, dock: false };
     case "restoreAll": return { ...s, strip: true, rail: true, dock: true };

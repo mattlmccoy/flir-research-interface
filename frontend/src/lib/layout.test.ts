@@ -97,3 +97,12 @@ test("studioClasses: strip content present but layout.strip closed reports no-st
   assert.match(r.className, /\bno-strip\b/);
   assert.equal(r.showStrip, false);
 });
+
+test("openSection opens a closed section and shows the rail; it never closes anything", () => {
+  const closed = { ...DEFAULT_LAYOUT, rail: false, sections: { ...DEFAULT_LAYOUT.sections, camera: false } };
+  const s = layoutReducer(closed, { type: "openSection", section: "camera" });
+  assert.equal(s.rail, true);
+  assert.equal(s.sections.camera, true);
+  const again = layoutReducer(s, { type: "openSection", section: "camera" });
+  assert.equal(again.sections.camera, true);
+});
