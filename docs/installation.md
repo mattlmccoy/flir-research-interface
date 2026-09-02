@@ -1,6 +1,35 @@
 # Installation
 
-## 0. Quick start (macOS, Apple Silicon) — one command
+## 0. Quick start — one command per platform
+
+The first-run page of the website shows the right command for the machine you are on:
+
+| Platform | Command |
+|---|---|
+| macOS (Apple Silicon) | `curl -fsSL https://raw.githubusercontent.com/mattlmccoy/flir-research-interface/main/install.sh \| bash` |
+| Windows 10/11 x64 | PowerShell: `irm https://raw.githubusercontent.com/mattlmccoy/flir-research-interface/main/install.ps1 \| iex` |
+| Ubuntu 20.04/22.04/24.04 | `curl -fsSL https://raw.githubusercontent.com/mattlmccoy/flir-research-interface/main/install.sh \| bash` |
+
+Each script installs the tools, clones or updates the repo, installs the Spinnaker SDK and PySpin
+from the project's **internal SDK mirror** (GitHub release `sdk-4.4.0.246`; the SDK itself is
+Teledyne FLIR's and its official page is <https://www.teledynevisionsolutions.com/products/spinnaker-sdk/>),
+asks for the camera credentials, and installs a background service (launchd / Task Scheduler /
+systemd --user). Set `FRI_SDK_BASE_URL` to use a different mirror.
+
+Publishing the mirror (owner only, from a machine that has the artifacts):
+
+```bash
+gh release create sdk-4.4.0.246 --prerelease --title "Spinnaker SDK 4.4.0.246 (internal mirror)" --notes "Internal mirror; SDK is Teledyne FLIR's."
+gh release upload sdk-4.4.0.246 vendor/spinnaker/*  SpinnakerSDK_FULL_4.4.0.246_arm64.dmg spinnaker_python-4.4.0.246-cp312-cp312-win_amd64.zip
+```
+
+Files the scripts look for: `SpinnakerSDK_FULL_4.4.0.246_arm64.dmg` (macOS; override the name
+with `FRI_MAC_DMG`), `spinnaker_python-4.4.0.246-cp312-cp312-macosx_14_0_arm64.tar.gz`,
+`SpinnakerSDK_FULL_4.4.0.246_x64.exe` + `spinnaker_python-4.4.0.246-cp312-cp312-win_amd64.zip`
+(Windows), `spinnaker-4.4.0.246-{focal,jammy,noble}-{amd64,arm64}-pkg.tar.gz` +
+`spinnaker_python-4.4.0.246-cp312-cp312-linux_{x86_64,aarch64}.tar.gz` (Linux).
+
+### macOS details
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mattlmccoy/flir-research-interface/main/install.sh | bash

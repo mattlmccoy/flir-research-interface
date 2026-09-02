@@ -30,28 +30,42 @@ export function installerFor(p: Platform): Installer {
 
 
 export const INSTALL_SH = "https://raw.githubusercontent.com/mattlmccoy/flir-research-interface/main/install.sh";
-export interface InstallSteps { command: string | null; steps: string[]; }
+export const INSTALL_PS1 = "https://raw.githubusercontent.com/mattlmccoy/flir-research-interface/main/install.ps1";
+export const TELEDYNE_SDK = "https://www.teledynevisionsolutions.com/products/spinnaker-sdk/";
+export interface InstallSteps { command: string | null; shell: string; steps: string[]; }
 
-/** What the first-run page shows: a one-line installer on macOS, the manual route elsewhere. */
+/** What the first-run page shows: a one-line installer per platform. */
 export function installSteps(platform: Platform): InstallSteps {
-  if (platform === "macos") {
+  const tail = [
+    "The FLIR Spinnaker SDK is fetched from this project's internal mirror; if that fails the script says so, you get it from Teledyne's page (link below) and re-run the same command.",
+    "Leave this page open: it detects the operator by itself and continues.",
+  ];
+  if (platform === "windows") {
+    return {
+      command: `irm ${INSTALL_PS1} | iex`,
+      shell: "PowerShell (Start → type PowerShell)",
+      steps: [
+        "Paste the command into PowerShell and press Enter. It installs git, Python 3.12, uv and ffmpeg with winget, downloads this project into your home folder, installs the Spinnaker SDK silently, asks for the camera IP and RTSP password, and registers a logon task that runs the operator.",
+        ...tail,
+      ],
+    };
+  }
+  if (platform === "linux") {
     return {
       command: `curl -fsSL ${INSTALL_SH} | bash`,
+      shell: "a terminal (Ubuntu 20.04 / 22.04 / 24.04, amd64 or arm64)",
       steps: [
-        "Open Terminal (⌘-space, type Terminal), paste the command, press Return.",
-        "It installs the tools with Homebrew, downloads this project into ~/flir-research-interface, asks for the camera IP and RTSP password, and starts the operator as a login item.",
-        "The one thing it cannot fetch for you is FLIR's Spinnaker SDK (behind a free Teledyne login). If it is missing the script prints the exact download; install the .pkg and run the command again.",
-        "Leave this page open: it detects the operator by itself and continues.",
+        "Paste the command and press Enter. It installs git, ffmpeg and uv, downloads this project into your home folder, installs the Spinnaker packages and PySpin, asks for the camera IP and RTSP password, and enables a systemd user service that runs the operator.",
+        ...tail,
       ],
     };
   }
   return {
-    command: null,
+    command: `curl -fsSL ${INSTALL_SH} | bash`,
+    shell: "Terminal (⌘-space, type Terminal)",
     steps: [
-      "Install Python 3.12, uv, ffmpeg 6 and FLIR's Spinnaker SDK + PySpin (see docs/installation.md).",
-      "git clone https://github.com/mattlmccoy/flir-research-interface && cd flir-research-interface/backend && uv sync --inexact",
-      "Put FRI_CAMERA_HOST, FRI_RTSP_USER, FRI_RTSP_PASSWORD in backend/.env, then: uv run fri-serve --port 8000",
-      "Leave this page open: it detects the operator by itself and continues.",
+      "Paste the command and press Return. It installs the tools with Homebrew, downloads this project into ~/flir-research-interface, installs the Spinnaker SDK (asks for your Mac password once), asks for the camera IP and RTSP password, and starts the operator as a login item.",
+      ...tail,
     ],
   };
 }

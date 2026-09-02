@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { SITE_MODE, api, operatorBase, setOperatorBase, type Health } from "../lib/api.ts";
 import { UI_API_VERSION, checkHandshake, type Handshake } from "../lib/operator.ts";
-import { detectPlatform, installSteps, type Platform } from "../lib/platform.ts";
+import { TELEDYNE_SDK, detectPlatform, installSteps, type Platform } from "../lib/platform.ts";
 
 const DOCS = "https://github.com/mattlmccoy/flir-research-interface/blob/main/docs/installation.md";
 const POLL_MS = 2000;
@@ -66,19 +66,14 @@ export function OperatorGate({ children }: { children: ReactNode }) {
           This website is the whole user interface. It talks to a small <b>operator</b> service on the computer the camera is plugged into.
           {!health && <> None is answering at <code>{base}</code>{tries > 0 ? ` (checked ${tries}×)` : ""}; this page keeps checking every 2 s and continues by itself.</>}
         </div>
-        {inst.command ? (
-          <>
-            <div className="hint" style={{ marginTop: 10 }}><b>One command installs everything on this Mac:</b></div>
-            <CommandBox command={inst.command} />
-          </>
-        ) : (
-          <div className="hint" style={{ marginTop: 10 }}><b>{platform === "windows" ? "Windows" : "Linux"}: manual install for now</b> (the one-line installer is macOS only).</div>
-        )}
+        <div className="hint" style={{ marginTop: 10 }}><b>One command installs everything on this {platform === "windows" ? "PC" : platform === "linux" ? "machine" : "Mac"}</b> — paste it into {inst.shell}:</div>
+        {inst.command && <CommandBox command={inst.command} />}
         <ol className="help" style={{ marginTop: 8 }}>
           {inst.steps.map((st, i) => <li key={i}>{st}</li>)}
         </ol>
         <div className="row" style={{ marginTop: 6 }}>
           <a className="dl" href={DOCS} target="_blank" rel="noreferrer">full installation guide</a>
+          <a className="dl" href={TELEDYNE_SDK} target="_blank" rel="noreferrer">Spinnaker SDK download page (Teledyne, free account)</a>
           <a className="dl" href={base} target="_blank" rel="noreferrer">already installed? open the local copy</a>
         </div>
       </div>

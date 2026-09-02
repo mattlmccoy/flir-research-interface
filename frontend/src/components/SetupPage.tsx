@@ -98,13 +98,13 @@ export function SetupPage({ onConnected }: { onConnected: () => void }) {
         {disc?.spinnaker_error != null && <div className="errbox">Spinnaker: {String(disc.spinnaker_error)}</div>}
       </div>
 
-      <div className="card">
-        <h2>3. No hardware? Use the simulated camera</h2>
-        <div className="row">
+      <details className="card" style={{ opacity: 0.8 }}>
+        <summary className="hint" style={{ cursor: "pointer" }}>Developer: simulated camera (no hardware)</summary>
+        <div className="row" style={{ marginTop: 8 }}>
           <button className="secondary" disabled={busy !== null} onClick={() => connect("simulated")}>Connect simulated A70</button>
-          <span className="muted">Synthetic 640×480 scene: 25 °C background, hotspot ramping to 200 °C over 60 s.</span>
+          <span className="muted">Synthetic 640×480 scene used by the automated tests; not a camera.</span>
         </div>
-      </div>
+      </details>
       {err && <div className="errbox">{err}</div>}
     </div>
   );

@@ -24,6 +24,7 @@ test("installSteps: macOS gets the one-line installer; others get the manual rou
   assert.ok(mac.command?.endsWith("| bash"));
   assert.ok(mac.steps.length >= 3);
   const win = installSteps("windows");
-  assert.equal(win.command, null);
-  assert.ok(win.steps.some((s) => /uv run fri-serve/.test(s)));
+  assert.ok(win.command?.startsWith("irm https://raw.githubusercontent.com/mattlmccoy/flir-research-interface/main/install.ps1"));
+  assert.ok(win.command?.endsWith("| iex"));
+  assert.ok(installSteps("linux").command?.endsWith("| bash"));
 });
