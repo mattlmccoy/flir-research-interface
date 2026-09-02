@@ -12,15 +12,19 @@ interface Props {
   dispatch: (a: RoiAction) => void;
 }
 
-function Values({ r, s }: { r: Roi; s: RoiStats | undefined }) {
+function Values({ s }: { s: RoiStats | undefined }) {
   if (!s) return <span className="vals">…</span>;
   if (s.n === 0 || s.mean === null) return <span className="vals">n/a</span>;
-  if (r.kind === "spot") return <span className="vals">{s.mean.toFixed(2)} °C</span>;
+  return <span className="vals">{s.mean.toFixed(2)} °C</span>;
+}
+
+/** Second line under an area ROI: min · max · σ · pixel count (full width, never overlaps the name). */
+function StatsLine({ r, s }: { r: Roi; s: RoiStats | undefined }) {
+  if (!s || s.n === 0 || s.mean === null || r.kind === "spot") return null;
   return (
-    <span className="vals">
-      {s.mean.toFixed(2)} °C
-      <small>min {(s.min as number).toFixed(2)} · max {(s.max as number).toFixed(2)}{s.std !== undefined ? ` · σ ${s.std.toFixed(2)}` : ""} · {s.n} px</small>
-    </span>
+    <small className="roi-stats">
+      min {(s.min as number).toFixed(2)} · max {(s.max as number).toFixed(2)}{s.std !== undefined ? ` · σ ${s.std.toFixed(2)}` : ""} · {s.n} px
+    </small>
   );
 }
 
@@ -91,11 +95,12 @@ export function RoiRows({ rois, stats, selected, dispatch, extremes, onExtremes 
                 </button>
               )}
             </span>,
-            <Values key={`v${r.id}`} r={r} s={stats.get(r.id)} />,
+            <Values key={`v${r.id}`} s={stats.get(r.id)} />,
             <span key={`x${r.id}`} style={{ display: "flex", gap: 4 }}>
               <button className="secondary" type="button" onClick={() => dispatch({ type: "toggleHidden", id: r.id })} aria-pressed={!!r.hidden} aria-label={`${r.hidden ? "Show" : "Hide"} ${roiLabel(r)}`} title={r.hidden ? "Hidden on the image (still measured and recorded) · click to show" : "Hide on the image (still measured and recorded)"} style={{ opacity: r.hidden ? 0.5 : 1 }}>{r.hidden ? "◌" : "◉"}</button>
               <button className="secondary" type="button" onClick={() => dispatch({ type: "remove", id: r.id })} aria-label={`Remove ${roiLabel(r)}`} title="Remove">×</button>
             </span>,
+            <StatsLine key={`s${r.id}`} r={r} s={stats.get(r.id)} />,
             picking === r.id ? <div key={`c${r.id}`} style={{ gridColumn: "1 / -1" }}><ColorPicker r={r} i={i} dispatch={dispatch} onDone={() => setPicking(null)} /></div> : null,
           ]
         ))}
