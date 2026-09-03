@@ -30,11 +30,16 @@ function resolve(color: string): string {
 }
 const FILL_ALPHA = 0.14;
 
+/** The per-context base transform (device pixel ratio only, no flip), set once per draw. */
+const BASE = new WeakMap<CanvasRenderingContext2D, DOMMatrix>();
+
 function drawLabel(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, color: string, scrim: string, box: Box) {
-  // Labels are drawn in screen space so a mirrored (flipped) overlay never mirrors its text.
-  const pt = ctx.getTransform().transformPoint(new DOMPoint(x, y));
+  // Labels are drawn in unflipped CSS-pixel space so a mirrored overlay never mirrors its text.
+  const base = BASE.get(ctx) ?? new DOMMatrix();
+  const device = ctx.getTransform().transformPoint(new DOMPoint(x, y));
+  const pt = base.inverse().transformPoint(device);
   ctx.save();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.setTransform(base);
   try { drawLabelScreen(ctx, text, pt.x, pt.y, color, scrim, box); } finally { ctx.restore(); }
 }
 
@@ -136,7 +141,7 @@ export function RoiOverlay(p: Props) {
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, p.box.width, p.box.height);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    BASE.set(ctx, ctx.getTransform());  // CSS-pixel space at device resolution; labels draw in this
     if (p.flipH || p.flipV) { ctx.translate(p.flipH ? p.box.width : 0, p.flipV ? p.box.height : 0); ctx.scale(p.flipH ? -1 : 1, p.flipV ? -1 : 1); }
     const sx = p.box.width / p.width;
     const sy = p.box.height / p.height;
