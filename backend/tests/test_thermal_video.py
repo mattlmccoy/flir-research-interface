@@ -32,8 +32,12 @@ def _make_experiment(root: Path, n: int = 12) -> Path:
         counts[10:30, 20:44] = 29815 + 500 * (i + 1)  # 5 °C hotter per frame
         rec.submit(
             Frame(
-                frame_id=i, device_timestamp_ns=i * 33_333_333, host_timestamp_ns=i,
-                pixel_format="Mono16", ir_format="TemperatureLinear10mK", counts=counts,
+                frame_id=i,
+                device_timestamp_ns=i * 33_333_333,
+                host_timestamp_ns=i,
+                pixel_format="Mono16",
+                ir_format="TemperatureLinear10mK",
+                counts=counts,
                 incomplete=False,
             )
         )
@@ -69,16 +73,31 @@ def test_render_thermal_video_writes_a_playable_mp4_next_to_the_store(tmp_path: 
     assert out == d / "exports" / "thermal_preview.mp4" and out.stat().st_size > 500
     assert info["frames"] == 12 and info["units"] == "celsius"
     assert info["vmin"] == pytest.approx(25.0, abs=0.05)
-    assert info["vmax"] == pytest.approx(85.0, abs=0.05)
+    assert (
+        25.0 < info["vmax"] <= 85.05
+    )  # robust (percentile) scale: a lone hot block does not dominate
     ffprobe = find_ffprobe()
     assert ffprobe
     import subprocess
 
     meta = json.loads(
         subprocess.run(
-            [ffprobe, "-v", "error", "-select_streams", "v:0", "-count_frames", "-show_entries",
-             "stream=codec_name,width,height,nb_read_frames", "-of", "json", str(out)],
-            capture_output=True, text=True, check=True,
+            [
+                ffprobe,
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-count_frames",
+                "-show_entries",
+                "stream=codec_name,width,height,nb_read_frames",
+                "-of",
+                "json",
+                str(out),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout
     )["streams"][0]
     assert meta["codec_name"] == "h264" and int(meta["nb_read_frames"]) == 12

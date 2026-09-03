@@ -205,7 +205,8 @@ def annotated_frame(
         )
     cap = (
         caption
-        or f"{reader.path.name} · frame {index + 1}/{reader.n_frames} · t = {reader.t_s(index):.2f} s · inferno {vmin:.1f} to {vmax:.1f} °C"
+        or f"{reader.path.name} · frame {index + 1}/{reader.n_frames}"
+        f" · t = {reader.t_s(index):.2f} s · inferno {vmin:.1f} to {vmax:.1f} °C"
     )
     d.text((6, bar_h + 5), cap, fill=(200, 200, 200), font=_font(max(11, 5 * scale)))
     return out

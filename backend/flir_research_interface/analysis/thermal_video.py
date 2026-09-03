@@ -43,13 +43,27 @@ def _celsius_frames(reader: ExperimentReader, start: int, stop: int) -> npt.NDAr
     return block.astype(np.float32)
 
 
-def run_range(reader: ExperimentReader) -> tuple[float, float, str]:
-    """(vmin, vmax, units) over the whole run, ignoring NaN; ``units`` is 'celsius' or 'counts'."""
+def run_range(reader: ExperimentReader, *, robust: bool = False) -> tuple[float, float, str]:
+    """(vmin, vmax, units) over the whole run, ignoring NaN; ``units`` is 'celsius' or 'counts'.
+
+    ``robust`` uses the 0.5th and 99.9th percentiles of every 8th frame instead of the extremes,
+    so a single hot pixel does not crush the rest of the scene to black in viewing copies.
+    """
     lo, hi = np.inf, -np.inf
+    samples: list[npt.NDArray[np.float32]] = []
     for s in range(0, reader.n_frames, BLOCK):
         c = _celsius_frames(reader, s, min(s + BLOCK, reader.n_frames))
         if c.size:
             lo, hi = min(lo, float(np.nanmin(c))), max(hi, float(np.nanmax(c)))
+            if robust:
+                samples.append(c[::8].reshape(-1))
+    if robust and samples:
+        allv = np.concatenate(samples)
+        allv = allv[np.isfinite(allv)]
+        if allv.size:
+            p_lo, p_hi = float(np.percentile(allv, 0.5)), float(np.percentile(allv, 99.9))
+            if p_hi - p_lo >= 1.0:
+                lo, hi = p_lo, p_hi
     fmt = reader.ir_format or ""
     units = "celsius" if fmt.startswith("TemperatureLinear") else "counts"
     if not np.isfinite(lo):
@@ -159,7 +173,7 @@ def render_thermal_video(
     ffmpeg = ffmpeg or find_ffprobe(FFMPEG_CANDIDATES)
     if ffmpeg is None:
         raise RuntimeError("ffmpeg not found")
-    vmin, vmax, units = run_range(reader)
+    vmin, vmax, units = run_range(reader, robust=True)
     fps = _fps(reader)
     _, h, w = reader.counts_block(0, 1).shape
     rois = (reader.metadata.get("rois") or []) if with_rois else []
