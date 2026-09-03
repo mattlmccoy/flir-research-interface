@@ -32,7 +32,7 @@ ROIS_OUT_NAME = "thermal_preview_rois.mp4"
 BLOCK = 64  # frames per read from the store
 MAX_FPS = 30.0
 BAR_PX = 24  # width of the colour bar strip appended on the right
-CRF = 23
+CRF = 27  # 2x-upscaled thermal noise compresses poorly; 27 keeps a 40 s run near 10 MB
 
 
 def _celsius_frames(reader: ExperimentReader, start: int, stop: int) -> npt.NDArray[np.float32]:
@@ -61,7 +61,7 @@ def run_range(reader: ExperimentReader, *, robust: bool = False) -> tuple[float,
         allv = np.concatenate(samples)
         allv = allv[np.isfinite(allv)]
         if allv.size:
-            p_lo, p_hi = float(np.percentile(allv, 0.5)), float(np.percentile(allv, 99.9))
+            p_lo, p_hi = float(np.percentile(allv, 0.5)), float(np.percentile(allv, 99.95))
             if p_hi - p_lo >= 1.0:
                 lo, hi = p_lo, p_hi
     fmt = reader.ir_format or ""

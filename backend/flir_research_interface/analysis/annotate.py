@@ -175,7 +175,7 @@ def annotated_frame(
     else:  # robust scale of this frame: a single hot pixel must not crush the rest to black
         finite = c[np.isfinite(c)]
         if finite.size:
-            vmin, vmax = float(np.percentile(finite, 0.5)), float(np.percentile(finite, 99.9))
+            vmin, vmax = float(np.percentile(finite, 0.5)), float(np.percentile(finite, 99.95))
             if vmax - vmin < 1.0:
                 vmin, vmax = run_range(reader)[:2]
         else:
