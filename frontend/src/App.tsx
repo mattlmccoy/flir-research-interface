@@ -146,6 +146,7 @@ export function App() {
   const visibleAvailable = recording?.visible?.state !== "unavailable";
   const nearLimit = hdr && active && hdr.max_c != null && active.high_c != null && hdr.max_c > active.high_c - 10;
   const allHidden = !layout.rail && !layout.dock;
+  const [revealNote, setRevealNote] = useState<string | null>(null);
 
   const nowT = hdr && t0Ref.current !== null ? (hdr.device_timestamp_ns - t0Ref.current) / 1e9 : 0;
   const traces: Trace[] = rois.rois.flatMap((r, i) => {
@@ -171,7 +172,10 @@ export function App() {
       {page === "playback" && openExp && (
         <span className="crumb">
           <button className="secondary" onClick={() => setPage("experiments")} title="Back to the experiments list" aria-label="Back to experiments">← experiments</button>
-          <span className="who" title={openExp}>{openExp}</span>
+          <span className="open-name" title={openExp}>{openExp}</span>
+          <button className="secondary" title="Show this run's folder in Finder / Explorer" aria-label="Reveal run folder"
+            onClick={() => { setRevealNote(null); api.reveal(openExp).then((r) => { if (!r.ok) setRevealNote(r.error ?? "reveal failed"); }).catch((e) => setRevealNote(String(e))); }}>reveal</button>
+          {revealNote && <span className="bad" role="alert">{revealNote}</span>}
         </span>
       )}
       <span className="conn">

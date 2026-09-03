@@ -27,7 +27,8 @@ button, select, input { font: inherit; }
 .tabs button { background: none; border: none; color: var(--muted); padding: 10px 10px; cursor: pointer; border-bottom: 2px solid transparent; font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.04em; }
 .tabs button.active { color: var(--fg-strong); border-bottom-color: var(--accent); }
 .crumb { display: flex; align-items: center; gap: 10px; font-family: var(--font-mono); font-size: 12px; color: var(--muted); min-width: 0; }
-.crumb .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
+.crumb .open-name { color: var(--fg-strong); font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
+.crumb .bad { color: var(--err); }
 .crumb button { padding: 2px 8px; }
 .conn { margin-left: auto; display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
 .conn .who { color: var(--fg); }
