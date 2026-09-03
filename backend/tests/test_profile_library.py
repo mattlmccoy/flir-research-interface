@@ -49,3 +49,21 @@ def test_suggest_route() -> None:
         assert r.status_code == 200
         ids = [m["id"] for m in r.json()["matches"]]
         assert "resin" in ids and "curing" in ids
+
+
+def test_library_covers_common_a70_research_uses() -> None:
+    cases = {
+        "heat exchanger fin tube effectiveness": "heat_exchanger",
+        "pulsed thermography lock-in NDT of a CFRP panel": "active_ndt",
+        "semiconductor die hotspot on a wafer": "semiconductor",
+        "sample inside a vacuum chamber with a germanium window": "chamber",
+        "injection moulding cavity cooling": "moulding",
+        "natural convection heat transfer coefficient on a heated plate": "convection",
+        "engine exhaust manifold and turbocharger": "automotive",
+        "server rack thermal management airflow": "datacenter",
+        "cold storage insulation pallets": "cold_chain",
+        "concrete curing bridge deck delamination": "civil",
+    }
+    for text, expected in cases.items():
+        ids = [m["id"] for m in suggest(text)["matches"]]
+        assert expected in ids, f"{text!r} → {ids}"
