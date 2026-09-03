@@ -13,13 +13,14 @@ import logging
 import os
 import platform
 import shutil
+import struct
 import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -29,7 +30,7 @@ from flir_research_interface.acquisition.service import AcquisitionService, Serv
 from flir_research_interface.api.frames import encode_frame_message
 from flir_research_interface.api.reveal import Runner, contained, reveal
 from flir_research_interface.camera import CAMERA_BACKENDS, create_backend
-from flir_research_interface.camera.base import CameraBackend, CameraError, DeviceDescriptor
+from flir_research_interface.camera.base import CameraBackend, CameraError, DeviceDescriptor, Frame
 from flir_research_interface.camera.simulated import HotspotRampScene
 from flir_research_interface.playback.reader import ExperimentReader, list_experiments
 from flir_research_interface.recording.recorder import Recorder, RecorderState
@@ -1007,6 +1008,40 @@ def create_app(
         out = await run_in_threadpool(lambda: roi_series(r, parsed, valid_c=valid_c))
         out["events"] = r.events
         return out
+
+    @app.get("/api/experiments/{name}/frames")
+    def experiment_frame_block(
+        name: str, start: int = 0, count: int = Query(32, ge=1, le=256)
+    ) -> Response:
+        """A run of frames in one response: repeated [uint32 length][frame message]. One request
+        instead of one per frame keeps playback smooth (block Zarr reads are ~30x cheaper)."""
+        r = _open(name)
+        if not 0 <= start < r.n_frames:
+            raise HTTPException(404, f"frame start {start} out of range [0, {r.n_frames})")
+        stop = min(start + count, r.n_frames)
+        block = r.counts_block(start, stop)  # one decompression per chunk, not per frame
+        parts: list[bytes] = []
+        for k in range(stop - start):
+            i = start + k
+            frame = Frame(
+                frame_id=int(r._frame_id[i]),
+                device_timestamp_ns=int(r._dev_ts[i]),
+                host_timestamp_ns=int(r._host_ts[i]),
+                pixel_format=r.pixel_format,
+                ir_format=str(r.ir_format or ""),
+                counts=block[k],
+                incomplete=False,
+            )
+            msg = encode_frame_message(
+                frame,
+                extra={"index": i, "n_frames": r.n_frames, "t_s": r.t_s(i), "source": "playback"},
+            )
+            parts.append(struct.pack(">I", len(msg)) + msg)
+        return Response(
+            content=b"".join(parts),
+            media_type="application/octet-stream",
+            headers={"x-frame-start": str(start), "x-frame-count": str(stop - start)},
+        )
 
     @app.get("/api/experiments/{name}/frames/{index}")
     def experiment_frame(name: str, index: int) -> Response:
