@@ -40,7 +40,7 @@ def test_rois_are_written_to_metadata_and_series_exported_at_stop(tmp_path: Path
         csv_path = d / "exports" / "roi_series.csv"
         assert csv_path.is_file()
         head = [ln for ln in csv_path.read_text().splitlines() if not ln.startswith("#")][0]
-        expect = "t_s,frame_id,S1_value,R2_mean,R2_min,R2_max,R2_std,C3_mean,C3_min,C3_max,C3_std"
+        expect = "t_s,frame_id,S1_value,R2_mean,R2_min,R2_max,R2_std,R2_n,C3_mean,C3_min,C3_max,C3_std,C3_n"
         assert head == expect
         info = c.get(f"/api/experiments/{d.name}").json()
         assert info["rois"][0]["name"] == "centre"

@@ -60,6 +60,8 @@ interface Props {
   flipH?: boolean; flipV?: boolean;
   /** Palette mapping: linear, or plateau equalisation of the shown field's histogram. */
   agc?: Agc;
+  /** Segmentation range for ROI statistics (null: all pixels count). */
+  valid?: Range | null;
 }
 
 /** The shape a drag from `a` to `b` produces for the active tool (null when degenerate). */
@@ -85,7 +87,7 @@ export function dragShape(tool: Tool, a: Pt, b: Pt, w: number, h: number): RoiIn
 /** Renders raw counts -> °C -> palette on a canvas, with an ROI overlay layer. Data arrays are never mutated. */
 const divergingLut = buildLut("diverging");
 
-export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois = NO_ROIS, selected = null, tool = "select", zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null, hold = "off", flipH = false, flipV = false, agc = LINEAR_AGC }: Props) {
+export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois = NO_ROIS, selected = null, tool = "select", zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null, hold = "off", flipH = false, flipV = false, agc = LINEAR_AGC, valid = null }: Props) {
   const viewRef = useRef<HTMLDivElement>(null);
   const holdRef = useRef<HoldBuffer | null>(null);
   const panning = useRef<{ cx: number; cy: number; sl: number; st: number } | null>(null);
@@ -153,10 +155,10 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
     const c = celsiusRef.current;
     if (!frame || !c) return;
     const m: StatsMap = new Map();
-    for (const r of rois) m.set(r.id, roiStats(c, frame.header.width, frame.header.height, r, rad));
+    for (const r of rois) m.set(r.id, roiStats(c, frame.header.width, frame.header.height, r, rad, valid));
     setStats(m);
     onStats?.(m, frame);
-  }, [frame, rois, onStats, rad]);
+  }, [frame, rois, onStats, rad, valid]);
 
   function pix(e: { currentTarget: HTMLCanvasElement; clientX: number; clientY: number }): Pt | null {
     if (!hdr) return null;

@@ -67,7 +67,16 @@ def test_series_csv_has_header_comments_and_one_row_per_frame(tmp_path: Path) ->
     assert any("S1" in c and "x=2" in c for c in comments)
     assert any("R2" in c and "x0=1" in c for c in comments)
     rows = list(csv.reader(ln for ln in lines if not ln.startswith("#")))
-    assert rows[0] == ["t_s", "frame_id", "S1_value", "R2_mean", "R2_min", "R2_max", "R2_std"]
+    assert rows[0] == [
+        "t_s",
+        "frame_id",
+        "S1_value",
+        "R2_mean",
+        "R2_min",
+        "R2_max",
+        "R2_std",
+        "R2_n",
+    ]
     assert len(rows) == 1 + 5
     assert float(rows[1][2]) == pytest.approx(26.0, abs=1e-3)
     assert float(rows[5][5]) == pytest.approx(30.0, abs=1e-3)

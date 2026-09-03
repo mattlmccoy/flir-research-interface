@@ -23,7 +23,7 @@ function StatsLine({ r, s }: { r: Roi; s: RoiStats | undefined }) {
   if (!s || s.n === 0 || s.mean === null || r.kind === "spot") return null;
   return (
     <small className="roi-stats">
-      min {(s.min as number).toFixed(2)} · max {(s.max as number).toFixed(2)}{s.std !== undefined ? ` · σ ${s.std.toFixed(2)}` : ""} · {s.n} px
+      min {(s.min as number).toFixed(2)} · max {(s.max as number).toFixed(2)}{s.std !== undefined ? ` · σ ${s.std.toFixed(2)}` : ""} · {s.n} px{s.excluded ? ` (${s.excluded} excluded)` : ""}
     </small>
   );
 }

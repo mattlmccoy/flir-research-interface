@@ -22,10 +22,11 @@ interface Props {
   /** Pixels at/beyond the camera's calibrated case limits in the current frame. */
   saturation?: { low: number; high: number; lowC: number; highC: number } | null;
   agc?: Agc; setAgc?: (a: Agc) => void;
+  segment?: { on: boolean; min: number; max: number }; setSegment?: (s: { on: boolean; min: number; max: number }) => void;
 }
 
 /** Palette + display-range controls shared by live view and playback. Visualization only. */
-export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, manual, setManual, shown, isotherm, setIsotherm, hasReference, onSetReference, onClearReference, onSnapshot, onRangeFromRoi, hold = "off", setHold, flipH = false, flipV = false, setFlip, saturation, agc, setAgc }: Props) {
+export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, manual, setManual, shown, isotherm, setIsotherm, hasReference, onSetReference, onClearReference, onSnapshot, onRangeFromRoi, hold = "off", setHold, flipH = false, flipV = false, setFlip, saturation, agc, setAgc, segment, setSegment }: Props) {
   const iso = isotherm ?? DEFAULT_ISOTHERM;
   const upd = (patch: Partial<Isotherm>) => setIsotherm?.({ ...iso, ...patch });
   const isoRow = setIsotherm && (
@@ -73,6 +74,15 @@ export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, 
           <select value={agc.mode} onChange={(e) => setAgc({ ...agc, mode: e.target.value as Agc["mode"] })} aria-label="AGC mode"><option value="linear">linear</option><option value="plateau">plateau equalisation</option></select>
           {agc.mode === "plateau" && <input type="range" min={0} max={1} step={0.05} value={agc.plateau} aria-label="plateau strength" style={{ width: 110 }} onChange={(e) => setAgc({ ...agc, plateau: Number(e.target.value) })} />}
           {agc.mode === "plateau" && <span className="hint">{Math.round(agc.plateau * 100)} %</span>}
+        </div>
+      )}
+      {setSegment && segment && (
+        <div className="row" aria-label="segmentation" title="Only pixels within this temperature range count in ROI statistics (ResearchIR segmentation); excluded pixels are reported per ROI. Recording and exports are unaffected.">
+          <label className="hint"><input type="checkbox" checked={segment.on} onChange={(e) => setSegment({ ...segment, on: e.target.checked })} /> stats only within</label>
+          <input type="number" step={0.5} value={segment.min} style={{ width: 64 }} aria-label="segmentation min °C" disabled={!segment.on} onChange={(e) => setSegment({ ...segment, min: Number(e.target.value) })} />
+          <span className="hint">to</span>
+          <input type="number" step={0.5} value={segment.max} style={{ width: 64 }} aria-label="segmentation max °C" disabled={!segment.on} onChange={(e) => setSegment({ ...segment, max: Number(e.target.value) })} />
+          <span className="hint">°C</span>
         </div>
       )}
       {saturation && (saturation.low > 0 || saturation.high > 0) && (

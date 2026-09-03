@@ -191,3 +191,15 @@ def test_ellipse_roi_is_parsed_and_indexed(tmp_path: Path) -> None:
     assert "mean" in s and len(s["mean"]) == r.n_frames
     with pytest.raises(ValueError):
         parse_rois('[{"id":1,"kind":"ellipse","cx":5,"cy":5,"rx":0,"ry":1}]')
+
+
+def test_series_segmentation_excludes_pixels_outside_the_valid_range(tmp_path: Path) -> None:
+    from flir_research_interface.analysis.series import roi_series
+    from flir_research_interface.playback.reader import ExperimentReader
+
+    r = ExperimentReader(_make_experiment(tmp_path))  # frames ramp 25..; scene mostly 25 °C
+    rect = {"id": 1, "kind": "rect", "x0": 0, "y0": 0, "x1": 4, "y1": 3}
+    plain = roi_series(r, [rect])["series"]["1"]
+    seg = roi_series(r, [rect], valid_c=(25.5, 1000.0))["series"]["1"]
+    assert seg["mean"][0] is None or seg["mean"][0] > plain["mean"][0]  # 25.0 pixels dropped
+    assert "n" in seg and seg["n"][0] < 12

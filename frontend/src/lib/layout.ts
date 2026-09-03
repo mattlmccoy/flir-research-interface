@@ -10,6 +10,12 @@ function parseAgc(v: unknown): Agc {
   const p = typeof o.plateau === "number" && Number.isFinite(o.plateau) ? Math.min(1, Math.max(0, o.plateau)) : 0.5;
   return { mode, plateau: p };
 }
+function parseSegment(v: unknown): { on: boolean; min: number; max: number } {
+  const o = (v ?? {}) as Record<string, unknown>;
+  const min = typeof o.min === "number" && Number.isFinite(o.min) ? o.min : 0;
+  const max = typeof o.max === "number" && Number.isFinite(o.max) ? o.max : 100;
+  return { on: o.on === true, min: Math.min(min, max), max: Math.max(min, max) };
+}
 export interface FloatRect { x: number; y: number; w: number; h: number; }
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 function clampRect(r: FloatRect): FloatRect {
@@ -51,6 +57,8 @@ export interface LayoutState {
   hold: "off" | "max" | "min";
   /** Automatic gain control: linear palette mapping or plateau equalisation (0..1 strength). */
   agc: Agc;
+  /** Segmentation: only pixels within [min, max] °C count in ROI statistics. */
+  segment: { on: boolean; min: number; max: number };
   /** Overlay registration: opacity 0–1, scale 0.5–2 and offsets in % of the image (visible lens ≠ IR lens). */
   overlay: Overlay;
   sections: Record<Section, boolean>;
@@ -97,6 +105,7 @@ export const DEFAULT_LAYOUT: LayoutState = {
   flipV: false,
   hold: "off",
   agc: { mode: "linear", plateau: 0.5 },
+  segment: { on: false, min: 0, max: 100 },
   overlay: DEFAULT_OVERLAY,
   sections: { measurements: true, profile: false, camera: true, experiment: true, recording: true, display: true, export: true, visible: true },
 };
@@ -118,6 +127,7 @@ export type LayoutAction =
   | { type: "setFlip"; h: boolean; v: boolean }
   | { type: "setHold"; hold: "off" | "max" | "min" }
   | { type: "setAgc"; agc: Agc }
+  | { type: "setSegment"; segment: { on: boolean; min: number; max: number } }
   | { type: "setVisibleMode"; mode: VisibleMode }
   | { type: "setOverlay"; patch: Partial<Overlay> }
   | { type: "collapseAll" }
@@ -143,6 +153,7 @@ export function layoutReducer(s: LayoutState, a: LayoutAction): LayoutState {
     case "setFlip": return { ...s, flipH: a.h, flipV: a.v };
     case "setHold": return { ...s, hold: a.hold };
     case "setAgc": return { ...s, agc: parseAgc(a.agc) };
+    case "setSegment": return { ...s, segment: { on: !!a.segment.on, min: Math.min(a.segment.min, a.segment.max), max: Math.max(a.segment.min, a.segment.max) } };
     case "dockBack": { const { [a.section]: _gone, ...rest } = s.floating; return { ...s, floating: rest }; }
     case "setOverlay": return { ...s, overlay: clampOverlay({ ...s.overlay, ...a.patch }) };
     case "collapseAll": return { ...s, strip: false, rail: false, dock: false };
@@ -193,6 +204,7 @@ export function loadLayout(storage: Storage | null): LayoutState {
       flipV: parsed.flipV === true,
       hold: "off",
       agc: parseAgc(parsed.agc),
+      segment: parseSegment(parsed.segment),
       overlay: clampOverlay({
         opacity: num(ov.opacity, DEFAULT_OVERLAY.opacity),
         scale: num(ov.scale, DEFAULT_OVERLAY.scale),

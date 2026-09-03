@@ -1,3 +1,4 @@
+import type { Range } from "./scale.ts";
 import { recorrectCelsius, type Radiometry } from "./emissivity.ts";
 /**
  * Regions of interest (spec §3, Milestone 6): spots and half-open rectangles in image pixel
@@ -133,6 +134,8 @@ export interface RoiStats {
   maxAt?: [number, number]; minAt?: [number, number];
   /** Population standard deviation (area ROIs). */
   std?: number;
+  /** Pixels dropped by the segmentation (valid-range) filter. */
+  excluded?: number;
 }
 const NONE = (nan: number): RoiStats => ({ n: 0, nan, min: null, max: null, mean: null });
 
@@ -221,20 +224,22 @@ export function roiPixels(roi: Roi, w: number, h: number): number[] {
 }
 
 /** Statistics of `field` (row-major w×h) inside `roi`. Out-of-image pixels count as absent. */
-export function roiStats(field: Float32Array, w: number, h: number, roi: Roi, rad?: Radiometry | null): RoiStats {
-  let n = 0, nan = 0, min = Infinity, max = -Infinity, sum = 0, sq = 0, kMin = -1, kMax = -1;
+export function roiStats(field: Float32Array, w: number, h: number, roi: Roi, rad?: Radiometry | null, valid?: Range | null): RoiStats {
+  let n = 0, nan = 0, excluded = 0, min = Infinity, max = -Infinity, sum = 0, sq = 0, kMin = -1, kMax = -1;
   const eps = roi.emissivity;
   const correct = rad && eps !== undefined && eps > 0 && eps <= 1;
   const treflK = (roi.reflected_c ?? (rad ? rad.treflCamK - 273.15 : 0)) + 273.15;
   for (const k of roiPixels(roi, w, h)) {
     const v = correct ? recorrectCelsius(field[k], rad, eps, treflK) : field[k];
     if (Number.isNaN(v)) { nan++; continue; }
+    if (valid && (v < valid.min || v > valid.max)) { excluded++; continue; }
     n++; sum += v; sq += v * v;
     if (v < min) { min = v; kMin = k; }
     if (v > max) { max = v; kMax = k; }
   }
-  if (n === 0) return NONE(nan);
+  if (n === 0) return excluded ? { ...NONE(nan), excluded } : NONE(nan);
   const out: RoiStats = { n, nan, min, max, mean: sum / n };
+  if (excluded) out.excluded = excluded;
   if (roi.kind !== "spot") {
     out.maxAt = [kMax % w, Math.floor(kMax / w)]; out.minAt = [kMin % w, Math.floor(kMin / w)];
     out.std = Math.sqrt(Math.max(0, sq / n - (sum / n) * (sum / n)));

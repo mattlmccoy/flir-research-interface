@@ -289,3 +289,15 @@ test("ellipse ROI: pixel centres inside (dx/rx)²+(dy/ry)² ≤ 1, movable, pers
   assert.deepEqual(loadRois(storage).rois[0], e);
   assert.equal(roiLabel(e), "E1");
 });
+
+test("segmentation: pixels outside the valid range are excluded from stats and counted", () => {
+  const f = new Float32Array([10, 20, 30, 40, 50, 60]);
+  const rect = { id: 1, kind: "rect" as const, x0: 0, y0: 0, x1: 6, y1: 1 };
+  const s = roiStats(f, 6, 1, rect, null, { min: 20, max: 50 });
+  assert.equal(s.n, 4);
+  assert.equal(s.excluded, 2);
+  assert.deepEqual([s.min, s.max, s.mean], [20, 50, 35]);
+  const all = roiStats(f, 6, 1, rect, null, { min: 100, max: 200 });
+  assert.equal(all.n, 0);
+  assert.equal(all.excluded, 6);
+});

@@ -151,16 +151,6 @@ def test_render_preview_degenerate_span_is_mid_gray() -> None:
     assert (rgb == IRON_LUT[128]).all()
 
 
-@pytest.mark.skip(
-    reason=(
-        "Cannot reach generate_previews's own n==0 guard through the public Recorder path: "
-        "Recorder.stop() succeeds with frames_written=0, but the 'counts' array is only "
-        "created lazily on the first submitted frame, so ExperimentReader(exp_dir) itself "
-        "raises KeyError('counts') before generate_previews can run its ValueError check. "
-        "This is a pre-existing gap in Recorder/ExperimentReader for zero-frame recordings, "
-        "out of scope for this preview-rendering fix."
-    )
-)
 def test_generate_previews_on_zero_frame_experiment_raises(tmp_path: Path) -> None:
     rec = Recorder(None, experiments_root=tmp_path, chunk_frames=8)
     d = rec.start(

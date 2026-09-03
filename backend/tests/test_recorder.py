@@ -149,3 +149,17 @@ def test_experiment_directory_name_is_dated_and_unique(tmp_path: Path) -> None:
     rec.stop()
     assert d1 != d2 and d1.parent == tmp_path
     assert d1.name.split("_", 2)[2].startswith("PA12_Run_1")  # YYYYMMDD_HHMMSS_<slug>
+
+
+def test_inspect_empty_recording_reports_zero_frames_without_store_error(tmp_path: Path) -> None:
+    """No frames submitted -> no 'counts' array; that is an empty recording, not a broken store."""
+    rec = Recorder(None, experiments_root=tmp_path, chunk_frames=8)
+    d = rec.start(
+        name="empty",
+        metadata={},
+        camera_info={"backend": "simulated", "ir_format": "TemperatureLinear10mK"},
+    )
+    rec.stop()
+    info = inspect_experiment(d)
+    assert info["complete"] is True and info["frames_on_disk"] == 0
+    assert "store_error" not in info

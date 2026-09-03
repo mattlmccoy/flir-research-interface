@@ -122,3 +122,42 @@ def test_list_experiments_sorted_newest_first(tmp_path: Path) -> None:
     items = list_experiments(tmp_path)
     assert [i["n_frames"] for i in items] == [3, 2] or [i["n_frames"] for i in items] == [2, 3]
     assert all("name" in i and "complete" in i for i in items)
+
+
+def _make_empty_experiment(root: Path) -> Path:
+    rec = Recorder(None, experiments_root=root, chunk_frames=8)
+    d = rec.start(
+        name="empty",
+        metadata={},
+        camera_info={"backend": "simulated", "ir_format": "TemperatureLinear10mK"},
+    )
+    rec.stop()  # zero frames submitted: the store has no 'counts' array at all
+    return d
+
+
+def test_empty_recording_opens_as_zero_frame_reader(tmp_path: Path) -> None:
+    """A start()/stop() with no frames is a valid, complete, empty experiment (not KeyError)."""
+    d = _make_empty_experiment(tmp_path)
+    r = ExperimentReader(d)
+    assert r.n_frames == 0
+    info = r.info()
+    assert info["n_frames"] == 0 and info["complete"] is True
+    assert info["width"] == 0 and info["height"] == 0 and info["duration_s"] == 0.0
+    assert info["ir_format"] == "TemperatureLinear10mK"  # from metadata, not the array attrs
+    assert r.timeline() == {"t_s": [], "frame_id": []}
+    assert r.timestamps_ns()[0].shape == (0,)
+    with pytest.raises(IndexError):
+        r.frame(0)
+    with pytest.raises(IndexError):
+        r.index_at(0.0)
+    with pytest.raises(IndexError):
+        r.counts_block(0, 1)
+    assert r.counts_block(0, 0).shape[0] == 0
+
+
+def test_list_experiments_includes_empty_recording_without_error(tmp_path: Path) -> None:
+    _make_empty_experiment(tmp_path)
+    items = list_experiments(tmp_path)
+    assert len(items) == 1
+    assert items[0]["n_frames"] == 0 and items[0]["complete"] is True
+    assert "error" not in items[0]

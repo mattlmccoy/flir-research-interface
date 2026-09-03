@@ -212,7 +212,11 @@ def _clean(a: np.ndarray) -> list[float | None]:
 
 
 def roi_series(
-    reader: ExperimentReader, rois: list[dict[str, Any]], *, batch: int = 64
+    reader: ExperimentReader,
+    rois: list[dict[str, Any]],
+    *,
+    batch: int = 64,
+    valid_c: tuple[float, float] | None = None,
 ) -> dict[str, Any]:
     """Per-frame ROI values for every frame of ``reader``.
 
@@ -230,7 +234,7 @@ def roi_series(
     cam = reader.metadata.get("camera")
     acc: dict[int, dict[str, np.ndarray]] = {}
     for r in rois:
-        keys = ("value",) if r["kind"] == "spot" else ("min", "max", "mean", "std")
+        keys = ("value",) if r["kind"] == "spot" else ("min", "max", "mean", "std", "n")
         acc[r["id"]] = {k: np.full(n, np.nan) for k in keys}
     for start in range(0, n, max(1, batch)):
         stop = min(n, start + batch)
@@ -239,6 +243,9 @@ def roi_series(
         _, h, w = field0.shape
         for r in rois:
             field = roi_field(field0, r, cam, fmt is not None)
+            if valid_c is not None:  # segmentation: outside the valid range → ignored (NaN)
+                lo, hi = valid_c
+                field = np.where((field >= lo) & (field <= hi), field, np.nan)
             dst = acc[r["id"]]
             if r["kind"] == "spot":
                 if r.get("box") == 3:
@@ -268,6 +275,7 @@ def roi_series(
                 dst["max"][start:stop] = np.nanmax(sub, axis=1)
                 dst["mean"][start:stop] = np.nanmean(sub, axis=1)
                 dst["std"][start:stop] = np.nanstd(sub, axis=1)  # population, as the browser
+                dst["n"][start:stop] = np.sum(~np.isnan(sub), axis=1)
     tl = reader.timeline()
     return {
         "units": "celsius" if fmt is not None else "counts",

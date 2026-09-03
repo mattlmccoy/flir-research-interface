@@ -81,8 +81,8 @@ export interface RoiSeries {
 export const api = {
   experiment: (name: string) => j<ExperimentInfo>(req(`/api/experiments/${encodeURIComponent(name)}`)),
   timeline: (name: string) => j<Timeline>(req(`/api/experiments/${encodeURIComponent(name)}/timeline`)),
-  series: (name: string, rois: unknown[]) =>
-    j<RoiSeries>(req(`/api/experiments/${encodeURIComponent(name)}/series?rois=${encodeURIComponent(JSON.stringify(rois))}`)),
+  series: (name: string, rois: unknown[], valid?: { min: number; max: number } | null) =>
+    j<RoiSeries>(req(`/api/experiments/${encodeURIComponent(name)}/series?rois=${encodeURIComponent(JSON.stringify(rois))}${valid ? `&valid=${valid.min},${valid.max}` : ""}`)),
   seriesCsvUrl: (name: string, rois: unknown[]) =>
     u(`/api/experiments/${encodeURIComponent(name)}/export/series.csv?rois=${encodeURIComponent(JSON.stringify(rois))}`),
   frameExportUrl: (name: string, index: number, format: "csv" | "tiff" | "png" | "npy") =>
