@@ -28,8 +28,10 @@ export interface Ellipse extends Meta { id: number; kind: "ellipse"; cx: number;
 export interface Line extends Meta { id: number; kind: "line"; x0: number; y0: number; x1: number; y1: number; }
 /** Closed polygon through `points` (≥ 3); pixels inside (even-odd) or on the boundary belong. */
 export interface Polygon extends Meta { id: number; kind: "polygon"; points: [number, number][]; }
-export type Roi = Spot | Rect | Circle | Ellipse | Line | Polygon;
-export type RoiInput = Omit<Spot, "id"> | Omit<Rect, "id"> | Omit<Circle, "id"> | Omit<Ellipse, "id"> | Omit<Line, "id"> | Omit<Polygon, "id">;
+/** Open multi-segment line (ResearchIR "bendable line"); pixels along every segment. */
+export interface Polyline extends Meta { id: number; kind: "polyline"; points: [number, number][]; }
+export type Roi = Spot | Rect | Circle | Ellipse | Line | Polygon | Polyline;
+export type RoiInput = Omit<Spot, "id"> | Omit<Rect, "id"> | Omit<Circle, "id"> | Omit<Ellipse, "id"> | Omit<Line, "id"> | Omit<Polygon, "id"> | Omit<Polyline, "id">;
 /** Kinds whose stats are a mean/min/max over several pixels (everything but a spot). */
 export function isArea(roi: Roi): boolean { return roi.kind !== "spot"; }
 
@@ -55,15 +57,15 @@ export function visibleRois(rois: Roi[]): Roi[] { return rois.filter((r) => !r.h
 
 /** The same shape shifted by (dx, dy); shifts are clamped so no coordinate goes below zero. */
 export function moveRoi(roi: Roi, dx: number, dy: number): Roi {
-  const xs = (r: Roi): number[] => r.kind === "spot" ? [r.x] : r.kind === "circle" || r.kind === "ellipse" ? [r.cx] : r.kind === "polygon" ? r.points.map((p) => p[0]) : [r.x0, r.x1];
-  const ys = (r: Roi): number[] => r.kind === "spot" ? [r.y] : r.kind === "circle" || r.kind === "ellipse" ? [r.cy] : r.kind === "polygon" ? r.points.map((p) => p[1]) : [r.y0, r.y1];
+  const xs = (r: Roi): number[] => r.kind === "spot" ? [r.x] : r.kind === "circle" || r.kind === "ellipse" ? [r.cx] : r.kind === "polygon" || r.kind === "polyline" ? r.points.map((p) => p[0]) : [r.x0, r.x1];
+  const ys = (r: Roi): number[] => r.kind === "spot" ? [r.y] : r.kind === "circle" || r.kind === "ellipse" ? [r.cy] : r.kind === "polygon" || r.kind === "polyline" ? r.points.map((p) => p[1]) : [r.y0, r.y1];
   const ddx = Math.max(dx, -Math.min(...xs(roi)));
   const ddy = Math.max(dy, -Math.min(...ys(roi)));
   switch (roi.kind) {
     case "spot": return { ...roi, x: roi.x + ddx, y: roi.y + ddy };
     case "circle": case "ellipse": return { ...roi, cx: roi.cx + ddx, cy: roi.cy + ddy };
     case "rect": case "line": return { ...roi, x0: roi.x0 + ddx, y0: roi.y0 + ddy, x1: roi.x1 + ddx, y1: roi.y1 + ddy };
-    case "polygon": return { ...roi, points: roi.points.map(([x, y]) => [x + ddx, y + ddy] as [number, number]) };
+    case "polygon": case "polyline": return { ...roi, points: roi.points.map(([x, y]) => [x + ddx, y + ddy] as [number, number]) };
   }
 }
 
@@ -216,6 +218,14 @@ export function roiPixels(roi: Roi, w: number, h: number): number[] {
       }
       return out;
     }
+    case "polyline": {
+      const out: number[] = [];
+      for (let i = 1; i < roi.points.length; i++) {
+        const seg = linePixels(roi.points[i - 1][0], roi.points[i - 1][1], roi.points[i][0], roi.points[i][1]);
+        for (let j = i === 1 ? 0 : 1; j < seg.length; j++) { const [x, y] = seg[j]; if (inside(x, y)) out.push(y * w + x); }
+      }
+      return out;
+    }
     case "line":
       return linePixels(roi.x0, roi.y0, roi.x1, roi.y1).filter(([x, y]) => inside(x, y)).map(([x, y]) => y * w + x);
     case "polygon":
@@ -247,7 +257,7 @@ export function roiStats(field: Float32Array, w: number, h: number, roi: Roi, ra
   return out;
 }
 
-const PREFIX: Record<Roi["kind"], string> = { spot: "S", rect: "R", circle: "C", ellipse: "E", line: "L", polygon: "P" };
+const PREFIX: Record<Roi["kind"], string> = { spot: "S", rect: "R", circle: "C", ellipse: "E", line: "L", polygon: "P", polyline: "B" };
 /** The user's name when set, else a short id like S1 / R2 / C3 / L4 / P5. */
 export function roiLabel(roi: Roi): string {
   return roi.name || `${PREFIX[roi.kind]}${roi.id}`;
@@ -285,6 +295,8 @@ function asRoi(v: unknown): Roi | null {
     shape = { id: r.id, kind: "line", x0: r.x0, y0: r.y0, x1: r.x1, y1: r.y1 };
   } else if (r.kind === "polygon" && Array.isArray(r.points) && r.points.length >= 3 && r.points.every((p) => Array.isArray(p) && p.length === 2 && isInt(p[0]) && isInt(p[1]))) {
     shape = { id: r.id, kind: "polygon", points: r.points.map((p) => [p[0], p[1]] as [number, number]) };
+  } else if (r.kind === "polyline" && Array.isArray(r.points) && r.points.length >= 2 && r.points.every((p) => Array.isArray(p) && p.length === 2 && isInt(p[0]) && isInt(p[1]))) {
+    shape = { id: r.id, kind: "polyline", points: r.points.map((p) => [p[0], p[1]] as [number, number]) };
   }
   return shape ? { ...shape, ...meta } : null;
 }

@@ -77,6 +77,16 @@ def parse_rois(raw: str) -> list[dict[str, Any]]:
             if (r["x0"], r["y0"]) == (r["x1"], r["y1"]):
                 raise ValueError("line endpoints must differ")
             out.append({"id": rid, "kind": "line", **r})
+        elif kind == "polyline":
+            pts = it.get("points")
+            if not isinstance(pts, list) or len(pts) < 2:
+                raise ValueError("polyline needs at least 2 points")
+            points = []
+            for p in pts:
+                if not isinstance(p, list | tuple) or len(p) != 2:
+                    raise ValueError("polyline points must be [x, y] pairs")
+                points.append([_int(p[0], "x"), _int(p[1], "y")])
+            out.append({"id": rid, "kind": "polyline", "points": points})
         elif kind == "polygon":
             pts = it.get("points")
             if not isinstance(pts, list) or len(pts) < 3:
@@ -155,6 +165,16 @@ def roi_index(roi: dict[str, Any], w: int, h: int) -> tuple[np.ndarray, np.ndarr
     pts: list[tuple[int, int]]
     if kind == "spot":
         pts = [(int(roi["x"]), int(roi["y"]))]
+    elif kind == "polyline":
+        pts = roi["points"]
+        seq: list[tuple[int, int]] = []
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:], strict=False):
+            seg = _line_pixels(x0, y0, x1, y1)
+            seq.extend(seg[1:] if seq else seg)  # joints once
+        keep = [(x, y) for x, y in seq if 0 <= x < w and 0 <= y < h]
+        ys_l = np.array([y for _, y in keep], dtype=np.intp)
+        xs_l = np.array([x for x, _ in keep], dtype=np.intp)
+        return ys_l, xs_l
     elif kind == "ellipse":
         cx, cy, rx, ry = roi["cx"], roi["cy"], roi["rx"], roi["ry"]
         ys, xs = np.mgrid[

@@ -1,3 +1,4 @@
+import { UNITS, UNIT_LABEL, type Conversion, type Units } from "../lib/units.ts";
 import type { FilterName } from "../lib/filters.ts";
 import type { Agc } from "../lib/layout.ts";
 import { DEFAULT_ISOTHERM, type Isotherm } from "../lib/isotherm.ts";
@@ -25,10 +26,11 @@ interface Props {
   agc?: Agc; setAgc?: (a: Agc) => void;
   segment?: { on: boolean; min: number; max: number }; setSegment?: (s: { on: boolean; min: number; max: number }) => void;
   filter?: FilterName; setFilter?: (f: FilterName) => void;
+  units?: Units; setUnits?: (u: Units) => void; conv?: Conversion | null;
 }
 
 /** Palette + display-range controls shared by live view and playback. Visualization only. */
-export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, manual, setManual, shown, isotherm, setIsotherm, hasReference, onSetReference, onClearReference, onSnapshot, onRangeFromRoi, hold = "off", setHold, flipH = false, flipV = false, setFlip, saturation, agc, setAgc, segment, setSegment, filter = "off", setFilter }: Props) {
+export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, manual, setManual, shown, isotherm, setIsotherm, hasReference, onSetReference, onClearReference, onSnapshot, onRangeFromRoi, hold = "off", setHold, flipH = false, flipV = false, setFlip, saturation, agc, setAgc, segment, setSegment, filter = "off", setFilter, units = "C", setUnits, conv = null }: Props) {
   const iso = isotherm ?? DEFAULT_ISOTHERM;
   const upd = (patch: Partial<Isotherm>) => setIsotherm?.({ ...iso, ...patch });
   const isoRow = setIsotherm && (
@@ -52,6 +54,14 @@ export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, 
   );
   return (
     <>
+      {setUnits && (
+        <div className="row" aria-label="units">
+          <span className="hint">units</span>
+          <select value={units} onChange={(e) => setUnits(e.target.value as Units)} aria-label="display units" title="Units for every temperature readout (values, ROI rows, colour bar). Inputs such as range limits stay in °C. Counts = the camera's raw 16-bit value.">
+            {UNITS.map((u) => <option key={u} value={u}>{UNIT_LABEL[u]}</option>)}
+          </select>
+        </div>
+      )}
       {onSnapshot && (
         <div className="row">
           <button className="secondary" onClick={onSnapshot} title="Download the thermal image with its ROIs, palette and a caption line as a PNG at native resolution">⤓ save image</button>
@@ -115,7 +125,7 @@ export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, 
           onChange={(e) => { const base = scaleMode === "manual" ? manual : { min: Math.round(shown.min * 10) / 10, max: shown.max }; setManual({ ...base, max: Number(e.target.value) }); setScaleMode("manual"); }} /> °C</label>
       </div>
       <div className="hint">{scaleMode === "auto" ? "Auto: the range follows each frame's min and max. Type a limit to lock it." : "Locked: colours stay fixed at these limits; values outside clip. \"Auto range\" returns to per-frame scaling."}</div>
-      <ColorBar palette={palette} range={shown} />
+      <ColorBar palette={palette} range={shown} units={units} conv={conv} />
     </>
   );
 }

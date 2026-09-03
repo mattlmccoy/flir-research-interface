@@ -222,3 +222,13 @@ test("display filter lives in the layout (off by default) and persists", () => {
   assert.equal(loadLayout(storage).filter, "median3");
   assert.equal(loadLayout({ getItem: () => JSON.stringify({ filter: "sharpen9000" }), setItem: () => undefined } as unknown as Storage).filter, "off");
 });
+
+test("display units live in the layout (°C default) and persist; unknown falls back", () => {
+  assert.equal(DEFAULT_LAYOUT.units, "C");
+  const s1 = layoutReducer(DEFAULT_LAYOUT, { type: "setUnits", units: "K" });
+  const store = new Map<string, string>();
+  const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); } } as unknown as Storage;
+  saveLayout(storage, s1);
+  assert.equal(loadLayout(storage).units, "K");
+  assert.equal(loadLayout({ getItem: () => JSON.stringify({ units: "rankine" }), setItem: () => undefined } as unknown as Storage).units, "C");
+});

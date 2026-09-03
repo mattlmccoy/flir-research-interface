@@ -30,6 +30,7 @@ export function hitTest(rois: Roi[], x: number, y: number, tol: number): number 
     const r = rois[i];
     if (r.kind === "spot" && Math.abs(r.x - x) <= tol && Math.abs(r.y - y) <= tol) return r.id;
     if (r.kind === "line" && segmentDistance(x, y, r.x0, r.y0, r.x1, r.y1) <= tol) return r.id;
+    if (r.kind === "polyline" && r.points.some((p, i) => i > 0 && segmentDistance(x, y, r.points[i - 1][0], r.points[i - 1][1], p[0], p[1]) <= tol)) return r.id;
   }
   for (let i = rois.length - 1; i >= 0; i--) {
     const r = rois[i];

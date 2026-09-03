@@ -9,7 +9,7 @@ import {
   saveRois,
   visibleRois,
   type Roi,
-  type RoiState, roiPixels, moveRoi } from "./roi.ts";
+  type RoiState, roiPixels, moveRoi, isArea } from "./roi.ts";
 
 const EMPTY: RoiState = { rois: [], selected: null, nextId: 1 };
 
@@ -300,4 +300,13 @@ test("segmentation: pixels outside the valid range are excluded from stats and c
   const all = roiStats(f, 6, 1, rect, null, { min: 100, max: 200 });
   assert.equal(all.n, 0);
   assert.equal(all.excluded, 6);
+});
+
+test("polyline ROI: pixels along every segment in order, no duplicated joints; movable; labelled B", () => {
+  const pl = { id: 1, kind: "polyline" as const, points: [[0, 0], [3, 0], [3, 2]] as [number, number][] };
+  const px = roiPixels(pl, 5, 5);
+  assert.deepEqual(px, [0, 1, 2, 3, 8, 13]);  // (0..3,0) then (3,1),(3,2)
+  assert.deepEqual((moveRoi(pl, 1, 1) as typeof pl).points, [[1, 1], [4, 1], [4, 3]]);
+  assert.equal(roiLabel(pl), "B1");
+  assert.ok(isArea(pl));
 });

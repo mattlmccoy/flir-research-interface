@@ -1,3 +1,5 @@
+import { fmtTemp, type Conversion, type Units } from "../lib/units.ts";
+import { simplifyPath } from "../lib/geometry.ts";
 import { applyFilter, type FilterName } from "../lib/filters.ts";
 import { applyMap, plateauMap } from "../lib/agc.ts";
 import type { Agc } from "../lib/layout.ts";
@@ -52,7 +54,7 @@ interface Props {
   /** Isotherm painted over the palette. */
   isotherm?: Isotherm | null;
   /** The decoded °C field of the frame just drawn (for profiles / histograms). */
-  onField?: (snap: { c: Float32Array; w: number; h: number }) => void;
+  onField?: (snap: { c: Float32Array; w: number; h: number; conv?: Conversion }) => void;
   /** Captured °C field: when set, the image shows (frame − reference) on a diverging scale. */
   reference?: Float32Array | null;
   /** Temporal hold mode; the shown field becomes the per-pixel max/min since the last reset. */
@@ -65,6 +67,8 @@ interface Props {
   valid?: Range | null;
   /** Display-only image filter applied before hold / subtraction / AGC. */
   filter?: FilterName;
+  /** Units for the hover readout. */
+  units?: Units;
 }
 
 /** The shape a drag from `a` to `b` produces for the active tool (null when degenerate). */
@@ -90,9 +94,12 @@ export function dragShape(tool: Tool, a: Pt, b: Pt, w: number, h: number): RoiIn
 /** Renders raw counts -> °C -> palette on a canvas, with an ROI overlay layer. Data arrays are never mutated. */
 const divergingLut = buildLut("diverging");
 
-export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois = NO_ROIS, selected = null, tool = "select", zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null, hold = "off", flipH = false, flipV = false, agc = LINEAR_AGC, valid = null, filter = "off" }: Props) {
+export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois = NO_ROIS, selected = null, tool = "select", zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null, hold = "off", flipH = false, flipV = false, agc = LINEAR_AGC, valid = null, filter = "off", units = "C" }: Props) {
   const viewRef = useRef<HTMLDivElement>(null);
   const holdRef = useRef<HoldBuffer | null>(null);
+  const freehand = useRef<[number, number][] | null>(null);
+  const miniRef = useRef<HTMLCanvasElement>(null);
+  const [viewportTick, setViewportTick] = useState(0);
   const panning = useRef<{ cx: number; cy: number; sl: number; st: number } | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const celsiusRef = useRef<Float32Array | null>(null);
@@ -130,7 +137,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
     const { header, counts } = frame;
     const c = countsToCelsius(counts, header.kelvin_per_count, header.kelvin_offset);
     celsiusRef.current = c;
-    onField?.({ c, w: header.width, h: header.height });
+    onField?.({ c, w: header.width, h: header.height, conv: header.kelvin_per_count != null ? { kelvin_per_count: header.kelvin_per_count, kelvin_offset: header.kelvin_offset } : undefined });
     const filtered = filter === "off" ? c : applyFilter(filter, c, header.width, header.height);
     if (hold === "off") holdRef.current = null;
     else if (!holdRef.current || holdRef.current.mode !== hold) holdRef.current = new HoldBuffer(hold);
@@ -153,6 +160,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
     else mapToRgba(shownField, range.min, range.max, lutNow, img.data);
     if (isotherm) applyIsotherm(c, img.data, isotherm);
     ctx.putImageData(img, 0, 0);
+    drawMinimap();
   }, [frame, palette, scaleMode, manual.min, manual.max, isotherm, reference, hold, agc.mode, agc.plateau, filter]);
 
   useEffect(() => {
@@ -172,7 +180,9 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
   }
   function finishPolygon(pts: [number, number][]) {
     setVertices([]); setDraft(null);
-    if (pts.length >= 3 && onRoi) onRoi({ type: "add", roi: { kind: "polygon", points: pts } });
+    if (!onRoi) return;
+    if (tool === "polyline") { if (pts.length >= 2) onRoi({ type: "add", roi: { kind: "polyline", points: pts } }); return; }
+    if (pts.length >= 3) onRoi({ type: "add", roi: { kind: "polygon", points: pts } });
   }
   function onDown(e: RPointerEvent<HTMLCanvasElement>) {
     const p = pix(e);
@@ -185,13 +195,18 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
       try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* synthetic or already-released pointer */ }
       return;
     }
-    if (tool === "polygon") {
+    if (tool === "polygon" || tool === "polyline") {
       if (e.detail >= 2) return; // the double-click handler closes the shape
       const last = vertices[vertices.length - 1];
       if (last && last[0] === p.x && last[1] === p.y) return;
       const next: [number, number][] = [...vertices, [p.x, p.y]];
       setVertices(next);
-      setDraft(next.length >= 2 ? { kind: "polygon", points: next } : null);
+      setDraft(next.length >= 2 ? { kind: tool, points: next } : null);
+      return;
+    }
+    if (tool === "freehand") {
+      freehand.current = [[p.x, p.y]];
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
       return;
     }
     const hit = hitTest(visibleRois(rois), p.x, p.y, HIT_TOL_PX);
@@ -223,10 +238,20 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
     }
     const s = dragStart.current;
     if (s && (tool === "rect" || tool === "circle" || tool === "ellipse" || tool === "line")) setDraft(dragShape(tool, s, p, hdr.width, hdr.height));
-    else if (tool === "polygon" && vertices.length >= 1) setDraft({ kind: "polygon", points: [...vertices, [p.x, p.y]] });
+    else if ((tool === "polygon" || tool === "polyline") && vertices.length >= 1) setDraft({ kind: tool, points: [...vertices, [p.x, p.y]] });
+    else if (tool === "freehand" && freehand.current) {
+      const fh = freehand.current, last = fh[fh.length - 1];
+      if (Math.abs(last[0] - p.x) + Math.abs(last[1] - p.y) >= 1) { fh.push([p.x, p.y]); setDraft(fh.length >= 2 ? { kind: "polygon", points: fh.slice() } : null); }
+    }
   }
   function onUp(e: RPointerEvent<HTMLCanvasElement>) {
     if (panning.current) { panning.current = null; return; }
+    if (freehand.current) {
+      const pts = simplifyPath(freehand.current, 1.0);
+      freehand.current = null; setDraft(null);
+      if (pts.length >= 3 && onRoi) onRoi({ type: "add", roi: { kind: "polygon", points: pts } });
+      return;
+    }
     if (moving.current) { moving.current = null; return; }
     const s = dragStart.current;
     if (!s || !hdr) return;
@@ -237,21 +262,44 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
     if (shape && onRoi) onRoi({ type: "add", roi: shape });
   }
   function onKey(e: RKeyboardEvent<HTMLCanvasElement>) {
-    if (tool === "polygon" && vertices.length) {
+    if ((tool === "polygon" || tool === "polyline") && vertices.length) {
       if (e.key === "Enter") { e.preventDefault(); finishPolygon(vertices); return; }
       if (e.key === "Escape") { setVertices([]); setDraft(null); return; }
-      if (e.key === "Backspace") { e.preventDefault(); const v = vertices.slice(0, -1); setVertices(v); setDraft(v.length >= 2 ? { kind: "polygon", points: v } : null); return; }
+      if (e.key === "Backspace") { e.preventDefault(); const v = vertices.slice(0, -1); setVertices(v); setDraft(v.length >= 2 ? { kind: tool, points: v } : null); return; }
     }
     if (!onRoi || selected === null) return;
     if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); onRoi({ type: "remove", id: selected }); }
     else if (e.key === "Escape") onRoi({ type: "select", id: null });
   }
 
+  function drawMinimap() {
+    const mini = miniRef.current, main = canvasRef.current, v = viewRef.current;
+    if (!mini || !main || !v || zoom === "fit" || main.width === 0) return;
+    const mw = 160, mh = Math.round(mw * main.height / main.width);
+    if (mini.width !== mw || mini.height !== mh) { mini.width = mw; mini.height = mh; }
+    const mctx = mini.getContext("2d"); if (!mctx) return;
+    mctx.imageSmoothingEnabled = true;
+    mctx.drawImage(main, 0, 0, mw, mh);
+    const cw = main.clientWidth || 1, ch = main.clientHeight || 1;
+    const rx = v.scrollLeft / cw, ry = v.scrollTop / ch, rw = Math.min(1, v.clientWidth / cw), rh = Math.min(1, v.clientHeight / ch);
+    mctx.strokeStyle = "#ffb000"; mctx.lineWidth = 1.5;
+    mctx.strokeRect(rx * mw + 0.5, ry * mh + 0.5, rw * mw - 1, rh * mh - 1);
+  }
+  function miniJump(e: React.PointerEvent<HTMLCanvasElement>) {
+    const mini = miniRef.current, main = canvasRef.current, v = viewRef.current;
+    if (!mini || !main || !v || e.buttons === 0) return;
+    const r = mini.getBoundingClientRect();
+    const fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
+    v.scrollLeft = fx * main.clientWidth - v.clientWidth / 2;
+    v.scrollTop = fy * main.clientHeight - v.clientHeight / 2;
+    setViewportTick((t) => t + 1);
+  }
   const size = hdr ? displaySize(hdr.width, hdr.height, cell.w, cell.h, zoom) : null;
+  useEffect(() => { drawMinimap(); }, [viewportTick, zoom, size?.width, size?.height]);  // eslint-disable-line react-hooks/exhaustive-deps
   const drawing = tool !== "select";
-  const help = tool === "polygon" && vertices.length ? `${vertices.length} point${vertices.length > 1 ? "s" : ""} · double-click or Enter closes the polygon · Esc cancels` : null;
+  const help = (tool === "polygon" || tool === "polyline") && vertices.length ? `${vertices.length} point${vertices.length > 1 ? "s" : ""} · double-click or Enter ${tool === "polygon" ? "closes the polygon" : "ends the line"} · Esc cancels` : null;
   return (
-    <div className={`view ${zoom === "fit" ? "" : "scroll"}`} ref={viewRef}>
+    <div className={`view ${zoom === "fit" ? "" : "scroll"}`} ref={viewRef} onScroll={() => { if (zoom !== "fit") setViewportTick((t) => t + 1); }}>
       <canvas ref={canvasRef} style={{ ...(size ? { width: size.width, height: size.height } : {}), transform: flipH || flipV ? `scale(${flipH ? -1 : 1}, ${flipV ? -1 : 1})` : undefined }} />
       {overlay && box && (
         <div className="visible-overlay" style={{ left: box.left, top: box.top, width: box.width, height: box.height, opacity: overlayStyle?.opacity ?? 0.5, transform: flipH || flipV ? `scale(${flipH ? -1 : 1}, ${flipV ? -1 : 1})` : undefined }}>
@@ -263,11 +311,15 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
       {hdr && box && (
         <RoiOverlay box={box} width={hdr.width} height={hdr.height} rois={rois} selected={selected} stats={stats} draft={draft} extremes={extremes} flipH={flipH} flipV={flipV} cursor={drawing ? "crosshair" : selected !== null ? "move" : zoom !== "fit" ? "grab" : "default"}
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => { setHover(null); moving.current = null; panning.current = null; }} onKeyDown={onKey}
-          onDoubleClick={() => { if (tool === "polygon") finishPolygon(vertices); }} />
+          onDoubleClick={() => { if (tool === "polygon" || tool === "polyline") finishPolygon(vertices); }} />
       )}
       {topLayer && box && <div className="top-layer" style={{ left: box.left, top: box.top, width: box.width, height: box.height }}>{topLayer}</div>}
       {hover && (
-        <div className="readout">{`x ${hover.x}   y ${hover.y}\nT ${Number.isNaN(hover.t) ? "n/a (not temperature-linear)" : `${hover.t.toFixed(2)} °C`}${help ? `\n${help}` : ""}`}</div>
+        <div className="readout">{`x ${hover.x}   y ${hover.y}\nT ${Number.isNaN(hover.t) ? "n/a (not temperature-linear)" : fmtTemp(hover.t, units, hdr && hdr.kelvin_per_count != null ? { kelvin_per_count: hdr.kelvin_per_count, kelvin_offset: hdr.kelvin_offset } : null)}${help ? `\n${help}` : ""}`}</div>
+      )}
+      {zoom !== "fit" && frame && (
+        <canvas ref={miniRef} className="minimap" aria-label="minimap: drag to move the view" title="Minimap: click or drag to move the view"
+          onPointerDown={(e) => { (e.currentTarget as HTMLCanvasElement).setPointerCapture(e.pointerId); miniJump(e); }} onPointerMove={miniJump} />
       )}
       {!frame && <div className="readout">no frames</div>}
     </div>

@@ -1,8 +1,9 @@
+import { UNITS, type Units } from "./units.ts";
 import { FILTER_NAMES, type FilterName } from "./filters.ts";
 import { DEFAULT_ISOTHERM, parseIsotherm, type Isotherm } from "./isotherm.ts";
 /** Studio layout state (spec §3): which panels are open, which rail sections, which tool, image zoom. */
 import { isZoom, type Zoom } from "./zoom.ts";
-export const TOOLS = ["select", "spot", "rect", "circle", "ellipse", "line", "polygon"] as const;
+export const TOOLS = ["select", "spot", "rect", "circle", "ellipse", "line", "polyline", "polygon", "freehand"] as const;
 const isDelta = (v: unknown): v is { a: number; b: number } => !!v && typeof v === "object" && Number.isInteger((v as { a: unknown }).a) && Number.isInteger((v as { b: unknown }).b);
 export interface Agc { mode: "linear" | "plateau"; plateau: number; }
 function parseAgc(v: unknown): Agc {
@@ -62,6 +63,8 @@ export interface LayoutState {
   segment: { on: boolean; min: number; max: number };
   /** Display-only image filter (blur / median). */
   filter: FilterName;
+  /** Display units for every temperature readout (°C, K, °F, raw counts). */
+  units: Units;
   /** Overlay registration: opacity 0–1, scale 0.5–2 and offsets in % of the image (visible lens ≠ IR lens). */
   overlay: Overlay;
   sections: Record<Section, boolean>;
@@ -110,6 +113,7 @@ export const DEFAULT_LAYOUT: LayoutState = {
   agc: { mode: "linear", plateau: 0.5 },
   segment: { on: false, min: 0, max: 100 },
   filter: "off",
+  units: "C",
   overlay: DEFAULT_OVERLAY,
   sections: { measurements: true, profile: false, camera: true, experiment: true, recording: true, display: true, export: true, visible: true },
 };
@@ -133,6 +137,7 @@ export type LayoutAction =
   | { type: "setAgc"; agc: Agc }
   | { type: "setSegment"; segment: { on: boolean; min: number; max: number } }
   | { type: "setFilter"; filter: FilterName }
+  | { type: "setUnits"; units: Units }
   | { type: "setVisibleMode"; mode: VisibleMode }
   | { type: "setOverlay"; patch: Partial<Overlay> }
   | { type: "collapseAll" }
@@ -158,6 +163,7 @@ export function layoutReducer(s: LayoutState, a: LayoutAction): LayoutState {
     case "setFlip": return { ...s, flipH: a.h, flipV: a.v };
     case "setHold": return { ...s, hold: a.hold };
     case "setAgc": return { ...s, agc: parseAgc(a.agc) };
+    case "setUnits": return { ...s, units: (UNITS as readonly string[]).includes(a.units) ? a.units : "C" };
     case "setFilter": return { ...s, filter: (FILTER_NAMES as readonly string[]).includes(a.filter) ? a.filter : "off" };
     case "setSegment": return { ...s, segment: { on: !!a.segment.on, min: Math.min(a.segment.min, a.segment.max), max: Math.max(a.segment.min, a.segment.max) } };
     case "dockBack": { const { [a.section]: _gone, ...rest } = s.floating; return { ...s, floating: rest }; }
@@ -212,6 +218,7 @@ export function loadLayout(storage: Storage | null): LayoutState {
       agc: parseAgc(parsed.agc),
       segment: parseSegment(parsed.segment),
       filter: (FILTER_NAMES as readonly string[]).includes(parsed.filter as string) ? (parsed.filter as FilterName) : "off",
+      units: (UNITS as readonly string[]).includes(parsed.units as string) ? (parsed.units as Units) : "C",
       overlay: clampOverlay({
         opacity: num(ov.opacity, DEFAULT_OVERLAY.opacity),
         scale: num(ov.scale, DEFAULT_OVERLAY.scale),

@@ -4,7 +4,7 @@ import { isArea, roiLabel, type Roi } from "../lib/roi.ts";
 import { roiColor } from "../lib/overlay.ts";
 import type { Range } from "../lib/scale.ts";
 
-export interface FieldSnapshot { c: Float32Array; w: number; h: number; }
+export interface FieldSnapshot { c: Float32Array; w: number; h: number; conv?: { kelvin_per_count: number; kelvin_offset: number }; }
 
 interface Props { field: FieldSnapshot | null; rois: Roi[]; selected: number | null; shown: Range; }
 

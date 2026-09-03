@@ -127,7 +127,7 @@ def test_parse_rois_accepts_circle_line_polyline() -> None:
         parse_rois(json.dumps([{"id": 1, "kind": "polygon", "points": [[0, 0], [1, 1]]}]))
 
 
-def test_roi_series_circle_line_polyline_match_pixel_enumeration(tmp_path: Path) -> None:
+def test_roi_series_circle_line_polygon_match_pixel_enumeration(tmp_path: Path) -> None:
     d = _make_experiment(tmp_path, n=2)
     r = ExperimentReader(d)
     out = roi_series(
@@ -135,7 +135,7 @@ def test_roi_series_circle_line_polyline_match_pixel_enumeration(tmp_path: Path)
         [
             {"id": 1, "kind": "circle", "cx": 2, "cy": 1, "r": 1},  # 5-pixel plus at the block edge
             {"id": 2, "kind": "line", "x0": 0, "y0": 1, "x1": 7, "y1": 1},  # row 1: 2 hot of 8
-            {"id": 3, "kind": "polyline", "points": [[0, 0], [7, 0], [7, 5]]},  # all background
+            {"id": 3, "kind": "polygon", "points": [[0, 0], [7, 0], [7, 5]]},  # triangle x >= y
         ],
     )
     s1, s2, s3 = (out["series"][k] for k in ("1", "2", "3"))
@@ -203,3 +203,20 @@ def test_series_segmentation_excludes_pixels_outside_the_valid_range(tmp_path: P
     seg = roi_series(r, [rect], valid_c=(25.5, 1000.0))["series"]["1"]
     assert seg["mean"][0] is None or seg["mean"][0] > plain["mean"][0]  # 25.0 pixels dropped
     assert "n" in seg and seg["n"][0] < 12
+
+
+def test_polyline_roi_is_parsed_and_indexed(tmp_path: Path) -> None:
+    from flir_research_interface.analysis.series import parse_rois, roi_index
+
+    rois = parse_rois('[{"id":1,"kind":"polyline","points":[[0,0],[3,0],[3,2]]}]')
+    ys, xs = roi_index(rois[0], 5, 5)
+    assert list(zip(ys.tolist(), xs.tolist(), strict=True)) == [
+        (0, 0),
+        (0, 1),
+        (0, 2),
+        (0, 3),
+        (1, 3),
+        (2, 3),
+    ]
+    with pytest.raises(ValueError):
+        parse_rois('[{"id":1,"kind":"polyline","points":[[0,0]]}]')

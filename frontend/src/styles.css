@@ -210,3 +210,6 @@ ul.help li { line-height: 1.35; }
 .dock .dock-foot > span { flex: 1 1 auto; min-width: 0; }
 .dock .dock-foot button { height: 22px; line-height: 20px; padding: 0 8px; }
 .dock .dock-foot select { height: 22px; padding: 0 4px; }
+
+/* ---- Minimap (zoomed) ------------------------------------------------------------- */
+.view .minimap { position: absolute; right: 12px; top: 12px; width: 160px; border: 1px solid var(--line-control); background: var(--scrim); opacity: 0.9; cursor: crosshair; image-rendering: auto; z-index: 3; }

@@ -1,9 +1,11 @@
+import { convertTemp, fmtTemp, type Conversion, type Units } from "../lib/units.ts";
 import { useState } from "react";
 import { roiId, roiLabel, type Roi, type RoiAction, type RoiStats, loadRois } from "../lib/roi.ts";
 import { COLOR_PRESETS, roiColor } from "../lib/overlay.ts";
 import { Disclosure } from "./Disclosure.tsx";
 
 interface Props {
+  units?: Units; conv?: Conversion | null;
   /** Hot/cold marker toggle (undefined hides the button). */
   extremes?: boolean; onExtremes?: (on: boolean) => void;
   rois: Roi[];
@@ -12,18 +14,20 @@ interface Props {
   dispatch: (a: RoiAction) => void;
 }
 
-function Values({ s }: { s: RoiStats | undefined }) {
+function Values({ s, units, conv }: { s: RoiStats | undefined; units: Units; conv: Conversion | null }) {
   if (!s) return <span className="vals">…</span>;
   if (s.n === 0 || s.mean === null) return <span className="vals">n/a</span>;
-  return <span className="vals">{s.mean.toFixed(2)} °C</span>;
+  return <span className="vals">{fmtTemp(s.mean, units, conv)}</span>;
 }
 
 /** Second line under an area ROI: min · max · σ · pixel count (full width, never overlaps the name). */
-function StatsLine({ r, s }: { r: Roi; s: RoiStats | undefined }) {
+function StatsLine({ r, s, units, conv }: { r: Roi; s: RoiStats | undefined; units: Units; conv: Conversion | null }) {
   if (!s || s.n === 0 || s.mean === null || r.kind === "spot") return null;
+  const f = (v: number) => (units === "counts" ? fmtTemp(v, units, conv) : convertTemp(v, units, conv).toFixed(2));
+  const sd = s.std !== undefined ? (units === "F" ? (s.std * 9 / 5).toFixed(2) : units === "counts" && conv ? String(Math.round(s.std / conv.kelvin_per_count)) : s.std.toFixed(2)) : null;
   return (
     <small className="roi-stats">
-      min {(s.min as number).toFixed(2)} · max {(s.max as number).toFixed(2)}{s.std !== undefined ? ` · σ ${s.std.toFixed(2)}` : ""} · {s.n} px{s.excluded ? ` (${s.excluded} excluded)` : ""}
+      min {f(s.min as number)} · max {f(s.max as number)}{sd !== null ? ` · σ ${sd}` : ""} · {s.n} px{s.excluded ? ` (${s.excluded} excluded)` : ""}
     </small>
   );
 }
@@ -36,6 +40,7 @@ function where(r: Roi): string {
     case "ellipse": return `ellipse centre (${r.cx}, ${r.cy}) rx ${r.rx} ry ${r.ry} px`;
     case "line": return `line (${r.x0}, ${r.y0}) → (${r.x1}, ${r.y1})`;
     case "polygon": return `polygon with ${r.points.length} vertices`;
+    case "polyline": return `bendable line with ${r.points.length} vertices`;
   }
 }
 
@@ -65,7 +70,7 @@ function ColorPicker({ r, i, dispatch, onDone }: { r: Roi; i: number; dispatch: 
 }
 
 /** One row per ROI: colour swatch (click to change), editable name, current values, remove. */
-export function RoiRows({ rois, stats, selected, dispatch, extremes, onExtremes }: Props) {
+export function RoiRows({ rois, stats, selected, dispatch, extremes, onExtremes, units = "C", conv = null }: Props) {
   const [editing, setEditing] = useState<number | null>(null);
   const [picking, setPicking] = useState<number | null>(null);
   const help = (
@@ -75,7 +80,7 @@ export function RoiRows({ rois, stats, selected, dispatch, extremes, onExtremes 
         <li>▭ Rectangle: drag corner to corner.</li>
         <li>◯ Circle: drag from the centre outwards. ⬭ Ellipse: drag its bounding box corner to corner.</li>
         <li>╱ Line: drag from one end to the other; the pixels along it are measured.</li>
-        <li>⬠ Polygon: click each vertex; double-click places the last one and closes the shape (Enter closes, Esc cancels, Backspace undoes a vertex).</li>
+        <li>⬠ Polygon: click each vertex; double-click places the last one and closes the shape (Enter closes, Esc cancels, Backspace undoes a vertex). ⌇ Bendable line: the same, but open. ✎ Freehand: hold the mouse and draw; releasing closes the shape.</li>
         <li>↖ Select: click an ROI, then drag to move it; Delete removes it.</li>
         <li>Click the colour square to recolour, set a per-ROI emissivity and reflected temperature (values are re-corrected from the camera's setting); double-click the name to rename; ◉ hides an ROI on the image and plot without removing it.</li>
       </ul>
@@ -101,12 +106,12 @@ export function RoiRows({ rois, stats, selected, dispatch, extremes, onExtremes 
                 </button>
               )}
             </span>,
-            <Values key={`v${r.id}`} s={stats.get(r.id)} />,
+            <Values key={`v${r.id}`} s={stats.get(r.id)} units={units} conv={conv} />,
             <span key={`x${r.id}`} style={{ display: "flex", gap: 4 }}>
               <button className="secondary" type="button" onClick={() => dispatch({ type: "toggleHidden", id: r.id })} aria-pressed={!!r.hidden} aria-label={`${r.hidden ? "Show" : "Hide"} ${roiLabel(r)}`} title={r.hidden ? "Hidden on the image (still measured and recorded) · click to show" : "Hide on the image (still measured and recorded)"} style={{ opacity: r.hidden ? 0.5 : 1 }}>{r.hidden ? "◌" : "◉"}</button>
               <button className="secondary" type="button" onClick={() => dispatch({ type: "remove", id: r.id })} aria-label={`Remove ${roiLabel(r)}`} title="Remove">×</button>
             </span>,
-            <StatsLine key={`s${r.id}`} r={r} s={stats.get(r.id)} />,
+            <StatsLine key={`s${r.id}`} r={r} s={stats.get(r.id)} units={units} conv={conv} />,
             picking === r.id ? <div key={`c${r.id}`} style={{ gridColumn: "1 / -1" }}><ColorPicker r={r} i={i} dispatch={dispatch} onDone={() => setPicking(null)} /></div> : null,
           ]
         ))}

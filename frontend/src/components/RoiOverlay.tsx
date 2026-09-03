@@ -82,6 +82,13 @@ function drawShape(ctx: CanvasRenderingContext2D, r: RoiInput, sx: number, sy: n
       ctx.beginPath(); ctx.moveTo(x - 4, y); ctx.lineTo(x + 4, y); ctx.moveTo(x, y - 4); ctx.lineTo(x, y + 4); ctx.stroke();
       return [x - r.r * sx, y - r.r * sy - 3];
     }
+    case "polyline": {
+      ctx.beginPath();
+      r.points.forEach(([x, y], i) => { const px = (x + 0.5) * sx, py = (y + 0.5) * sy; if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py); });
+      ctx.stroke();
+      for (const [x, y] of r.points) { ctx.beginPath(); ctx.arc((x + 0.5) * sx, (y + 0.5) * sy, 3, 0, Math.PI * 2); ctx.stroke(); }
+      return [Math.min(...r.points.map((p) => (p[0] + 0.5) * sx)), Math.min(...r.points.map((p) => (p[1] + 0.5) * sy)) - 3];
+    }
     case "line": {
       const ax = (r.x0 + 0.5) * sx, ay = (r.y0 + 0.5) * sy, bx = (r.x1 + 0.5) * sx, by = (r.y1 + 0.5) * sy;
       ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();

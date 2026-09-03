@@ -1,8 +1,9 @@
+import { convertTemp, fmtTemp, type Conversion, type Units } from "../lib/units.ts";
 import { useEffect, useRef } from "react";
 import { buildLut, type PaletteName } from "../lib/palette.ts";
 import type { Range } from "../lib/scale.ts";
 
-export function ColorBar({ palette, range }: { palette: PaletteName; range: Range }) {
+export function ColorBar({ palette, range, units = "C", conv = null }: { palette: PaletteName; range: Range; units?: Units; conv?: Conversion | null }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const c = ref.current;
@@ -16,9 +17,9 @@ export function ColorBar({ palette, range }: { palette: PaletteName; range: Rang
   }, [palette]);
   return (
     <div className="colorbar">
-      <span className="v">{range.min.toFixed(1)}</span>
+      <span className="v">{units === "counts" ? fmtTemp(range.min, units, conv) : convertTemp(range.min, units, conv).toFixed(1)}</span>
       <canvas ref={ref} />
-      <span className="v">{range.max.toFixed(1)} °C</span>
+      <span className="v">{fmtTemp(range.max, units, conv, 1)}</span>
     </div>
   );
 }

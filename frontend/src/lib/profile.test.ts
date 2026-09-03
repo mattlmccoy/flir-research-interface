@@ -23,3 +23,10 @@ test("histogram bins the field (or an ROI) between lo and hi, NaN ignored", () =
   const roi = histogram(f, 12, 1, { id: 1, kind: "rect", x0: 0, y0: 0, x1: 4, y1: 1 }, { lo: 0, hi: 10, bins: 5 });
   assert.deepEqual(roi.counts, [2, 2, 0, 0, 0]);
 });
+
+test("lineProfile along a polyline accumulates distance across segments", () => {
+  const f = new Float32Array(25).map((_, i) => i);
+  const p = lineProfile(f, 5, 5, { id: 1, kind: "polyline", points: [[0, 0], [2, 0], [2, 2]] });
+  assert.deepEqual(p.v, [0, 1, 2, 7, 12]);
+  assert.deepEqual(p.d, [0, 1, 2, 3, 4]);
+});

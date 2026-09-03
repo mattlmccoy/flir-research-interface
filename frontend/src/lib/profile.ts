@@ -2,16 +2,19 @@
  * Line profiles and histograms over the °C field (Research Studio's "line" and "histogram"
  * tools). Pure functions; the same code serves live frames and playback.
  */
-import { roiPixels, type Line, type Roi } from "./roi.ts";
+import { roiPixels, type Line, type Polyline, type Roi } from "./roi.ts";
 
 export interface Profile { d: number[]; v: number[]; }
 
 /** Temperature along a line ROI, Bresenham order; `d` is the distance from the start in pixels. */
-export function lineProfile(field: Float32Array, w: number, h: number, roi: Line): Profile {
+export function lineProfile(field: Float32Array, w: number, h: number, roi: Line | Polyline): Profile {
   const d: number[] = [], v: number[] = [];
+  let prev: [number, number] | null = null, acc = 0;
   for (const k of roiPixels(roi, w, h)) {
     const x = k % w, y = Math.floor(k / w);
-    d.push(Math.hypot(x - roi.x0, y - roi.y0));
+    if (prev) acc += Math.hypot(x - prev[0], y - prev[1]);
+    prev = [x, y];
+    d.push(acc);
     v.push(field[k]);
   }
   return { d, v };
