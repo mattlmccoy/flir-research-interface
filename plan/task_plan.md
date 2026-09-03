@@ -36,7 +36,7 @@ the probe output from the real A70 before touching radiometric node names.
 
 ### Blocked on the user
 - [ ] P0 Research Studio comparison (software equivalence): fri-live vs Research Studio on available scenes (room temperature, a warm object such as a hand/laptop/coffee mug), same case/object params -> docs/validation.md table. No hot targets exist; the camera's 3 factory cases ARE the calibration, we never do our own.
-- [ ] P0 Free disk space on the acquisition Mac (~2.9 GiB free; recording needs ~1.1 GB/min raw).
+- [x] P0 Free disk space on the acquisition Mac (40 GB free on 2026-09-02; Dropbox online-only would free ~320 GB more).
 - [ ] P2 (optional) `brew reinstall libbluray` or `brew reinstall ffmpeg` to repair the broken Homebrew ffmpeg 7.
 
 ### Development (next milestones)
@@ -49,7 +49,7 @@ the probe output from the real A70 before touching radiometric node names.
 - [x] M4 Recording (2026-09-01): Zarr v2 (docs/data_format.md); recorder + API + UI verified on the A70 (291 frames, 0 drops). Camera-controls panel (case/object params/NUC/frame rate, block-while-recording) still TODO -> fold into M6/M8.
 - [x] M5 Playback (2026-09-01): ExperimentReader (read-only), experiments/timeline/frame endpoints, Experiments + Playback pages (scrub, play/pause, step, speed, keyboard), store hash unchanged after playback.
 - [x] UI plan 1 (2026-09-02, branch feat/ui-studio): tokens+fonts, layout reducer, Studio shell, live/playback in frame, previews (preview.png/keyframes.png/previews.json), reveal endpoint, experiments card grid with hover-scrub. Remaining plans: deployment (site + operator), camera controls.
-- [ ] M6 ROI/plots (+ camera-controls panel), M7 export, M8 experiment metadata/events.
+- [x] M6 ROI/plots + camera-controls panel, M7 export, M8 experiment metadata/events (all shipped 2026-09-02).
 - [x] M9 Visible camera recorder (2026-09-02): RTSP /avc/ch1 stream copy, live MJPEG preview, side/overlay placement, homography alignment (10-pair fit verified on the A70), alignment + ROIs stamped into metadata.json, roi_series.csv auto-export.
 - [x] M9b Thermal preview video (2026-09-02): exports/thermal_preview.mp4 rendered in the background after every stop (iron palette, fixed run-wide °C scale, colour bar, time label); `POST …/export/thermal-video` re-renders; playback → export shows MP4 link + render button.
 - [x] M9c Per-run README.txt + exports/roi_plot.png at stop; recorder counts/logs frozen frames (A70 repeats its image ~2 s during a NUC — seen in the dress rehearsal: 70 identical frames 3.0–5.4 s) (2026-09-02).
@@ -120,8 +120,8 @@ from events.json as markers. Camera-controls rail section follows as its own ste
 ## M9 visible camera (core DONE 2026-09-02, hardware verification pending)
 - [x] visible/recorder.py: ffmpeg stream copy of /avc/ch1 with wall-clock timestamps, graceful 'q' stop, visible.json sidecar; tested with a fake process
 - [x] POST /api/recording/start {visible: true}; status/manifest/experiment info carry `visible`; RECORDING section checkbox
-- [ ] On the A70: record 30 s with visible video, confirm visible.mp4 plays, duration matches, compare visible.json start time vs first thermal host timestamp
-- [ ] Playback: show visible.mp4 beside/overlaid on the thermal image (needs FOV registration)
+- [x] On the A70: visible video recorded and played back (dress rehearsal + 4 AIT runs, 2026-09-02).
+- [x] Playback: visible.mp4 beside/overlaid on the thermal image with homography registration.
 
 ## Next: deployment (spec §6) — GitHub Pages site + operator packaging + PWA offline; blocked on the GitHub repo existing (gh repo create refused by the sandbox; user runs it)
 
@@ -141,10 +141,10 @@ from events.json as markers. Camera-controls rail section follows as its own ste
 - [x] Site mode UI (VITE_SITE_MODE=1): operator base URL, OperatorGate first-run page, PWA shell, CI + Pages workflows
 - [x] Verified: site on :5174 drove the operator on :8000 with the real A70; 403 without the client header, 200 with it
 - [x] Pages live at https://mattlmccoy.github.io/flir-research-interface/ (repo public, Pages source = Actions); fri-serve allows that origin by default; verified in real Chrome: the site drove the local operator with the A70 acquiring
-- [ ] Operator packaging: launchd (.pkg) / Windows service (.msi) / systemd unit; menu-bar item; release feed
-- [ ] SDK install job from the private artifact URL + sdk-manifest.json (spec §6.2 step 4)
+- [~] Operator packaging: launchd LaunchAgent (verified on the dev Mac), systemd --user unit and Task Scheduler task (scripts written, untested on real machines); no menu-bar item / release feed (not needed: the site is the UI).
+- [x] SDK install from the internal mirror release sdk-4.4.0.246 (11 assets), done by the install scripts.
 - [ ] Safari ws:// fallback (redirect to the local copy)
-- [ ] M9 follow-up: playback of visible.mp4 beside thermal; decide whether ~12 fps (throttled by the GigE stream) is acceptable or use /avc/ 640x480
+- [x] M9 follow-up: side-by-side/overlay playback done; visible runs 6–13 fps while GigE streams (accepted).
 
 ## 2026-09-02 (evening) UI feedback round
 - [x] Palette/range strip button removed (display lives in the rail); settings/NUC strip buttons removed (they duplicated the open camera section)
@@ -154,4 +154,4 @@ from events.json as markers. Camera-controls rail section follows as its own ste
 ## 2026-09-02 (late): visible camera placement
 - [x] live preview (MJPEG relay, low latency, watchdog), recorded video in playback, side by side, overlay with registration sliders
 - [x] served bundle rebuilt 2026-09-02 evening (overlay + calibration + range inputs); page reload picks it up, operator untouched
-- [ ] the rest: operator installers, SDK install job, Research Studio comparison, disk space
+- [ ] the rest: Research Studio comparison (needs a session with Research Studio); clean-machine installer runs on Windows/Linux.
