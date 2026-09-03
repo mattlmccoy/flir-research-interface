@@ -509,6 +509,23 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
+    @app.get("/api/profile")
+    def get_profile() -> dict[str, Any]:
+        from flir_research_interface.analysis.profile import load_profile
+
+        return load_profile(app.state.experiments_root)
+
+    @app.put("/api/profile")
+    async def put_profile(request: Request) -> dict[str, Any]:
+        """Store the project profile (metadata fields + mark buttons) for every client."""
+        from flir_research_interface.analysis.profile import save_profile
+
+        try:
+            body = await request.json()
+            return await run_in_threadpool(save_profile, app.state.experiments_root, body)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
     @app.get("/api/visible/live.mjpeg")
     def visible_live() -> Response:
         """Low-rate MJPEG of the visible camera; one ffmpeg per viewer, killed on disconnect."""
@@ -544,9 +561,12 @@ def create_app(
 
     def _recording_extra(req: RecordingStartRequest) -> dict[str, Any]:
         from flir_research_interface.analysis.calibration import load_alignment
+        from flir_research_interface.analysis.profile import load_profile
         from flir_research_interface.analysis.series import parse_rois
 
         extra: dict[str, Any] = {}
+        prof = load_profile(app.state.experiments_root)
+        extra["profile"] = {"name": prof["name"], "marks": [m["label"] for m in prof["marks"]]}
         alignment = load_alignment(app.state.experiments_root)
         if alignment:
             extra["visible_alignment"] = alignment

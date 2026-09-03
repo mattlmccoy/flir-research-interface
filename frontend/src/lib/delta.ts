@@ -15,9 +15,10 @@ export function deltaTrace(a: Trace, b: Trace): Trace {
   return { id: DELTA_ID, label: `${a.label} − ${b.label}`, color: "#ffffff", t, v };
 }
 
-/** Keyboard marks while recording: r = RF ON, f = RF OFF; never while typing in a field. */
-export function markForKey(key: string, inInput: boolean): "RF ON" | "RF OFF" | null {
-  if (inInput) return null;
+export interface MarkDef { label: string; key?: string; }
+/** Keyboard marks while recording, from the project profile; never while typing in a field. */
+export function markForKey(key: string, inInput: boolean, marks: MarkDef[]): string | null {
+  if (inInput || key.length !== 1) return null;
   const k = key.toLowerCase();
-  return k === "r" ? "RF ON" : k === "f" ? "RF OFF" : null;
+  return marks.find((m) => m.key && m.key.toLowerCase() === k)?.label ?? null;
 }

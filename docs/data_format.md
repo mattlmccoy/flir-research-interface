@@ -76,7 +76,9 @@ experiments/<YYYYMMDD_HHMMSS>_<name>/
                          software version + git commit + host, the operator's experiment fields,
                          the ROIs in force (`rois`, with names/colours) and the visible↔IR
                          alignment in force (`visible_alignment`), `camera.device_temperature_c`
-                         (the A70's shutter/FPA temperature at start), `nuc_hold` (NUC mode held
+                         (the A70's shutter/FPA temperature at start), `profile` (the project
+                         profile in force: its name and mark labels; fields and marks are defined on
+                         the setup page and stored in `calibration/profile.json`), `nuc_hold` (NUC mode held
                          Off during the run, and whether a NUC ran just before it); post-hoc
                          edits append to `edits`
   events.json            recording start/stop, frame gaps, NUCs, `trigger` / `trigger_end` for

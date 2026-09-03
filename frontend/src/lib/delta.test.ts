@@ -15,10 +15,12 @@ test("deltaTrace subtracts B from A sample by sample on A's time axis (nearest B
   assert.ok(Array.from(deltaTrace(a, { ...b, t: [], v: [] }).v).every(Number.isNaN), "no B samples → NaN");
 });
 
-test("markForKey maps r / f to RF marks and ignores everything else and inputs", () => {
-  assert.equal(markForKey("r", false), "RF ON");
-  assert.equal(markForKey("R", false), "RF ON");
-  assert.equal(markForKey("f", false), "RF OFF");
-  assert.equal(markForKey("r", true), null, "typing in an input never marks");
-  assert.equal(markForKey("x", false), null);
+test("markForKey maps profile hotkeys to mark labels and ignores everything else and inputs", () => {
+  const marks = [{ label: "RF ON", key: "r" }, { label: "RF OFF", key: "f" }, { label: "no hotkey" }];
+  assert.equal(markForKey("r", false, marks), "RF ON");
+  assert.equal(markForKey("R", false, marks), "RF ON");
+  assert.equal(markForKey("f", false, marks), "RF OFF");
+  assert.equal(markForKey("r", true, marks), null, "typing in an input never marks");
+  assert.equal(markForKey("x", false, marks), null);
+  assert.equal(markForKey("Enter", false, marks), null);
 });

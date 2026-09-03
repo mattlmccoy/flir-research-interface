@@ -1,3 +1,4 @@
+import { ProfileEditor } from "./ProfileEditor.tsx";
 import { CredentialsHelp } from "./CredentialsHelp.tsx";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api.ts";
@@ -103,6 +104,11 @@ export function SetupPage({ onConnected }: { onConnected: () => void }) {
         <h2>3. Visible camera credentials (optional)</h2>
         <div className="muted" style={{ marginBottom: 6 }}>The visible camera streams over RTSP and needs the camera's RTSP user and password on the operator machine. The thermal camera needs nothing.</div>
         <CredentialsHelp open />
+      </div>
+
+      <div className="card">
+        <h2>4. Project profile (metadata fields and mark buttons)</h2>
+        <ProfileEditor />
       </div>
 
       <details className="card" style={{ opacity: 0.8 }}>

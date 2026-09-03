@@ -46,6 +46,9 @@ export interface Previews {
 }
 export interface RevealResult { ok: boolean; path: string; error?: string; }
 export interface Health { status: string; version: string; app_version?: string; api_version?: string; platform?: string; }
+export interface ProfileField { key: string; label: string; type: "text" | "number"; }
+export interface Profile { name: string; fields: ProfileField[]; marks: { label: string; key?: string }[]; }
+export const DEFAULT_PROFILE: Profile = { name: "default", fields: [{ key: "operator", label: "Operator", type: "text" }, { key: "sample_id", label: "Sample ID", type: "text" }, { key: "notes", label: "Notes", type: "text" }], marks: [{ label: "event A", key: "a" }, { label: "event B", key: "b" }] };
 export interface Hdf5Export { path: string; size_bytes: number; sha256: string; n_frames: number; }
 export interface ThermalVideoExport { path: string; frames: number; fps: number; width: number; height: number; vmin: number; vmax: number; units: string; bytes: number; }
 
@@ -124,6 +127,8 @@ export const api = {
   regeneratePreviews: (name: string) => j<Previews>(req(`/api/experiments/${encodeURIComponent(name)}/previews`, { method: "POST" })),
   reveal: (name: string) => j<RevealResult>(req(`/api/experiments/${encodeURIComponent(name)}/reveal`, { method: "POST" })),
   experimentsSummary: () => j<{ count: number; size_bytes: number; free_space_gb: number }>(req("/api/experiments/summary")),
+  profile: () => j<Profile>(req("/api/profile")),
+  saveProfile: (p: Profile) => j<Profile>(req("/api/profile", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(p) })),
   deleteExperiment: (name: string) =>
     j<{ deleted: string }>(req(`/api/experiments/${encodeURIComponent(name)}`, { method: "DELETE" })),
   revealRoot: () => j<RevealResult>(req("/api/experiments/reveal-root", { method: "POST" })),

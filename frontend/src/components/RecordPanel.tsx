@@ -1,24 +1,16 @@
 import { markForKey } from "../lib/delta.ts";
 import { useEffect, useState } from "react";
-import { api, type RecordingStatus } from "../lib/api.ts";
+import { api, DEFAULT_PROFILE, type Profile, type RecordingStatus } from "../lib/api.ts";
 import { ArmPanel } from "./ArmPanel.tsx";
 import type { Roi } from "../lib/roi.ts";
 
-const FIELDS: { key: string; label: string; type?: "number" }[] = [
-  { key: "operator", label: "Operator" },
-  { key: "sample_id", label: "Sample ID" },
-  { key: "material", label: "Material" },
-  { key: "dopant", label: "Dopant" },
-  { key: "dopant_concentration", label: "Dopant conc." },
-  { key: "rf_frequency_mhz", label: "RF freq (MHz)", type: "number" },
-  { key: "rf_forward_power_w", label: "RF fwd (W)", type: "number" },
-  { key: "electrode_gap_mm", label: "Gap (mm)", type: "number" },
-  { key: "notes", label: "Notes" },
-];
 
 export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: Roi[] }) {
   const [name, setName] = useState("Run");
-  const [meta, setMeta] = useState<Record<string, string>>({ material: "PA12", rf_frequency_mhz: "13.56" });
+  const [meta, setMeta] = useState<Record<string, string>>({});
+  const [profile, setProfile] = useState<Profile>(DEFAULT_PROFILE);
+  useEffect(() => { api.profile().then(setProfile).catch(() => undefined); }, []);
+  const FIELDS = profile.fields;
   const [status, setStatus] = useState<RecordingStatus>({ state: "idle" });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -83,7 +75,7 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: Roi
     const onKey = (e: KeyboardEvent) => {
       const tgt = e.target as HTMLElement | null;
       const inInput = !!tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.tagName === "SELECT" || tgt.isContentEditable);
-      const m = markForKey(e.key, inInput || e.metaKey || e.ctrlKey || e.altKey);
+      const m = markForKey(e.key, inInput || e.metaKey || e.ctrlKey || e.altKey, profile.marks);
       if (!m) return;
       e.preventDefault();
       void mark(m);
@@ -91,7 +83,7 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: Roi
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recording, markNote]);
+  }, [recording, markNote, profile]);
   async function mark(label: string) {
     const nm = label.trim();
     if (!nm) return;
@@ -129,8 +121,9 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: Roi
       {recording && (
         <>
           <div className="row" aria-label="event marks">
-            <button className="secondary" onClick={() => mark("RF ON")} title="keyboard: r">RF ON <small className="muted">r</small></button>
-            <button className="secondary" onClick={() => mark("RF OFF")} title="keyboard: f">RF OFF <small className="muted">f</small></button>
+            {profile.marks.map((m) => (
+              <button key={m.label} className="secondary" onClick={() => mark(m.label)} title={m.key ? `keyboard: ${m.key}` : undefined}>{m.label}{m.key ? <small className="muted"> {m.key}</small> : null}</button>
+            ))}
             <input type="text" value={markName} placeholder="custom mark" style={{ width: 110 }} onChange={(e) => setMarkName(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") void mark(markName); }} />
             <button className="secondary" disabled={!markName.trim()} onClick={() => mark(markName)}>mark</button>
@@ -143,6 +136,7 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: Roi
       )}
       {showForm && !recording && (
         <div className="kv">
+          <span className="hint" style={{ gridColumn: "1 / -1" }}>profile: <b>{profile.name}</b> · fields and mark buttons are set on the setup page</span>
           {FIELDS.map((f) => (
             <label key={f.key} style={{ display: "contents" }}>
               <span>{f.label}</span>
