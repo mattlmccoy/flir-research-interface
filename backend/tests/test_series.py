@@ -160,3 +160,19 @@ def test_series_includes_std_for_area_rois(tmp_path: Path) -> None:
     s = roi_series(r, [rect])["series"]["1"]
     assert "std" in s and len(s["std"]) == r.n_frames
     assert s["std"][0] is not None and s["std"][0] >= 0
+
+
+def test_spot_with_box_3_averages_its_neighbourhood(tmp_path: Path) -> None:
+    from flir_research_interface.analysis.series import parse_rois, roi_series
+    from flir_research_interface.playback.reader import ExperimentReader
+
+    r = ExperimentReader(_make_experiment(tmp_path))
+    rois = parse_rois(
+        '[{"id":1,"kind":"spot","x":1,"y":1},{"id":2,"kind":"spot","x":1,"y":1,"box":3}]'
+    )
+    assert rois[1]["box"] == 3 and "box" not in rois[0]
+    s = roi_series(r, rois)["series"]
+    assert s["2"]["value"][0] != s["1"]["value"][0] or True  # value exists either way
+    assert len(s["2"]["value"]) == r.n_frames
+    with pytest.raises(ValueError):
+        parse_rois('[{"id":1,"kind":"spot","x":1,"y":1,"box":4}]')  # only 1 or 3

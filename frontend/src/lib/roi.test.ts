@@ -261,3 +261,18 @@ test("roiStats reports the population standard deviation for area ROIs", () => {
   const one = roiStats(f, 8, 1, { id: 2, kind: "spot", x: 0, y: 0 });
   assert.equal(one.std, undefined);
 });
+
+test("a spot with box 3 measures the 3×3 neighbourhood (clamped at the edge) and survives reload", () => {
+  const f = new Float32Array(16).map((_, i) => i);  // 4x4, value = index
+  const centre = roiStats(f, 4, 4, { id: 1, kind: "spot", x: 1, y: 1, box: 3 });
+  assert.equal(centre.n, 9);
+  assert.ok(Math.abs((centre.mean ?? NaN) - 5) < 1e-9, "mean of indices 0,1,2,4,5,6,8,9,10");
+  const corner = roiStats(f, 4, 4, { id: 2, kind: "spot", x: 0, y: 0, box: 3 });
+  assert.equal(corner.n, 4);
+  const plain = roiStats(f, 4, 4, { id: 3, kind: "spot", x: 1, y: 1 });
+  assert.equal(plain.n, 1);
+  const store = new Map<string, string>();
+  const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); } } as unknown as Storage;
+  saveRois(storage, { rois: [{ id: 1, kind: "spot", x: 1, y: 1, box: 3 }], selected: null, nextId: 2 });
+  assert.equal((loadRois(storage).rois[0] as { box?: number }).box, 3);
+});

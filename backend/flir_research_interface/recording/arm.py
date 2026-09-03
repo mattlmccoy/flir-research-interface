@@ -38,6 +38,9 @@ def watched_value(frame: Frame, roi: dict[str, Any] | None, stat: str) -> float 
     h, w = frame.counts.shape
     if roi["kind"] == "spot":
         x, y = int(roi["x"]), int(roi["y"])
+        if roi.get("box") == 3:
+            sub = frame.counts[max(0, y - 1) : y + 2, max(0, x - 1) : x + 2]
+            return float(np.nanmean(counts_to_celsius(sub, fmt))) if sub.size else None
         if not (0 <= x < w and 0 <= y < h):
             return None
         return float(counts_to_celsius(frame.counts[y : y + 1, x : x + 1], fmt)[0, 0])

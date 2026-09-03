@@ -3,6 +3,13 @@ import { DEFAULT_ISOTHERM, parseIsotherm, type Isotherm } from "./isotherm.ts";
 import { isZoom, type Zoom } from "./zoom.ts";
 export const TOOLS = ["select", "spot", "rect", "circle", "line", "polygon"] as const;
 const isDelta = (v: unknown): v is { a: number; b: number } => !!v && typeof v === "object" && Number.isInteger((v as { a: unknown }).a) && Number.isInteger((v as { b: unknown }).b);
+export interface Agc { mode: "linear" | "plateau"; plateau: number; }
+function parseAgc(v: unknown): Agc {
+  const o = (v ?? {}) as Record<string, unknown>;
+  const mode = o.mode === "plateau" ? "plateau" : "linear";
+  const p = typeof o.plateau === "number" && Number.isFinite(o.plateau) ? Math.min(1, Math.max(0, o.plateau)) : 0.5;
+  return { mode, plateau: p };
+}
 export interface FloatRect { x: number; y: number; w: number; h: number; }
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 function clampRect(r: FloatRect): FloatRect {
@@ -42,6 +49,8 @@ export interface LayoutState {
   flipH: boolean; flipV: boolean;
   /** Temporal hold: show the per-pixel max/min since reset instead of the live frame. */
   hold: "off" | "max" | "min";
+  /** Automatic gain control: linear palette mapping or plateau equalisation (0..1 strength). */
+  agc: Agc;
   /** Overlay registration: opacity 0–1, scale 0.5–2 and offsets in % of the image (visible lens ≠ IR lens). */
   overlay: Overlay;
   sections: Record<Section, boolean>;
@@ -87,6 +96,7 @@ export const DEFAULT_LAYOUT: LayoutState = {
   flipH: false,
   flipV: false,
   hold: "off",
+  agc: { mode: "linear", plateau: 0.5 },
   overlay: DEFAULT_OVERLAY,
   sections: { measurements: true, profile: false, camera: true, experiment: true, recording: true, display: true, export: true, visible: true },
 };
@@ -107,6 +117,7 @@ export type LayoutAction =
   | { type: "dockBack"; section: Section }
   | { type: "setFlip"; h: boolean; v: boolean }
   | { type: "setHold"; hold: "off" | "max" | "min" }
+  | { type: "setAgc"; agc: Agc }
   | { type: "setVisibleMode"; mode: VisibleMode }
   | { type: "setOverlay"; patch: Partial<Overlay> }
   | { type: "collapseAll" }
@@ -131,6 +142,7 @@ export function layoutReducer(s: LayoutState, a: LayoutAction): LayoutState {
     case "moveFloat": return { ...s, floating: { ...s.floating, [a.section]: clampRect(a.rect) } };
     case "setFlip": return { ...s, flipH: a.h, flipV: a.v };
     case "setHold": return { ...s, hold: a.hold };
+    case "setAgc": return { ...s, agc: parseAgc(a.agc) };
     case "dockBack": { const { [a.section]: _gone, ...rest } = s.floating; return { ...s, floating: rest }; }
     case "setOverlay": return { ...s, overlay: clampOverlay({ ...s.overlay, ...a.patch }) };
     case "collapseAll": return { ...s, strip: false, rail: false, dock: false };
@@ -180,6 +192,7 @@ export function loadLayout(storage: Storage | null): LayoutState {
       flipH: parsed.flipH === true,
       flipV: parsed.flipV === true,
       hold: "off",
+      agc: parseAgc(parsed.agc),
       overlay: clampOverlay({
         opacity: num(ov.opacity, DEFAULT_OVERLAY.opacity),
         scale: num(ov.scale, DEFAULT_OVERLAY.scale),

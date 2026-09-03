@@ -202,3 +202,13 @@ test("flip and temporal hold live in the layout with safe defaults", () => {
   assert.equal(loadLayout(storage).flipH, true);
   assert.equal(loadLayout(storage).hold, "off", "hold is a session choice: never restored");
 });
+
+test("AGC setting (linear / plateau + strength) lives in the layout and persists", () => {
+  assert.deepEqual(DEFAULT_LAYOUT.agc, { mode: "linear", plateau: 0.5 });
+  const s1 = layoutReducer(DEFAULT_LAYOUT, { type: "setAgc", agc: { mode: "plateau", plateau: 0.8 } });
+  const store = new Map<string, string>();
+  const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); } } as unknown as Storage;
+  saveLayout(storage, s1);
+  assert.deepEqual(loadLayout(storage).agc, { mode: "plateau", plateau: 0.8 });
+  assert.equal(layoutReducer(DEFAULT_LAYOUT, { type: "setAgc", agc: { mode: "plateau", plateau: 7 } }).agc.plateau, 1, "clamped");
+});

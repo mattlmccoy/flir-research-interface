@@ -16,7 +16,8 @@ interface Meta {
   /** Per-ROI reflected temperature in °C (defaults to the camera's setting). */
   reflected_c?: number;
 }
-export interface Spot extends Meta { id: number; kind: "spot"; x: number; y: number; }
+/** `box: 3` turns the spot into ResearchIR's measurement cursor: the mean of the 3×3 neighbourhood. */
+export interface Spot extends Meta { id: number; kind: "spot"; x: number; y: number; box?: 1 | 3; }
 export interface Rect extends Meta { id: number; kind: "rect"; x0: number; y0: number; x1: number; y1: number; }
 /** Disc of radius r (pixels) around (cx, cy); a pixel belongs when its centre is within r. */
 export interface Circle extends Meta { id: number; kind: "circle"; cx: number; cy: number; r: number; }
@@ -41,6 +42,7 @@ export type RoiAction =
   | { type: "recolor"; id: number; color: string | null }
   | { type: "toggleHidden"; id: number }
   | { type: "setOptics"; id: number; emissivity?: number | null; reflected_c?: number | null }
+  | { type: "setBox"; id: number; box: 1 | 3 }
   | { type: "setHiddenAll"; hidden: boolean }
   | { type: "replace"; rois: Roi[] }
   | { type: "clear" };
@@ -85,6 +87,8 @@ export function roiReducer(s: RoiState, a: RoiAction): RoiState {
       return patch(s, a.id, (r) => { const name = a.name.trim(); const { name: _old, ...rest } = r; return name ? { ...rest, name } as Roi : rest as Roi; });
     case "recolor":
       return patch(s, a.id, (r) => { const { color: _old, ...rest } = r; return a.color ? { ...rest, color: a.color } as Roi : rest as Roi; });
+    case "setBox":
+      return patch(s, a.id, (r) => { if (r.kind !== "spot") return r; const { box: _b, ...rest } = r; return a.box === 3 ? { ...rest, box: 3 } as Roi : rest as Roi; });
     case "setOptics":
       return patch(s, a.id, (r) => {
         const { emissivity: e0, reflected_c: t0, ...rest } = r;
@@ -175,8 +179,12 @@ export function polygonPixels(points: [number, number][], w: number, h: number):
 export function roiPixels(roi: Roi, w: number, h: number): number[] {
   const inside = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h;
   switch (roi.kind) {
-    case "spot":
-      return inside(roi.x, roi.y) ? [roi.y * w + roi.x] : [];
+    case "spot": {
+      if (roi.box !== 3) return inside(roi.x, roi.y) ? [roi.y * w + roi.x] : [];
+      const out: number[] = [];
+      for (let y = roi.y - 1; y <= roi.y + 1; y++) for (let x = roi.x - 1; x <= roi.x + 1; x++) if (inside(x, y)) out.push(y * w + x);
+      return out;
+    }
     case "rect": {
       const out: number[] = [];
       for (let y = Math.max(0, roi.y0); y < Math.min(h, roi.y1); y++) for (let x = Math.max(0, roi.x0); x < Math.min(w, roi.x1); x++) out.push(y * w + x);
@@ -245,6 +253,7 @@ function asRoi(v: unknown): Roi | null {
   if (typeof r.name === "string" && r.name.trim()) meta.name = r.name.trim().slice(0, 40);
   if (typeof r.color === "string" && HEX.test(r.color)) meta.color = r.color.toLowerCase();
   if (r.hidden === true) meta.hidden = true;
+  if (r.box === 3) (meta as { box?: 3 }).box = 3;
   if (typeof r.emissivity === "number" && r.emissivity > 0 && r.emissivity <= 1) meta.emissivity = r.emissivity;
   if (typeof r.reflected_c === "number" && Number.isFinite(r.reflected_c)) meta.reflected_c = r.reflected_c;
   let shape: Roi | null = null;

@@ -63,7 +63,8 @@ def _roi_optics(r: dict[str, Any]) -> str:
 def _roi_geom(r: dict[str, Any]) -> str:
     k = r["kind"]
     if k == "spot":
-        return f"S{r['id']}: spot x={r['x']} y={r['y']}"
+        box = " (mean of 3x3)" if r.get("box") == 3 else ""
+        return f"S{r['id']}: spot x={r['x']} y={r['y']}{box}"
     if k == "rect":
         return f"R{r['id']}: rect x0={r['x0']} y0={r['y0']} x1={r['x1']} y1={r['y1']} (half-open)"
     if k == "circle":

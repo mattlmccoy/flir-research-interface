@@ -1,3 +1,4 @@
+import type { Agc } from "../lib/layout.ts";
 import { DEFAULT_ISOTHERM, type Isotherm } from "../lib/isotherm.ts";
 import { PALETTE_NAMES, type PaletteName, PALETTE_NOTES } from "../lib/palette.ts";
 import type { Range, ScaleMode } from "../lib/scale.ts";
@@ -20,10 +21,11 @@ interface Props {
   flipH?: boolean; flipV?: boolean; setFlip?: (h: boolean, v: boolean) => void;
   /** Pixels at/beyond the camera's calibrated case limits in the current frame. */
   saturation?: { low: number; high: number; lowC: number; highC: number } | null;
+  agc?: Agc; setAgc?: (a: Agc) => void;
 }
 
 /** Palette + display-range controls shared by live view and playback. Visualization only. */
-export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, manual, setManual, shown, isotherm, setIsotherm, hasReference, onSetReference, onClearReference, onSnapshot, onRangeFromRoi, hold = "off", setHold, flipH = false, flipV = false, setFlip, saturation }: Props) {
+export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, manual, setManual, shown, isotherm, setIsotherm, hasReference, onSetReference, onClearReference, onSnapshot, onRangeFromRoi, hold = "off", setHold, flipH = false, flipV = false, setFlip, saturation, agc, setAgc }: Props) {
   const iso = isotherm ?? DEFAULT_ISOTHERM;
   const upd = (patch: Partial<Isotherm>) => setIsotherm?.({ ...iso, ...patch });
   const isoRow = setIsotherm && (
@@ -63,6 +65,14 @@ export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, 
           {setHold && hold !== "off" && <button className="secondary" onClick={() => { setHold("off"); setTimeout(() => setHold(hold), 0); }} title="Restart the hold from the next frame">reset</button>}
           {setFlip && <button className="secondary" aria-pressed={flipH} onClick={() => setFlip(!flipH, flipV)} title="Mirror the image left–right (display only)">⇋ H</button>}
           {setFlip && <button className="secondary" aria-pressed={flipV} onClick={() => setFlip(flipH, !flipV)} title="Mirror the image top–bottom (display only)">⇅ V</button>}
+        </div>
+      )}
+      {setAgc && agc && (
+        <div className="row" aria-label="AGC" title="How the palette is spread over the range. Linear: even. Plateau equalisation: bands where most pixels sit get more colours (ResearchIR's PE); the colour bar is then non-linear.">
+          <span className="hint">AGC</span>
+          <select value={agc.mode} onChange={(e) => setAgc({ ...agc, mode: e.target.value as Agc["mode"] })} aria-label="AGC mode"><option value="linear">linear</option><option value="plateau">plateau equalisation</option></select>
+          {agc.mode === "plateau" && <input type="range" min={0} max={1} step={0.05} value={agc.plateau} aria-label="plateau strength" style={{ width: 110 }} onChange={(e) => setAgc({ ...agc, plateau: Number(e.target.value) })} />}
+          {agc.mode === "plateau" && <span className="hint">{Math.round(agc.plateau * 100)} %</span>}
         </div>
       )}
       {saturation && (saturation.low > 0 || saturation.high > 0) && (

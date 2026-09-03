@@ -1,3 +1,6 @@
+import { applyMap, plateauMap } from "../lib/agc.ts";
+import type { Agc } from "../lib/layout.ts";
+const LINEAR_AGC: Agc = { mode: "linear", plateau: 0.5 };
 import { HoldBuffer } from "../lib/enhance.ts";
 import { subtractReference } from "../lib/reference.ts";
 import { applyIsotherm, type Isotherm } from "../lib/isotherm.ts";
@@ -55,6 +58,8 @@ interface Props {
   hold?: "off" | "max" | "min";
   /** Software flip of the displayed image (ROIs stay in sensor coordinates). */
   flipH?: boolean; flipV?: boolean;
+  /** Palette mapping: linear, or plateau equalisation of the shown field's histogram. */
+  agc?: Agc;
 }
 
 /** The shape a drag from `a` to `b` produces for the active tool (null when degenerate). */
@@ -76,7 +81,7 @@ export function dragShape(tool: Tool, a: Pt, b: Pt, w: number, h: number): RoiIn
 /** Renders raw counts -> °C -> palette on a canvas, with an ROI overlay layer. Data arrays are never mutated. */
 const divergingLut = buildLut("diverging");
 
-export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois = NO_ROIS, selected = null, tool = "select", zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null, hold = "off", flipH = false, flipV = false }: Props) {
+export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois = NO_ROIS, selected = null, tool = "select", zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null, hold = "off", flipH = false, flipV = false, agc = LINEAR_AGC }: Props) {
   const viewRef = useRef<HTMLDivElement>(null);
   const holdRef = useRef<HoldBuffer | null>(null);
   const panning = useRef<{ cx: number; cy: number; sl: number; st: number } | null>(null);
@@ -133,10 +138,12 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     const img = ctx.createImageData(header.width, header.height);
-    mapToRgba(shownField, range.min, range.max, sub?.delta ? divergingLut : lutRef.current, img.data);
+    const lutNow = sub?.delta ? divergingLut : lutRef.current;
+    if (agc.mode === "plateau" && !sub?.delta) applyMap(shownField, plateauMap(shownField, range, 256, agc.plateau), lutNow, img.data);
+    else mapToRgba(shownField, range.min, range.max, lutNow, img.data);
     if (isotherm) applyIsotherm(c, img.data, isotherm);
     ctx.putImageData(img, 0, 0);
-  }, [frame, palette, scaleMode, manual.min, manual.max, isotherm, reference, hold]);
+  }, [frame, palette, scaleMode, manual.min, manual.max, isotherm, reference, hold, agc.mode, agc.plateau]);
 
   useEffect(() => {
     const c = celsiusRef.current;

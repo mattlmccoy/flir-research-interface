@@ -48,6 +48,11 @@ function ColorPicker({ r, i, dispatch, onDone }: { r: Roi; i: number; dispatch: 
       ))}
       <input type="color" aria-label="custom colour" value={r.color ?? "#ffffff"} title="any colour"
         onChange={(e) => dispatch({ type: "recolor", id: r.id, color: e.target.value })} />
+      {r.kind === "spot" && (
+        <label className="hint" style={{ flexBasis: "100%", marginTop: 4 }} title="Measurement cursor: report the mean of the 3×3 pixels around the spot (standard thermography practice) instead of the single pixel">
+          <input type="checkbox" checked={r.box === 3} onChange={(e) => dispatch({ type: "setBox", id: r.id, box: e.target.checked ? 3 : 1 })} /> 3×3 average
+        </label>
+      )}
       <span className="hint" style={{ flexBasis: "100%", display: "flex", gap: 6, alignItems: "center", marginTop: 4 }} title="Per-ROI optics: this ROI's values are re-corrected from the camera's global emissivity / reflected temperature using the camera's own R, B, F constants (FLIR signal model, atmosphere ≈ 1). Leave blank to use the camera's setting.">
         ε <input type="number" min={0.01} max={1} step={0.01} value={r.emissivity ?? ""} placeholder="camera" style={{ width: 64 }} aria-label={`emissivity of ${roiLabel(r)}`}
           onChange={(e) => dispatch({ type: "setOptics", id: r.id, emissivity: e.target.value === "" ? null : Number(e.target.value) })} />

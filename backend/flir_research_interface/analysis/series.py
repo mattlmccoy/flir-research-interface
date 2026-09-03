@@ -45,7 +45,13 @@ def parse_rois(raw: str) -> list[dict[str, Any]]:
         rid = _int(it.get("id"), "id")
         if kind == "spot":
             x, y = _int(it.get("x"), "x"), _int(it.get("y"), "y")
-            out.append({"id": rid, "kind": "spot", "x": x, "y": y})
+            spot: dict[str, Any] = {"id": rid, "kind": "spot", "x": x, "y": y}
+            box = it.get("box", 1)
+            if box not in (1, 3) or isinstance(box, bool):
+                raise ValueError("spot box must be 1 or 3")
+            if box == 3:
+                spot["box"] = 3  # measurement cursor: mean of the 3x3 neighbourhood
+            out.append(spot)
         elif kind == "rect":
             r = {k: _int(it.get(k), k) for k in ("x0", "y0", "x1", "y1")}
             if r["x1"] <= r["x0"] or r["y1"] <= r["y0"]:
@@ -218,7 +224,15 @@ def roi_series(
             field = roi_field(field0, r, cam, fmt is not None)
             dst = acc[r["id"]]
             if r["kind"] == "spot":
-                if 0 <= r["x"] < w and 0 <= r["y"] < h:
+                if r.get("box") == 3:
+                    y0, y1 = max(0, r["y"] - 1), min(h, r["y"] + 2)
+                    x0, x1 = max(0, r["x"] - 1), min(w, r["x"] + 2)
+                    if y1 > y0 and x1 > x0:
+                        with np.errstate(all="ignore"):
+                            dst["value"][start:stop] = np.nanmean(
+                                field[:, y0:y1, x0:x1].reshape(stop - start, -1), axis=1
+                            )
+                elif 0 <= r["x"] < w and 0 <= r["y"] < h:
                     dst["value"][start:stop] = field[:, r["y"], r["x"]]
                 continue
             if r["kind"] == "rect":
