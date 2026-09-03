@@ -1,3 +1,4 @@
+import type { FilterName } from "../lib/filters.ts";
 import type { Agc } from "../lib/layout.ts";
 import { DEFAULT_ISOTHERM, type Isotherm } from "../lib/isotherm.ts";
 import { PALETTE_NAMES, type PaletteName, PALETTE_NOTES } from "../lib/palette.ts";
@@ -23,10 +24,11 @@ interface Props {
   saturation?: { low: number; high: number; lowC: number; highC: number } | null;
   agc?: Agc; setAgc?: (a: Agc) => void;
   segment?: { on: boolean; min: number; max: number }; setSegment?: (s: { on: boolean; min: number; max: number }) => void;
+  filter?: FilterName; setFilter?: (f: FilterName) => void;
 }
 
 /** Palette + display-range controls shared by live view and playback. Visualization only. */
-export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, manual, setManual, shown, isotherm, setIsotherm, hasReference, onSetReference, onClearReference, onSnapshot, onRangeFromRoi, hold = "off", setHold, flipH = false, flipV = false, setFlip, saturation, agc, setAgc, segment, setSegment }: Props) {
+export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, manual, setManual, shown, isotherm, setIsotherm, hasReference, onSetReference, onClearReference, onSnapshot, onRangeFromRoi, hold = "off", setHold, flipH = false, flipV = false, setFlip, saturation, agc, setAgc, segment, setSegment, filter = "off", setFilter }: Props) {
   const iso = isotherm ?? DEFAULT_ISOTHERM;
   const upd = (patch: Partial<Isotherm>) => setIsotherm?.({ ...iso, ...patch });
   const isoRow = setIsotherm && (
@@ -64,6 +66,11 @@ export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, 
             </select>
           )}
           {setHold && hold !== "off" && <button className="secondary" onClick={() => { setHold("off"); setTimeout(() => setHold(hold), 0); }} title="Restart the hold from the next frame">reset</button>}
+          {setFilter && (
+            <select value={filter} onChange={(e) => setFilter(e.target.value as FilterName)} aria-label="image filter" title="Display-only smoothing: box blur 3×3 / 5×5 or a 3×3 median (removes single-pixel spikes). Measurements use the unfiltered pixels.">
+              <option value="off">no filter</option><option value="blur3">blur 3×3</option><option value="blur5">blur 5×5</option><option value="median3">median 3×3</option>
+            </select>
+          )}
           {setFlip && <button className="secondary" aria-pressed={flipH} onClick={() => setFlip(!flipH, flipV)} title="Mirror the image left–right (display only)">⇋ H</button>}
           {setFlip && <button className="secondary" aria-pressed={flipV} onClick={() => setFlip(flipH, !flipV)} title="Mirror the image top–bottom (display only)">⇅ V</button>}
         </div>

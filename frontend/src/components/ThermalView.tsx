@@ -1,3 +1,4 @@
+import { applyFilter, type FilterName } from "../lib/filters.ts";
 import { applyMap, plateauMap } from "../lib/agc.ts";
 import type { Agc } from "../lib/layout.ts";
 const LINEAR_AGC: Agc = { mode: "linear", plateau: 0.5 };
@@ -62,6 +63,8 @@ interface Props {
   agc?: Agc;
   /** Segmentation range for ROI statistics (null: all pixels count). */
   valid?: Range | null;
+  /** Display-only image filter applied before hold / subtraction / AGC. */
+  filter?: FilterName;
 }
 
 /** The shape a drag from `a` to `b` produces for the active tool (null when degenerate). */
@@ -87,7 +90,7 @@ export function dragShape(tool: Tool, a: Pt, b: Pt, w: number, h: number): RoiIn
 /** Renders raw counts -> °C -> palette on a canvas, with an ROI overlay layer. Data arrays are never mutated. */
 const divergingLut = buildLut("diverging");
 
-export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois = NO_ROIS, selected = null, tool = "select", zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null, hold = "off", flipH = false, flipV = false, agc = LINEAR_AGC, valid = null }: Props) {
+export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois = NO_ROIS, selected = null, tool = "select", zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null, hold = "off", flipH = false, flipV = false, agc = LINEAR_AGC, valid = null, filter = "off" }: Props) {
   const viewRef = useRef<HTMLDivElement>(null);
   const holdRef = useRef<HoldBuffer | null>(null);
   const panning = useRef<{ cx: number; cy: number; sl: number; st: number } | null>(null);
@@ -128,9 +131,10 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
     const c = countsToCelsius(counts, header.kelvin_per_count, header.kelvin_offset);
     celsiusRef.current = c;
     onField?.({ c, w: header.width, h: header.height });
+    const filtered = filter === "off" ? c : applyFilter(filter, c, header.width, header.height);
     if (hold === "off") holdRef.current = null;
     else if (!holdRef.current || holdRef.current.mode !== hold) holdRef.current = new HoldBuffer(hold);
-    const held = holdRef.current ? holdRef.current.push(c) : c;
+    const held = holdRef.current ? holdRef.current.push(filtered) : filtered;
     const sub = reference ? subtractReference(held, reference) : null;
     const shownField = sub?.delta ?? held;
     const range = sub?.delta ? sub.range : resolveScale(scaleMode, manual, autoScale(held));
@@ -149,7 +153,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
     else mapToRgba(shownField, range.min, range.max, lutNow, img.data);
     if (isotherm) applyIsotherm(c, img.data, isotherm);
     ctx.putImageData(img, 0, 0);
-  }, [frame, palette, scaleMode, manual.min, manual.max, isotherm, reference, hold, agc.mode, agc.plateau]);
+  }, [frame, palette, scaleMode, manual.min, manual.max, isotherm, reference, hold, agc.mode, agc.plateau, filter]);
 
   useEffect(() => {
     const c = celsiusRef.current;

@@ -1,3 +1,4 @@
+import { FILTER_NAMES, type FilterName } from "./filters.ts";
 import { DEFAULT_ISOTHERM, parseIsotherm, type Isotherm } from "./isotherm.ts";
 /** Studio layout state (spec §3): which panels are open, which rail sections, which tool, image zoom. */
 import { isZoom, type Zoom } from "./zoom.ts";
@@ -59,6 +60,8 @@ export interface LayoutState {
   agc: Agc;
   /** Segmentation: only pixels within [min, max] °C count in ROI statistics. */
   segment: { on: boolean; min: number; max: number };
+  /** Display-only image filter (blur / median). */
+  filter: FilterName;
   /** Overlay registration: opacity 0–1, scale 0.5–2 and offsets in % of the image (visible lens ≠ IR lens). */
   overlay: Overlay;
   sections: Record<Section, boolean>;
@@ -106,6 +109,7 @@ export const DEFAULT_LAYOUT: LayoutState = {
   hold: "off",
   agc: { mode: "linear", plateau: 0.5 },
   segment: { on: false, min: 0, max: 100 },
+  filter: "off",
   overlay: DEFAULT_OVERLAY,
   sections: { measurements: true, profile: false, camera: true, experiment: true, recording: true, display: true, export: true, visible: true },
 };
@@ -128,6 +132,7 @@ export type LayoutAction =
   | { type: "setHold"; hold: "off" | "max" | "min" }
   | { type: "setAgc"; agc: Agc }
   | { type: "setSegment"; segment: { on: boolean; min: number; max: number } }
+  | { type: "setFilter"; filter: FilterName }
   | { type: "setVisibleMode"; mode: VisibleMode }
   | { type: "setOverlay"; patch: Partial<Overlay> }
   | { type: "collapseAll" }
@@ -153,6 +158,7 @@ export function layoutReducer(s: LayoutState, a: LayoutAction): LayoutState {
     case "setFlip": return { ...s, flipH: a.h, flipV: a.v };
     case "setHold": return { ...s, hold: a.hold };
     case "setAgc": return { ...s, agc: parseAgc(a.agc) };
+    case "setFilter": return { ...s, filter: (FILTER_NAMES as readonly string[]).includes(a.filter) ? a.filter : "off" };
     case "setSegment": return { ...s, segment: { on: !!a.segment.on, min: Math.min(a.segment.min, a.segment.max), max: Math.max(a.segment.min, a.segment.max) } };
     case "dockBack": { const { [a.section]: _gone, ...rest } = s.floating; return { ...s, floating: rest }; }
     case "setOverlay": return { ...s, overlay: clampOverlay({ ...s.overlay, ...a.patch }) };
@@ -205,6 +211,7 @@ export function loadLayout(storage: Storage | null): LayoutState {
       hold: "off",
       agc: parseAgc(parsed.agc),
       segment: parseSegment(parsed.segment),
+      filter: (FILTER_NAMES as readonly string[]).includes(parsed.filter as string) ? (parsed.filter as FilterName) : "off",
       overlay: clampOverlay({
         opacity: num(ov.opacity, DEFAULT_OVERLAY.opacity),
         scale: num(ov.scale, DEFAULT_OVERLAY.scale),

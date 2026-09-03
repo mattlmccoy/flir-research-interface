@@ -212,3 +212,13 @@ test("AGC setting (linear / plateau + strength) lives in the layout and persists
   assert.deepEqual(loadLayout(storage).agc, { mode: "plateau", plateau: 0.8 });
   assert.equal(layoutReducer(DEFAULT_LAYOUT, { type: "setAgc", agc: { mode: "plateau", plateau: 7 } }).agc.plateau, 1, "clamped");
 });
+
+test("display filter lives in the layout (off by default) and persists", () => {
+  assert.equal(DEFAULT_LAYOUT.filter, "off");
+  const s1 = layoutReducer(DEFAULT_LAYOUT, { type: "setFilter", filter: "median3" });
+  const store = new Map<string, string>();
+  const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); } } as unknown as Storage;
+  saveLayout(storage, s1);
+  assert.equal(loadLayout(storage).filter, "median3");
+  assert.equal(loadLayout({ getItem: () => JSON.stringify({ filter: "sharpen9000" }), setItem: () => undefined } as unknown as Storage).filter, "off");
+});
