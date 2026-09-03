@@ -34,6 +34,7 @@ def test_suggest_handles_synonyms_case_and_nothing() -> None:
     s = suggest("Aluminium plate heated by INDUCTION coil")
     ids = [m["id"] for m in s["matches"]]
     assert "metal" in ids and "induction" in ids
+    assert "polymer" not in [m["id"] for m in s["matches"]], "'plate' must not match 'pla'"
     empty = suggest("")
     assert empty["matches"] == [] and [f["key"] for f in empty["fields"]][:2] == [
         "operator",

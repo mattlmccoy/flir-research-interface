@@ -752,8 +752,11 @@ def _hits(entry: dict[str, Any], text: str, tokens: list[str]) -> list[str]:
     hits = []
     for kw in entry["keywords"]:
         k = kw.lower()
-        if " " in k or "." in k or len(k) <= 2:
-            if k in text or (len(k) <= 2 and k in tokens):
+        if " " in k or "." in k:
+            if k in text:
+                hits.append(kw)
+        elif len(k) <= 3:  # short keywords (pla, abs, rf, pv…) only as whole words
+            if k in tokens:
                 hits.append(kw)
         elif any(t.startswith(k) for t in tokens):
             hits.append(kw)

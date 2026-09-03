@@ -1,0 +1,60 @@
+{
+  "name": "RF heating",
+  "fields": [
+    {
+      "key": "operator",
+      "label": "Operator",
+      "type": "text"
+    },
+    {
+      "key": "sample_id",
+      "label": "Sample ID",
+      "type": "text"
+    },
+    {
+      "key": "material",
+      "label": "Material",
+      "type": "text"
+    },
+    {
+      "key": "dopant",
+      "label": "Dopant",
+      "type": "text"
+    },
+    {
+      "key": "dopant_concentration",
+      "label": "Dopant conc.",
+      "type": "text"
+    },
+    {
+      "key": "rf_frequency_mhz",
+      "label": "RF freq (MHz)",
+      "type": "number"
+    },
+    {
+      "key": "rf_forward_power_w",
+      "label": "RF fwd (W)",
+      "type": "number"
+    },
+    {
+      "key": "electrode_gap_mm",
+      "label": "Gap (mm)",
+      "type": "number"
+    },
+    {
+      "key": "notes",
+      "label": "Notes",
+      "type": "text"
+    }
+  ],
+  "marks": [
+    {
+      "label": "RF ON",
+      "key": "r"
+    },
+    {
+      "label": "RF OFF",
+      "key": "f"
+    }
+  ]
+}
