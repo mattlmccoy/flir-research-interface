@@ -19,6 +19,8 @@ interface Props {
   onCollapseAll: () => void;
   /** Rendered before the tools (e.g. a back button on the playback page). */
   leading?: ReactNode;
+  /** Panels are hidden: the ⛶ button restores them instead. */
+  collapsed?: boolean;
   /** Tools that make no sense in this context (e.g. camera controls during playback). */
   disabledTools?: readonly Tool[];
   zoom?: Zoom;
@@ -29,7 +31,7 @@ interface Props {
  * Left icon strip (spec §3). Disabled tools stay visible so the layout never shifts between
  * releases; they use aria-disabled (not the disabled attribute) so their tooltip still shows.
  */
-export function ToolStrip({ tool, onTool, onCollapseAll, leading, disabledTools = [], zoom = "fit", onZoom }: Props) {
+export function ToolStrip({ tool, onTool, onCollapseAll, leading, disabledTools = [], zoom = "fit", onZoom, collapsed = false }: Props) {
   return (
     <nav className="strip" aria-label="tools">
       {leading}
@@ -56,7 +58,7 @@ export function ToolStrip({ tool, onTool, onCollapseAll, leading, disabledTools 
           {zoom === "fit" ? "⤢" : zoomLabel(zoom)}
         </button>
       )}
-      <button aria-label="Hide panels (image only)" title="Hide panels (image only)" onClick={onCollapseAll}>⛶</button>
+      <button className={collapsed ? "active" : ""} aria-pressed={collapsed} aria-label={collapsed ? "Restore panels" : "Hide panels (image only)"} title={collapsed ? "Restore panels" : "Hide panels (image only)"} onClick={onCollapseAll}>⛶</button>
     </nav>
   );
 }

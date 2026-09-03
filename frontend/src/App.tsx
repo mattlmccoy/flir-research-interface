@@ -145,7 +145,7 @@ export function App() {
   const isRecording = recording?.state === "recording";
   const visibleAvailable = recording?.visible?.state !== "unavailable";
   const nearLimit = hdr && active && hdr.max_c != null && active.high_c != null && hdr.max_c > active.high_c - 10;
-  const allHidden = !layout.strip && !layout.rail && !layout.dock;
+  const allHidden = !layout.rail && !layout.dock;
 
   const nowT = hdr && t0Ref.current !== null ? (hdr.device_timestamp_ns - t0Ref.current) / 1e9 : 0;
   const traces: Trace[] = rois.rois.flatMap((r, i) => {
@@ -168,8 +168,12 @@ export function App() {
         <button className={page === "experiments" || page === "playback" ? "active" : ""} aria-current={page === "experiments" || page === "playback" ? "page" : undefined} onClick={() => setPage("experiments")}>experiments</button>
         <button className={page === "setup" ? "active" : ""} aria-current={page === "setup" ? "page" : undefined} onClick={() => setPage("setup")}>setup</button>
       </nav>
-      <button className="secondary" aria-pressed={allHidden} title={allHidden ? "Restore panels" : "Hide panels (image only)"}
-        onClick={() => dispatch({ type: allHidden ? "restoreAll" : "collapseAll" })}>⛶</button>
+      {page === "playback" && openExp && (
+        <span className="crumb">
+          <button className="secondary" onClick={() => setPage("experiments")} title="Back to the experiments list" aria-label="Back to experiments">← experiments</button>
+          <span className="who" title={openExp}>{openExp}</span>
+        </span>
+      )}
       <span className="conn">
         <span className={`dot ${dot}`} />
         <span className="who">{status.device ? `${status.device.model} · ${status.device.serial}` : "no camera"}</span>
@@ -198,7 +202,7 @@ export function App() {
 
   return (
     <StudioFrame layout={layout} topbar={topbar} dispatch={dispatch} statusbar={statusbar}
-      strip={<ToolStrip tool={layout.tool} onCollapseAll={() => dispatch({ type: "collapseAll" })} zoom={layout.zoom} onZoom={(z) => dispatch({ type: "setZoom", zoom: z })}
+      strip={<ToolStrip tool={layout.tool} onCollapseAll={() => dispatch({ type: allHidden ? "restoreAll" : "collapseAll" })} collapsed={allHidden} zoom={layout.zoom} onZoom={(z) => dispatch({ type: "setZoom", zoom: z })}
         onTool={(t) => dispatch({ type: "setTool", tool: t })} />}
       center={
         <div className={`center-split ${(layout.visibleMode === "side" || calibrating) && visibleAvailable ? "on" : ""}`}>

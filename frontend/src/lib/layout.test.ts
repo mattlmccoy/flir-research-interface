@@ -32,9 +32,9 @@ test("setTool changes the active tool", () => {
   assert.equal(layoutReducer(DEFAULT_LAYOUT, { type: "setTool", tool: "rect" }).tool, "rect");
 });
 
-test("collapseAll hides strip, rail and dock; restore brings them back", () => {
+test("collapseAll hides rail and dock but keeps the tool strip (its ⛶ is the way back); restore brings them back", () => {
   const c = layoutReducer(DEFAULT_LAYOUT, { type: "collapseAll" });
-  assert.deepEqual([c.strip, c.rail, c.dock], [false, false, false]);
+  assert.deepEqual([c.strip, c.rail, c.dock], [true, false, false]);
   const r = layoutReducer(c, { type: "restoreAll" });
   assert.deepEqual([r.strip, r.rail, r.dock], [true, true, true]);
 });
