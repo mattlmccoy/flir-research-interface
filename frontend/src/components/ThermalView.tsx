@@ -166,7 +166,9 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
 
   function pix(e: { currentTarget: HTMLCanvasElement; clientX: number; clientY: number }): Pt | null {
     if (!hdr) return null;
-    return clientToImage(e.currentTarget.getBoundingClientRect(), e.clientX, e.clientY, hdr.width, hdr.height);
+    const q = clientToImage(e.currentTarget.getBoundingClientRect(), e.clientX, e.clientY, hdr.width, hdr.height);
+    if (!q) return q;
+    return { x: flipH ? hdr.width - 1 - q.x : q.x, y: flipV ? hdr.height - 1 - q.y : q.y };
   }
   function finishPolygon(pts: [number, number][]) {
     setVertices([]); setDraft(null);
@@ -252,14 +254,14 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
     <div className={`view ${zoom === "fit" ? "" : "scroll"}`} ref={viewRef}>
       <canvas ref={canvasRef} style={{ ...(size ? { width: size.width, height: size.height } : {}), transform: flipH || flipV ? `scale(${flipH ? -1 : 1}, ${flipV ? -1 : 1})` : undefined }} />
       {overlay && box && (
-        <div className="visible-overlay" style={{ left: box.left, top: box.top, width: box.width, height: box.height, opacity: overlayStyle?.opacity ?? 0.5 }}>
+        <div className="visible-overlay" style={{ left: box.left, top: box.top, width: box.width, height: box.height, opacity: overlayStyle?.opacity ?? 0.5, transform: flipH || flipV ? `scale(${flipH ? -1 : 1}, ${flipV ? -1 : 1})` : undefined }}>
           <div className="visible-overlay-inner" style={overlayH
             ? { transform: toCssMatrix3d(overlayH, box.width, box.height), transformOrigin: "0 0" }
             : { transform: `translate(${overlayStyle?.dx ?? 0}%, ${overlayStyle?.dy ?? 0}%) scale(${overlayStyle?.scale ?? 1})` }}>{overlay}</div>
         </div>
       )}
       {hdr && box && (
-        <RoiOverlay box={box} width={hdr.width} height={hdr.height} rois={rois} selected={selected} stats={stats} draft={draft} extremes={extremes} cursor={drawing ? "crosshair" : selected !== null ? "move" : zoom !== "fit" ? "grab" : "default"}
+        <RoiOverlay box={box} width={hdr.width} height={hdr.height} rois={rois} selected={selected} stats={stats} draft={draft} extremes={extremes} flipH={flipH} flipV={flipV} cursor={drawing ? "crosshair" : selected !== null ? "move" : zoom !== "fit" ? "grab" : "default"}
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => { setHover(null); moving.current = null; panning.current = null; }} onKeyDown={onKey}
           onDoubleClick={() => { if (tool === "polygon") finishPolygon(vertices); }} />
       )}

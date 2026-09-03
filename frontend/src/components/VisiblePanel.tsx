@@ -6,7 +6,8 @@ import { DEFAULT_OVERLAY, VISIBLE_MODES, type LayoutAction, type Overlay, type V
 
 /** Live MJPEG view: fetches the stream itself so unmounting aborts it (the operator's transcode ends at once).
  *  `plain` renders only the image (for the overlay). */
-export function VisibleLive({ big = false, plain = false, topLayer }: { big?: boolean; plain?: boolean; topLayer?: ReactNode }) {
+export function VisibleLive({ big = false, plain = false, topLayer, flipH = false, flipV = false }: { big?: boolean; plain?: boolean; topLayer?: ReactNode; flipH?: boolean; flipV?: boolean }) {
+  const flip = flipH || flipV ? { transform: `scale(${flipH ? -1 : 1}, ${flipV ? -1 : 1})` } : undefined;
   const img = useRef<HTMLImageElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const layerBox = useMediaBox(boxRef, img);
@@ -28,10 +29,10 @@ export function VisibleLive({ big = false, plain = false, topLayer }: { big?: bo
     }, (e) => { if (e) setErr(e); });
     return () => { stop(); if (url) URL.revokeObjectURL(url); };
   }, []);
-  if (plain) return <img ref={img} alt="visible camera overlay" className="fill" />;
+  if (plain) return <img ref={img} alt="visible camera overlay" className="fill" style={flip} />;
   return (
     <div className={`visible-box ${big ? "big" : ""}`} ref={boxRef}>
-      <img ref={img} alt="visible camera" />
+      <img ref={img} alt="visible camera" style={flip} />
       <span className="tag">visible · {fps ? `${fps.toFixed(1)} fps` : "connecting…"} · ~1 s behind thermal</span>
       {topLayer && layerBox && <div className="top-layer" style={layerBox}>{topLayer}</div>}
       {err && <div className="errbox">{err}</div>}
@@ -57,10 +58,11 @@ function useMediaBox(box: React.RefObject<HTMLElement | null>, media: React.RefO
   return b;
 }
 
-interface VideoProps { name: string; t: number; playing: boolean; speed: number; measuredFps?: number | null; big?: boolean; plain?: boolean; topLayer?: ReactNode; }
+interface VideoProps { name: string; t: number; playing: boolean; speed: number; measuredFps?: number | null; big?: boolean; plain?: boolean; topLayer?: ReactNode; flipH?: boolean; flipV?: boolean; }
 
 /** Recorded visible.mp4 kept in step with the thermal cursor (host-clock alignment, not frame-exact). */
-export function VisibleVideo({ name, t, playing, speed, measuredFps, big = false, plain = false, topLayer }: VideoProps) {
+export function VisibleVideo({ name, t, playing, speed, measuredFps, big = false, plain = false, topLayer, flipH = false, flipV = false }: VideoProps) {
+  const flip = flipH || flipV ? { transform: `scale(${flipH ? -1 : 1}, ${flipV ? -1 : 1})` } : undefined;
   const video = useRef<HTMLVideoElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const layerBox = useMediaBox(boxRef, video);
@@ -76,10 +78,10 @@ export function VisibleVideo({ name, t, playing, speed, measuredFps, big = false
       if (Math.abs(v.currentTime - t) > 0.02) v.currentTime = t;
     }
   }, [t, playing, speed]);
-  if (plain) return <video ref={video} src={api.visibleVideoUrl(name)} muted playsInline preload="auto" className="fill" />;
+  if (plain) return <video ref={video} src={api.visibleVideoUrl(name)} muted playsInline preload="auto" className="fill" style={flip} />;
   return (
     <div className={`visible-box ${big ? "big" : ""}`} ref={boxRef}>
-      <video ref={video} src={api.visibleVideoUrl(name)} muted playsInline preload="auto" />
+      <video ref={video} src={api.visibleVideoUrl(name)} muted playsInline preload="auto" style={flip} />
       <span className="tag">recorded visible{measuredFps ? ` · ${measuredFps.toFixed(1)} fps` : ""} · host-clock aligned</span>
       {topLayer && layerBox && <div className="top-layer" style={layerBox}>{topLayer}</div>}
     </div>

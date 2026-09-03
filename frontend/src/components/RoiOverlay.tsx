@@ -12,6 +12,8 @@ interface Props {
   rois: Roi[]; selected: number | null; stats: Map<number, RoiStats>; draft: Draft | null;
   /** Draw ▲ at the hottest and ▽ at the coldest pixel of every area ROI (default on). */
   extremes?: boolean;
+  /** Mirror the geometry to match a flipped image; labels stay readable. */
+  flipH?: boolean; flipV?: boolean;
   cursor: string;
   onPointerDown: (e: PE) => void; onPointerMove: (e: PE) => void; onPointerUp: (e: PE) => void;
   onPointerLeave: () => void; onKeyDown: (e: RKeyboardEvent<HTMLCanvasElement>) => void;
@@ -29,6 +31,14 @@ function resolve(color: string): string {
 const FILL_ALPHA = 0.14;
 
 function drawLabel(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, color: string, scrim: string, box: Box) {
+  // Labels are drawn in screen space so a mirrored (flipped) overlay never mirrors its text.
+  const pt = ctx.getTransform().transformPoint(new DOMPoint(x, y));
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  try { drawLabelScreen(ctx, text, pt.x, pt.y, color, scrim, box); } finally { ctx.restore(); }
+}
+
+function drawLabelScreen(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, color: string, scrim: string, box: Box) {
   const w = ctx.measureText(text).width + 8;
   const lx = Math.min(Math.max(0, x), box.width - w);
   const ly = Math.min(Math.max(14, y), box.height - 2);
@@ -119,6 +129,8 @@ export function RoiOverlay(p: Props) {
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, p.box.width, p.box.height);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (p.flipH || p.flipV) { ctx.translate(p.flipH ? p.box.width : 0, p.flipV ? p.box.height : 0); ctx.scale(p.flipH ? -1 : 1, p.flipV ? -1 : 1); }
     const sx = p.box.width / p.width;
     const sy = p.box.height / p.height;
     const scrim = cssVar("--scrim");
