@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { detectPlatform, installerFor, installSteps } from "./platform.ts";
+import { detectPlatform, installerFor, installSteps, restartHints } from "./platform.ts";
 
 test("detectPlatform recognises macOS (arm64 assumed on modern Macs), Windows and Linux", () => {
   assert.equal(detectPlatform("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605", "MacIntel"), "macos");
@@ -27,4 +27,13 @@ test("installSteps: macOS gets the one-line installer; others get the manual rou
   assert.ok(win.command?.startsWith("irm https://raw.githubusercontent.com/mattlmccoy/flir-research-interface/main/install.ps1"));
   assert.ok(win.command?.endsWith("| iex"));
   assert.ok(installSteps("linux").command?.endsWith("| bash"));
+});
+
+test("restartHints: how to start the operator by hand on each platform, plus the log location", () => {
+  const mac = restartHints("macos");
+  assert.ok(mac.restart.includes("launchctl kickstart"));
+  assert.ok(mac.manual.includes("uv run fri-serve"));
+  assert.ok(mac.log.includes("operator.log"));
+  assert.ok(restartHints("windows").restart.includes("Start-ScheduledTask"));
+  assert.ok(restartHints("linux").restart.includes("systemctl --user"));
 });

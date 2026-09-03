@@ -56,6 +56,22 @@ on `http://127.0.0.1:8000` and restarts it if it dies. Then open
 <https://mattlmccoy.github.io/flir-research-interface/> in a browser on the same machine and
 enter that address once. Re-running the command updates everything.
 
+### Starting and stopping the operator (after install)
+
+The operator is a **login item**: it starts when you log in and restarts itself if it dies.
+You never start it by hand in normal use; the website finds it at `http://127.0.0.1:8000`.
+
+| Need | macOS | Linux | Windows |
+|---|---|---|---|
+| restart | `launchctl kickstart -k gui/$(id -u)/io.github.mattlmccoy.flir-research-interface` | `systemctl --user restart fri-operator.service` | `Start-ScheduledTask -TaskName "FLIR Research Interface operator"` |
+| run by hand (see errors) | `cd <checkout>/backend && uv run fri-serve --port 8000` | same | `cd <checkout>\backend; uv run fri-serve --port 8000` |
+| log | `<checkout>/backend/operator.log` | `journalctl --user -u fri-operator.service -f` | the task's console |
+| stop for good | `launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/io.github.mattlmccoy.flir-research-interface.plist` | `systemctl --user disable --now fri-operator.service` | `Unregister-ScheduledTask -TaskName "FLIR Research Interface operator"` |
+
+On a development checkout (this repo cloned somewhere else than `~/flir-research-interface`),
+`cd backend && uv run fri-install --host <ip> --rtsp-user <user>` installs the same login item
+for that checkout. The first-run page of the site shows these commands for the current platform.
+
 Useful afterwards:
 
 ```bash

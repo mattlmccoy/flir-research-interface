@@ -69,3 +69,32 @@ export function installSteps(platform: Platform): InstallSteps {
     ],
   };
 }
+
+export interface RestartHints { where: string; restart: string; manual: string; log: string; }
+
+/** For a machine that already has the operator installed but where nothing answers. */
+export function restartHints(platform: Platform): RestartHints {
+  const manual = "cd ~/flir-research-interface/backend && uv run fri-serve --port 8000";
+  if (platform === "windows") {
+    return {
+      where: "installed as a logon task named \"FLIR Research Interface operator\" (Task Scheduler)",
+      restart: "Start-ScheduledTask -TaskName \"FLIR Research Interface operator\"",
+      manual: "cd $HOME\\flir-research-interface\\backend; uv run fri-serve --port 8000",
+      log: "the PowerShell window that runs fri-serve (task output), or run it by hand to see it",
+    };
+  }
+  if (platform === "linux") {
+    return {
+      where: "installed as a systemd user service (fri-operator.service), starts at login",
+      restart: "systemctl --user restart fri-operator.service",
+      manual,
+      log: "journalctl --user -u fri-operator.service -f",
+    };
+  }
+  return {
+    where: "installed as a login item (launchd LaunchAgent io.github.mattlmccoy.flir-research-interface); it starts at login and restarts itself if it dies",
+    restart: "launchctl kickstart -k gui/$(id -u)/io.github.mattlmccoy.flir-research-interface",
+    manual,
+    log: "~/flir-research-interface/backend/operator.log",
+  };
+}

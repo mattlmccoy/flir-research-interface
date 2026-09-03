@@ -39,3 +39,4 @@ vendor/
 .superpowers/
 frontend/dist-site/
 frontend/dist-staged/
+backend/operator.log

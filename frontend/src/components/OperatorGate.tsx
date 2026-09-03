@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { SITE_MODE, api, operatorBase, setOperatorBase, type Health } from "../lib/api.ts";
 import { UI_API_VERSION, checkHandshake, type Handshake } from "../lib/operator.ts";
-import { TELEDYNE_SDK, detectPlatform, installSteps, type Platform } from "../lib/platform.ts";
+import { TELEDYNE_SDK, detectPlatform, installSteps, restartHints, type Platform } from "../lib/platform.ts";
 
 const DOCS = "https://github.com/mattlmccoy/flir-research-interface/blob/main/docs/installation.md";
 const POLL_MS = 2000;
@@ -58,6 +58,7 @@ export function OperatorGate({ children }: { children: ReactNode }) {
   }
 
   const inst = installSteps(platform);
+  const hints = restartHints(platform);
   return (
     <div className="page-body">
       <div className="card">
@@ -79,6 +80,16 @@ export function OperatorGate({ children }: { children: ReactNode }) {
           <a className="dl" href={TELEDYNE_SDK} target="_blank" rel="noreferrer">Spinnaker SDK download page (Teledyne, free account)</a>
           <a className="dl" href={base} target="_blank" rel="noreferrer">already installed? open the local copy</a>
         </div>
+      </div>
+      <div className="card">
+        <h2>Already installed on this computer, but nothing answers?</h2>
+        <div className="hint">The operator is {hints.where}. It should already be running; if this page still says none is answering, open a terminal and run one of these:</div>
+        <div className="kv" style={{ marginTop: 8 }}>
+          <span>restart the service</span><span className="v plain"><CommandBox command={hints.restart} /></span>
+          <span>run it by hand (see errors)</span><span className="v plain"><CommandBox command={hints.manual} /></span>
+          <span>log</span><span className="v plain"><code>{hints.log}</code></span>
+        </div>
+        <div className="hint" style={{ marginTop: 6 }}>Re-running the install command from the box above also repairs and restarts the service; it never touches your recordings.</div>
       </div>
       <div className="card">
         <h2>Operator address</h2>
