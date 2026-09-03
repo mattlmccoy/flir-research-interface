@@ -37,8 +37,25 @@ export function decodeFrameMessage(buf: ArrayBuffer): FrameMessage {
   if (bytes !== expected * 2) {
     throw new Error(`payload size ${bytes} does not match ${header.width}x${header.height} uint16`);
   }
-  const counts = new Uint16Array(expected);
   const off = 4 + n;
-  for (let i = 0; i < expected; i++) counts[i] = view.getUint16(off + i * 2, true);
+  // Little-endian on every platform this runs on: view the payload as Uint16 directly.
+  // Typed-array views need 2-byte alignment, so copy when the header length makes `off` odd.
+  const counts = off % 2 === 0
+    ? new Uint16Array(buf.slice(off, off + expected * 2))
+    : new Uint16Array(new Uint8Array(buf, off, expected * 2).slice().buffer);
   return { header, counts };
+}
+
+/** Split a block body of repeated [uint32 length][frame message] into decoded frames. */
+export function decodeFrameBlock(buf: ArrayBuffer): FrameMessage[] {
+  const view = new DataView(buf);
+  const out: FrameMessage[] = [];
+  let off = 0;
+  while (off + 4 <= buf.byteLength) {
+    const len = view.getUint32(off, false);
+    off += 4;
+    out.push(decodeFrameMessage(buf.slice(off, off + len)));
+    off += len;
+  }
+  return out;
 }

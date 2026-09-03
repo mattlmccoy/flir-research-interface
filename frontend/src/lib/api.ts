@@ -106,6 +106,11 @@ export const api = {
     if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
     return res.arrayBuffer();
   },
+  frameBlock: async (name: string, start: number, count: number): Promise<ArrayBuffer> => {
+    const res = await req(`/api/experiments/${encodeURIComponent(name)}/frames?start=${start}&count=${count}`);
+    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+    return res.arrayBuffer();
+  },
   recordingStart: (name: string, metadata: Record<string, unknown>, visible = false, rois: unknown[] | null = null, nucHold = true, everyNth = 1) =>
     j<{ state: string; experiment_dir: string; visible?: VisibleStatus }>(req("/api/recording/start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, metadata, visible, rois, nuc_hold: nucHold, every_nth: everyNth }) })),
   recordingStop: () => j<Record<string, unknown>>(req("/api/recording/stop", { method: "POST" })),

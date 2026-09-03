@@ -7,7 +7,7 @@ import { radiometryFromCamera } from "../lib/emissivity.ts";
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import type { Dispatch, ReactNode } from "react";
 import { api, type ExperimentInfo, type RecordingStatus, type RoiSeries, type Status, type Timeline } from "../lib/api.ts";
-import { decodeFrameMessage, type FrameMessage } from "../lib/protocol.ts";
+import { type FrameMessage, decodeFrameBlock } from "../lib/protocol.ts";
 import type { PaletteName } from "../lib/palette.ts";
 import type { Range, ScaleMode } from "../lib/scale.ts";
 import type { LayoutAction, LayoutState } from "../lib/layout.ts";
@@ -65,11 +65,14 @@ export function PlaybackPage(p: Props) {
   const [stats, setStats] = useState<StatsMap>(new Map());
   const [series, setSeries] = useState<RoiSeries | null>(null);
   const cache = useRef(new Map<number, FrameMessage>());
+  const inflight = useRef(new Map<number, Promise<void>>());
+  const BLOCK = 60;
   const n = info?.n_frames ?? 0;
   const onStats = useCallback((m: StatsMap) => setStats(m), []);
 
   useEffect(() => {
     cache.current.clear();
+    inflight.current.clear();
     Promise.all([api.experiment(p.name), api.timeline(p.name)])
       .then(([i, t]) => { setInfo(i); setTl(t); setIndex(0); }).catch((e) => setErr(String(e)));
   }, [p.name]);
@@ -84,22 +87,44 @@ export function PlaybackPage(p: Props) {
     return () => { alive = false; window.clearTimeout(id); };
   }, [p.name, info, p.rois.rois, p.layout.segment.on, p.layout.segment.min, p.layout.segment.max]);
 
+  const ensureBlock = useCallback((start: number): Promise<void> => {
+    const running = inflight.current.get(start);
+    if (running) return running;
+    const promise = api.frameBlock(p.name, start, BLOCK)
+      .then((buf) => {
+        for (const m of decodeFrameBlock(buf)) {
+          const idx = (m.header as { index?: number }).index;
+          if (typeof idx === "number") cache.current.set(idx, m);
+        }
+        // keep the cache bounded to a few blocks around the play head
+        if (cache.current.size > BLOCK * 4) {
+          const keys = [...cache.current.keys()].sort((a, b) => a - b);
+          for (const k of keys.slice(0, keys.length - BLOCK * 3)) cache.current.delete(k);
+        }
+      })
+      .finally(() => { inflight.current.delete(start); });
+    inflight.current.set(start, promise);
+    return promise;
+  }, [p.name]);
+
   const load = useCallback(async (i: number): Promise<FrameMessage> => {
     const hit = cache.current.get(i);
     if (hit) return hit;
-    const msg = decodeFrameMessage(await api.frameBuffer(p.name, i));
-    if (cache.current.size >= 64) cache.current.delete(cache.current.keys().next().value as number);
-    cache.current.set(i, msg);
-    return msg;
-  }, [p.name]);
+    await ensureBlock(Math.floor(i / BLOCK) * BLOCK);
+    const m = cache.current.get(i);
+    if (!m) throw new Error(`frame ${i} not returned`);
+    return m;
+  }, [ensureBlock]);
 
   useEffect(() => {
     if (!info || n === 0) return;
     let alive = true;
     load(index).then((m) => { if (alive) setFrame(m); }).catch((e) => setErr(String(e)));
-    if (index + 1 < n) void load(index + 1).catch(() => undefined);
+    // prefetch the next block once we're into the current one, so playback never waits
+    const blockStart = Math.floor(index / BLOCK) * BLOCK;
+    if (index - blockStart >= BLOCK - 20 && blockStart + BLOCK < n) void ensureBlock(blockStart + BLOCK).catch(() => undefined);
     return () => { alive = false; };
-  }, [index, info, n, load]);
+  }, [index, info, n, load, ensureBlock]);
 
   useEffect(() => {
     if (!playing || !tl || n === 0) return;
