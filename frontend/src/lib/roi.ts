@@ -16,6 +16,8 @@ interface Meta {
   emissivity?: number;
   /** Per-ROI reflected temperature in °C (defaults to the camera's setting). */
   reflected_c?: number;
+  /** Per-ROI object distance in metres (defaults to the camera's setting). */
+  distance_m?: number;
 }
 /** `box: 3` turns the spot into ResearchIR's measurement cursor: the mean of the 3×3 neighbourhood. */
 export interface Spot extends Meta { id: number; kind: "spot"; x: number; y: number; box?: 1 | 3; }
@@ -35,18 +37,22 @@ export type RoiInput = Omit<Spot, "id"> | Omit<Rect, "id"> | Omit<Circle, "id"> 
 /** Kinds whose stats are a mean/min/max over several pixels (everything but a spot). */
 export function isArea(roi: Roi): boolean { return roi.kind !== "spot"; }
 
-export interface RoiState { rois: Roi[]; selected: number | null; nextId: number; }
-export const EMPTY_ROIS: RoiState = Object.freeze({ rois: [], selected: null, nextId: 1 }) as RoiState;
+export interface RoiState { rois: Roi[]; selected: number | null; selectedIds: number[]; nextId: number; }
+export const EMPTY_ROIS: RoiState = Object.freeze({ rois: [], selected: null, selectedIds: [], nextId: 1 }) as RoiState;
 
 export type RoiAction =
   | { type: "add"; roi: RoiInput }
   | { type: "remove"; id: number }
   | { type: "select"; id: number | null }
+  | { type: "toggleSelect"; id: number }
+  | { type: "moveMany"; ids: number[]; dx: number; dy: number }
+  | { type: "setVertex"; id: number; index: number; x: number; y: number }
+  | { type: "setEndpoint"; id: number; end: 0 | 1; x: number; y: number }
   | { type: "move"; id: number; dx: number; dy: number }
   | { type: "rename"; id: number; name: string }
   | { type: "recolor"; id: number; color: string | null }
   | { type: "toggleHidden"; id: number }
-  | { type: "setOptics"; id: number; emissivity?: number | null; reflected_c?: number | null }
+  | { type: "setOptics"; id: number; emissivity?: number | null; reflected_c?: number | null; distance_m?: number | null }
   | { type: "setBox"; id: number; box: 1 | 3 }
   | { type: "setHiddenAll"; hidden: boolean }
   | { type: "replace"; rois: Roi[] }
@@ -55,18 +61,24 @@ export type RoiAction =
 /** The ROIs that should be drawn and hit-tested. */
 export function visibleRois(rois: Roi[]): Roi[] { return rois.filter((r) => !r.hidden); }
 
+export function roiXs(r: Roi): number[] { return r.kind === "spot" ? [r.x] : r.kind === "circle" || r.kind === "ellipse" ? [r.cx] : r.kind === "polygon" || r.kind === "polyline" ? r.points.map((p) => p[0]) : [r.x0, r.x1]; }
+export function roiYs(r: Roi): number[] { return r.kind === "spot" ? [r.y] : r.kind === "circle" || r.kind === "ellipse" ? [r.cy] : r.kind === "polygon" || r.kind === "polyline" ? r.points.map((p) => p[1]) : [r.y0, r.y1]; }
+
+/** Translate a shape by exactly (dx, dy) with no clamping (caller has already clamped). */
+export function translateRoi(roi: Roi, dx: number, dy: number): Roi {
+  switch (roi.kind) {
+    case "spot": return { ...roi, x: roi.x + dx, y: roi.y + dy };
+    case "circle": case "ellipse": return { ...roi, cx: roi.cx + dx, cy: roi.cy + dy };
+    case "rect": case "line": return { ...roi, x0: roi.x0 + dx, y0: roi.y0 + dy, x1: roi.x1 + dx, y1: roi.y1 + dy };
+    case "polygon": case "polyline": return { ...roi, points: roi.points.map(([x, y]) => [x + dx, y + dy] as [number, number]) };
+  }
+}
+
 /** The same shape shifted by (dx, dy); shifts are clamped so no coordinate goes below zero. */
 export function moveRoi(roi: Roi, dx: number, dy: number): Roi {
-  const xs = (r: Roi): number[] => r.kind === "spot" ? [r.x] : r.kind === "circle" || r.kind === "ellipse" ? [r.cx] : r.kind === "polygon" || r.kind === "polyline" ? r.points.map((p) => p[0]) : [r.x0, r.x1];
-  const ys = (r: Roi): number[] => r.kind === "spot" ? [r.y] : r.kind === "circle" || r.kind === "ellipse" ? [r.cy] : r.kind === "polygon" || r.kind === "polyline" ? r.points.map((p) => p[1]) : [r.y0, r.y1];
-  const ddx = Math.max(dx, -Math.min(...xs(roi)));
-  const ddy = Math.max(dy, -Math.min(...ys(roi)));
-  switch (roi.kind) {
-    case "spot": return { ...roi, x: roi.x + ddx, y: roi.y + ddy };
-    case "circle": case "ellipse": return { ...roi, cx: roi.cx + ddx, cy: roi.cy + ddy };
-    case "rect": case "line": return { ...roi, x0: roi.x0 + ddx, y0: roi.y0 + ddy, x1: roi.x1 + ddx, y1: roi.y1 + ddy };
-    case "polygon": case "polyline": return { ...roi, points: roi.points.map(([x, y]) => [x + ddx, y + ddy] as [number, number]) };
-  }
+  const ddx = Math.max(dx, -Math.min(...roiXs(roi)));
+  const ddy = Math.max(dy, -Math.min(...roiYs(roi)));
+  return translateRoi(roi, ddx, ddy);
 }
 
 function patch(s: RoiState, id: number, f: (r: Roi) => Roi): RoiState {
@@ -78,16 +90,49 @@ export function roiReducer(s: RoiState, a: RoiAction): RoiState {
   switch (a.type) {
     case "add": {
       const roi = { ...a.roi, id: s.nextId } as Roi;
-      return { rois: [...s.rois, roi], selected: roi.id, nextId: s.nextId + 1 };
+      return { rois: [...s.rois, roi], selected: roi.id, selectedIds: [roi.id], nextId: s.nextId + 1 };
     }
     case "remove": {
       const rois = s.rois.filter((r) => r.id !== a.id);
-      return { ...s, rois, selected: s.selected === a.id ? null : s.selected };
+      const selectedIds = s.selectedIds.filter((id) => id !== a.id);
+      return { ...s, rois, selectedIds, selected: s.selected === a.id ? (selectedIds[selectedIds.length - 1] ?? null) : s.selected };
     }
-    case "select":
-      return { ...s, selected: a.id !== null && s.rois.some((r) => r.id === a.id) ? a.id : null };
+    case "select": {
+      const ok = a.id !== null && s.rois.some((r) => r.id === a.id);
+      return { ...s, selected: ok ? a.id : null, selectedIds: ok ? [a.id as number] : [] };
+    }
+    case "toggleSelect": {
+      if (!s.rois.some((r) => r.id === a.id)) return s;
+      if (s.selectedIds.includes(a.id)) {
+        const selectedIds = s.selectedIds.filter((id) => id !== a.id);
+        return { ...s, selectedIds, selected: s.selected === a.id ? (selectedIds[selectedIds.length - 1] ?? null) : s.selected };
+      }
+      return { ...s, selectedIds: [...s.selectedIds, a.id], selected: a.id };
+    }
     case "move":
       return patch(s, a.id, (r) => moveRoi(r, a.dx, a.dy));
+    case "moveMany": {
+      const set = new Set(a.ids);
+      const targets = s.rois.filter((r) => set.has(r.id));
+      if (targets.length === 0) return s;
+      // one shared clamp so the group stays rigid at the top/left edge
+      const minX = Math.min(...targets.map((r) => Math.min(...roiXs(r))));
+      const minY = Math.min(...targets.map((r) => Math.min(...roiYs(r))));
+      const ddx = Math.max(a.dx, -minX), ddy = Math.max(a.dy, -minY);
+      return { ...s, rois: s.rois.map((r) => (set.has(r.id) ? translateRoi(r, ddx, ddy) : r)) };
+    }
+    case "setVertex":
+      return patch(s, a.id, (r) => {
+        if (r.kind !== "polygon" && r.kind !== "polyline") return r;
+        const points = r.points.map((pt, i) => (i === a.index ? [Math.max(0, Math.round(a.x)), Math.max(0, Math.round(a.y))] as [number, number] : pt));
+        return { ...r, points };
+      });
+    case "setEndpoint":
+      return patch(s, a.id, (r) => {
+        if (r.kind !== "line") return r;
+        const x = Math.max(0, Math.round(a.x)), y = Math.max(0, Math.round(a.y));
+        return a.end === 0 ? { ...r, x0: x, y0: y } : { ...r, x1: x, y1: y };
+      });
     case "rename":
       return patch(s, a.id, (r) => { const name = a.name.trim(); const { name: _old, ...rest } = r; return name ? { ...rest, name } as Roi : rest as Roi; });
     case "recolor":
@@ -96,27 +141,29 @@ export function roiReducer(s: RoiState, a: RoiAction): RoiState {
       return patch(s, a.id, (r) => { if (r.kind !== "spot") return r; const { box: _b, ...rest } = r; return a.box === 3 ? { ...rest, box: 3 } as Roi : rest as Roi; });
     case "setOptics":
       return patch(s, a.id, (r) => {
-        const { emissivity: e0, reflected_c: t0, ...rest } = r;
+        const { emissivity: e0, reflected_c: t0, distance_m: d0, ...rest } = r;
         const next: Roi = rest as Roi;
         const e = a.emissivity === undefined ? e0 : a.emissivity;
         const t = a.reflected_c === undefined ? t0 : a.reflected_c;
+        const d = a.distance_m === undefined ? d0 : a.distance_m;
         if (typeof e === "number" && e > 0 && e <= 1) next.emissivity = e;
         else if (e !== null && e0 !== undefined) next.emissivity = e0;
         if (typeof t === "number" && Number.isFinite(t)) next.reflected_c = t;
+        if (typeof d === "number" && d > 0) next.distance_m = d;
         return next;
       });
     case "toggleHidden": {
       const next = patch(s, a.id, (r) => { const { hidden, ...rest } = r; return hidden ? rest as Roi : { ...rest, hidden: true } as Roi; });
-      return next.rois.find((r) => r.id === a.id)?.hidden && s.selected === a.id ? { ...next, selected: null } : next;
+      return next.rois.find((r) => r.id === a.id)?.hidden && s.selected === a.id ? { ...next, selected: null, selectedIds: next.selectedIds.filter((id) => id !== a.id) } : next;
     }
     case "setHiddenAll":
-      return { ...s, rois: s.rois.map((r) => { const { hidden, ...rest } = r; return a.hidden ? { ...rest, hidden: true } as Roi : rest as Roi; }), selected: a.hidden ? null : s.selected };
+      return { ...s, rois: s.rois.map((r) => { const { hidden, ...rest } = r; return a.hidden ? { ...rest, hidden: true } as Roi : rest as Roi; }), selected: a.hidden ? null : s.selected, selectedIds: a.hidden ? [] : s.selectedIds };
     case "replace": {
       const maxId = a.rois.reduce((m, r) => Math.max(m, r.id), 0);
-      return { rois: a.rois, selected: null, nextId: Math.max(s.nextId, maxId + 1) };
+      return { rois: a.rois, selected: null, selectedIds: [], nextId: Math.max(s.nextId, maxId + 1) };
     }
     case "clear":
-      return { ...s, rois: [], selected: null };
+      return { ...s, rois: [], selected: null, selectedIds: [] };
   }
 }
 
@@ -322,7 +369,7 @@ export function loadRois(storage: Storage | null): RoiState {
     const rois = Array.isArray(parsed.rois) ? parsed.rois.map(asRoi).filter((r): r is Roi => r !== null) : [];
     const maxId = rois.reduce((m, r) => Math.max(m, r.id), 0);
     const nextId = isInt(parsed.nextId) && parsed.nextId > maxId ? parsed.nextId : maxId + 1;
-    return { rois, selected: null, nextId };
+    return { rois, selected: null, selectedIds: [], nextId };
   } catch {
     return EMPTY_ROIS;
   }

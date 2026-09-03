@@ -11,7 +11,7 @@ import {
   type Roi,
   type RoiState, roiPixels, moveRoi, isArea } from "./roi.ts";
 
-const EMPTY: RoiState = { rois: [], selected: null, nextId: 1 };
+const EMPTY: RoiState = { rois: [], selected: null, selectedIds: [], nextId: 1 };
 
 // 4x3 field, row-major, x = column, y = row.
 //   row 0: 10 11 12 13
@@ -98,7 +98,7 @@ test("saveRois / loadRois round-trip and reject malformed storage", () => {
   const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); } } as unknown as Storage;
   const s = roiReducer(roiReducer(EMPTY, { type: "add", roi: { kind: "spot", x: 1, y: 2 } }), { type: "add", roi: { kind: "rect", x0: 0, y0: 0, x1: 2, y1: 2 } });
   saveRois(storage, s);
-  assert.deepEqual(loadRois(storage), { ...s, selected: null });
+  assert.deepEqual(loadRois(storage), { ...s, selected: null, selectedIds: [] });
   store.set("fri.rois.v1", JSON.stringify({ rois: [{ id: "x", kind: "spot" }, { id: 4, kind: "rect", x0: 0, y0: 0, x1: 3, y1: 3 }], nextId: 5 }));
   const l = loadRois(storage);
   assert.deepEqual(l.rois.map((r) => r.id), [4]);
@@ -272,7 +272,7 @@ test("a spot with box 3 measures the 3×3 neighbourhood (clamped at the edge) an
   assert.equal(plain.n, 1);
   const store = new Map<string, string>();
   const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); } } as unknown as Storage;
-  saveRois(storage, { rois: [{ id: 1, kind: "spot", x: 1, y: 1, box: 3 }], selected: null, nextId: 2 });
+  saveRois(storage, { rois: [{ id: 1, kind: "spot", x: 1, y: 1, box: 3 }], selected: null, selectedIds: [], nextId: 2 });
   assert.equal((loadRois(storage).rois[0] as { box?: number }).box, 3);
 });
 
@@ -285,7 +285,7 @@ test("ellipse ROI: pixel centres inside (dx/rx)²+(dy/ry)² ≤ 1, movable, pers
   assert.deepEqual(moveRoi(e, 2, -1), { ...e, cx: 7, cy: 4 });
   const store = new Map<string, string>();
   const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); } } as unknown as Storage;
-  saveRois(storage, { rois: [e], selected: null, nextId: 2 });
+  saveRois(storage, { rois: [e], selected: null, selectedIds: [], nextId: 2 });
   assert.deepEqual(loadRois(storage).rois[0], e);
   assert.equal(roiLabel(e), "E1");
 });
@@ -309,4 +309,50 @@ test("polyline ROI: pixels along every segment in order, no duplicated joints; m
   assert.deepEqual((moveRoi(pl, 1, 1) as typeof pl).points, [[1, 1], [4, 1], [4, 3]]);
   assert.equal(roiLabel(pl), "B1");
   assert.ok(isArea(pl));
+});
+
+test("multi-select: toggleSelect adds/removes; select resets to one; selectedIds tracks selected", () => {
+  let s = roiReducer(EMPTY, { type: "add", roi: { kind: "spot", x: 1, y: 1 } });
+  s = roiReducer(s, { type: "add", roi: { kind: "spot", x: 2, y: 2 } });
+  s = roiReducer(s, { type: "add", roi: { kind: "spot", x: 3, y: 3 } });
+  s = roiReducer(s, { type: "select", id: 1 });
+  assert.deepEqual(s.selectedIds, [1]); assert.equal(s.selected, 1);
+  s = roiReducer(s, { type: "toggleSelect", id: 2 });
+  assert.deepEqual([...s.selectedIds].sort(), [1, 2]); assert.equal(s.selected, 2, "last toggled becomes primary");
+  s = roiReducer(s, { type: "toggleSelect", id: 2 });
+  assert.deepEqual(s.selectedIds, [1]); assert.equal(s.selected, 1, "removing primary falls back to a remaining member");
+  s = roiReducer(s, { type: "select", id: 3 });
+  assert.deepEqual(s.selectedIds, [3]);
+  s = roiReducer(s, { type: "select", id: null });
+  assert.deepEqual(s.selectedIds, []); assert.equal(s.selected, null);
+});
+
+test("moveMany shifts every selected ROI rigidly with a shared clamp at the top-left edge", () => {
+  let s: RoiState = { rois: [
+    { id: 1, kind: "rect", x0: 5, y0: 5, x1: 9, y1: 9 },
+    { id: 2, kind: "rect", x0: 2, y0: 8, x1: 6, y1: 12 },
+  ], selected: 1, selectedIds: [1, 2], nextId: 3 };
+  s = roiReducer(s, { type: "moveMany", ids: [1, 2], dx: -10, dy: 3 });
+  // shared clamp: min x is 2, so dx clamps to -2; min y is 5, dy stays +3
+  assert.deepEqual(s.rois[0], { id: 1, kind: "rect", x0: 3, y0: 8, x1: 7, y1: 12 });
+  assert.deepEqual(s.rois[1], { id: 2, kind: "rect", x0: 0, y0: 11, x1: 4, y1: 15 });
+});
+
+test("setVertex moves one polygon/polyline vertex; setEndpoint moves a line end", () => {
+  let s: RoiState = { rois: [
+    { id: 1, kind: "polygon", points: [[0, 0], [4, 0], [4, 4]] },
+    { id: 2, kind: "line", x0: 1, y0: 1, x1: 9, y1: 9 },
+  ], selected: 1, selectedIds: [1], nextId: 3 };
+  s = roiReducer(s, { type: "setVertex", id: 1, index: 1, x: 6, y: 2 });
+  assert.deepEqual((s.rois[0] as { points: number[][] }).points, [[0, 0], [6, 2], [4, 4]]);
+  s = roiReducer(s, { type: "setEndpoint", id: 2, end: 1, x: 12, y: 3 });
+  assert.deepEqual(s.rois[1], { id: 2, kind: "line", x0: 1, y0: 1, x1: 12, y1: 3 });
+});
+
+test("removing / clearing keeps selectedIds consistent", () => {
+  let s: RoiState = { rois: [{ id: 1, kind: "spot", x: 1, y: 1 }, { id: 2, kind: "spot", x: 2, y: 2 }], selected: 2, selectedIds: [1, 2], nextId: 3 };
+  s = roiReducer(s, { type: "remove", id: 2 });
+  assert.deepEqual(s.selectedIds, [1]); assert.equal(s.selected, 1, "removing the primary falls back to a remaining selected member");
+  s = roiReducer(s, { type: "clear" });
+  assert.deepEqual(s.selectedIds, []);
 });

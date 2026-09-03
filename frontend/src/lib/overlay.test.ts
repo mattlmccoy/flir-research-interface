@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { COLOR_PRESETS, clientToImage, hitTest, roiColor, traceColor } from "./overlay.ts";
+import { COLOR_PRESETS, clientToImage, hitTest, roiColor, traceColor, vertexHit } from "./overlay.ts";
 import type { Roi } from "./roi.ts";
 
 const RECT = { left: 100, top: 50, width: 320, height: 240 }; // canvas drawn at half size of 640x480
@@ -50,4 +50,14 @@ test("roiColor: explicit colour wins, otherwise the trace token by index; preset
   assert.equal(roiColor({ id: 1, kind: "spot", x: 0, y: 0 }, 1), "var(--accent)");
   assert.equal(COLOR_PRESETS.length, 9);
   for (const c of COLOR_PRESETS) assert.match(c, /^#[0-9a-f]{6}$/);
+});
+
+test("vertexHit finds a polygon/polyline vertex or a line endpoint within tolerance", () => {
+  const poly = { id: 1, kind: "polygon" as const, points: [[0, 0], [10, 0], [10, 10]] as [number, number][] };
+  assert.deepEqual(vertexHit(poly, 10, 1, 2), { kind: "vertex", index: 1 });
+  assert.equal(vertexHit(poly, 5, 5, 2), null);
+  const line = { id: 2, kind: "line" as const, x0: 2, y0: 2, x1: 20, y1: 20 };
+  assert.deepEqual(vertexHit(line, 21, 19, 2), { kind: "endpoint", end: 1 });
+  assert.deepEqual(vertexHit(line, 2, 3, 2), { kind: "endpoint", end: 0 });
+  assert.equal(vertexHit({ id: 3, kind: "spot", x: 1, y: 1 }, 1, 1, 2), null, "no vertices on a spot");
 });

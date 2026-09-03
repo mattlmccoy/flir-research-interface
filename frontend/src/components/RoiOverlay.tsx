@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { KeyboardEvent as RKeyboardEvent, MouseEvent as RMouseEvent, PointerEvent as RPointerEvent } from "react";
 import { roiLabel, type Roi, type RoiInput, type RoiStats } from "../lib/roi.ts";
-import { roiColor, type Box } from "../lib/overlay.ts";
+import { roiColor, type Box, vertexHandles } from "../lib/overlay.ts";
 
 /** In-progress shape while the pointer is down / vertices are being placed. */
 export type Draft = RoiInput;
@@ -9,7 +9,7 @@ export type Draft = RoiInput;
 type PE = RPointerEvent<HTMLCanvasElement>;
 interface Props {
   box: Box; width: number; height: number;
-  rois: Roi[]; selected: number | null; stats: Map<number, RoiStats>; draft: Draft | null;
+  rois: Roi[]; selected: number | null; selectedIds?: number[]; stats: Map<number, RoiStats>; draft: Draft | null;
   /** Draw ▲ at the hottest and ▽ at the coldest pixel of every area ROI (default on). */
   extremes?: boolean;
   /** Mirror the geometry to match a flipped image; labels stay readable. */
@@ -151,13 +151,19 @@ export function RoiOverlay(p: Props) {
     p.rois.forEach((r, i) => {
       if (r.hidden) return; // keep i so default colours match the rows
       const color = resolve(roiColor(r, i));
-      const sel = r.id === p.selected;
+      const inSel = p.selectedIds ? p.selectedIds.includes(r.id) : r.id === p.selected;
+      const sel = inSel;
       ctx.strokeStyle = color;
       ctx.lineWidth = sel ? 2.5 : 1;
       ctx.setLineDash([]);
       const [lx, ly] = drawShape(ctx, r, sx, sy, true);
       if (sel) { ctx.strokeStyle = accent; ctx.lineWidth = 1; ctx.setLineDash([3, 3]); drawShape(ctx, r, sx, sy, false); ctx.setLineDash([]); }
       drawLabel(ctx, `${roiLabel(r)}${statText(r, p.stats.get(r.id))}`, lx, ly, color, scrim, p.box);
+      if (r.id === p.selected) for (const [vx, vy] of vertexHandles(r)) {
+        const hx = (vx + 0.5) * sx, hy = (vy + 0.5) * sy;
+        ctx.setLineDash([]); ctx.fillStyle = accent; ctx.strokeStyle = scrim; ctx.lineWidth = 1.5;
+        ctx.fillRect(hx - 3.5, hy - 3.5, 7, 7); ctx.strokeRect(hx - 3.5, hy - 3.5, 7, 7);
+      }
       const st = p.stats.get(r.id);
       if (p.extremes !== false && st?.maxAt && st.minAt && st.n > 1) {
         drawMarker(ctx, (st.maxAt[0] + 0.5) * sx, (st.maxAt[1] + 0.5) * sy, "hot", scrim);

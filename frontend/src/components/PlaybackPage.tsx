@@ -197,7 +197,7 @@ export function PlaybackPage(p: Props) {
       center={
         <div className={`center-split ${p.layout.visibleMode === "side" && hasVideo ? "on" : ""}`}>
           <ThermalView frame={frame} palette={p.palette} scaleMode={p.scaleMode} manual={p.manual} onScale={setShown}
-            rois={p.rois.rois} selected={p.rois.selected} tool={p.layout.tool} zoom={p.layout.zoom} onRoi={p.roiDispatch} onStats={onStats} rad={rad} extremes={p.layout.extremes} isotherm={p.layout.isotherm} onField={setField} reference={reference} hold={p.layout.hold} flipH={p.layout.flipH} flipV={p.layout.flipV} agc={p.layout.agc} filter={p.layout.filter} units={p.layout.units} valid={p.layout.segment.on ? { min: p.layout.segment.min, max: p.layout.segment.max } : null}
+            rois={p.rois.rois} selected={p.rois.selected} selectedIds={p.rois.selectedIds} tool={p.layout.tool} zoom={p.layout.zoom} onRoi={p.roiDispatch} onStats={onStats} rad={rad} extremes={p.layout.extremes} isotherm={p.layout.isotherm} onField={setField} reference={reference} hold={p.layout.hold} flipH={p.layout.flipH} flipV={p.layout.flipV} agc={p.layout.agc} filter={p.layout.filter} units={p.layout.units} valid={p.layout.segment.on ? { min: p.layout.segment.min, max: p.layout.segment.max } : null}
             overlay={p.layout.visibleMode === "overlay" && hasVideo ? <VisibleVideo plain name={p.name} t={t} playing={playing} speed={speed} /> : undefined} overlayStyle={p.layout.overlay} overlayH={overlayH} />
           {p.layout.visibleMode === "side" && hasVideo && <VisibleVideo big flipH={p.layout.flipH} flipV={p.layout.flipV} name={p.name} t={t} playing={playing} speed={speed} measuredFps={info?.visible?.measured_fps} />}
         </div>
@@ -244,7 +244,7 @@ export function PlaybackPage(p: Props) {
                 <span className="hint">as they were when it was recorded (exports/roi_series.csv matches them)</span>
               </div>
             )}
-            <RoiRows rois={p.rois.rois} units={p.layout.units} conv={field?.conv ?? null} stats={stats} selected={p.rois.selected} extremes={p.layout.extremes} onExtremes={(on) => p.dispatch({ type: "setExtremes", on })}
+            <RoiRows rois={p.rois.rois} units={p.layout.units} conv={field?.conv ?? null} stats={stats} selected={p.rois.selected} selectedIds={p.rois.selectedIds} extremes={p.layout.extremes} onExtremes={(on) => p.dispatch({ type: "setExtremes", on })}
               dispatch={p.roiDispatch} />
             <DeltaPicker rois={p.rois.rois} delta={p.layout.delta} onChange={(delta) => p.dispatch({ type: "setDelta", delta })} />
             {err && <div className="errbox">{err}</div>}

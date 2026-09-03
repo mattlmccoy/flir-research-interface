@@ -10,7 +10,7 @@ interface Props {
   extremes?: boolean; onExtremes?: (on: boolean) => void;
   rois: Roi[];
   stats: Map<number, RoiStats>;
-  selected: number | null;
+  selected: number | null; selectedIds?: number[];
   dispatch: (a: RoiAction) => void;
 }
 
@@ -59,20 +59,30 @@ function ColorPicker({ r, i, dispatch, onDone }: { r: Roi; i: number; dispatch: 
           <input type="checkbox" checked={r.box === 3} onChange={(e) => dispatch({ type: "setBox", id: r.id, box: e.target.checked ? 3 : 1 })} /> 3×3 average
         </label>
       )}
-      <span className="hint" style={{ flexBasis: "100%", display: "flex", gap: 6, alignItems: "center", marginTop: 4 }} title="Per-ROI optics: this ROI's values are re-corrected from the camera's global emissivity / reflected temperature using the camera's own R, B, F constants (FLIR signal model, atmosphere ≈ 1). Leave blank to use the camera's setting.">
-        ε <input type="number" min={0.01} max={1} step={0.01} value={r.emissivity ?? ""} placeholder="camera" style={{ width: 64 }} aria-label={`emissivity of ${roiLabel(r)}`}
-          onChange={(e) => dispatch({ type: "setOptics", id: r.id, emissivity: e.target.value === "" ? null : Number(e.target.value) })} />
-        T<sub>refl</sub> <input type="number" step={0.5} value={r.reflected_c ?? ""} placeholder="camera" style={{ width: 64 }} aria-label={`reflected temperature of ${roiLabel(r)} in °C`}
-          onChange={(e) => dispatch({ type: "setOptics", id: r.id, reflected_c: e.target.value === "" ? null : Number(e.target.value) })} /> °C
-      </span>
+    </div>
+  );
+}
+
+function OpticsEditor({ r, dispatch }: { r: Roi; dispatch: (a: RoiAction) => void }) {
+  const set = (patch: { emissivity?: number | null; reflected_c?: number | null; distance_m?: number | null }) => dispatch({ type: "setOptics", id: r.id, ...patch });
+  return (
+    <div className="optics" title="Emissivity and reflected temperature re-correct this region's reading live using the camera's R,B,F constants (emissivity has the largest effect). Distance is recorded with the ROI for your own atmospheric correction; at bench range (under ~2 m) its effect on the reading is under a few tenths of a degree. Blank = use the camera's global setting.">
+      <div className="hint" style={{ marginBottom: 4 }}>Optics for {roiLabel(r)} — ε and reflected re-correct the reading live; distance is recorded for your processing. Blank = camera setting.</div>
+      <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+        <label className="hint">ε <input type="number" min={0.01} max={1} step={0.01} value={r.emissivity ?? ""} placeholder="camera" style={{ width: 70 }} aria-label={`emissivity of ${roiLabel(r)}`} onChange={(e) => set({ emissivity: e.target.value === "" ? null : Number(e.target.value) })} /></label>
+        <label className="hint">reflected <input type="number" step={0.5} value={r.reflected_c ?? ""} placeholder="camera" style={{ width: 70 }} aria-label={`reflected temperature of ${roiLabel(r)} in °C`} onChange={(e) => set({ reflected_c: e.target.value === "" ? null : Number(e.target.value) })} /> °C</label>
+        <label className="hint">distance <input type="number" min={0.01} step={0.1} value={r.distance_m ?? ""} placeholder="camera" style={{ width: 70 }} aria-label={`object distance of ${roiLabel(r)} in metres`} onChange={(e) => set({ distance_m: e.target.value === "" ? null : Number(e.target.value) })} /> m</label>
+      </div>
     </div>
   );
 }
 
 /** One row per ROI: colour swatch (click to change), editable name, current values, remove. */
-export function RoiRows({ rois, stats, selected, dispatch, extremes, onExtremes, units = "C", conv = null }: Props) {
+export function RoiRows({ rois, stats, selected, selectedIds, dispatch, extremes, onExtremes, units = "C", conv = null }: Props) {
+  const isSel = (id: number) => (selectedIds ? selectedIds.includes(id) : selected === id);
   const [editing, setEditing] = useState<number | null>(null);
   const [picking, setPicking] = useState<number | null>(null);
+  const [optics, setOptics] = useState<number | null>(null);
   const help = (
     <Disclosure label="How to draw and edit ROIs">
       <ul className="help">
@@ -81,7 +91,7 @@ export function RoiRows({ rois, stats, selected, dispatch, extremes, onExtremes,
         <li>◯ Circle: drag from the centre outwards. ⬭ Ellipse: drag its bounding box corner to corner.</li>
         <li>╱ Line: drag from one end to the other; the pixels along it are measured.</li>
         <li>⬠ Polygon: click each vertex; double-click places the last one and closes the shape (Enter closes, Esc cancels, Backspace undoes a vertex). ⌇ Bendable line: the same, but open. ✎ Freehand: hold the mouse and draw; releasing closes the shape.</li>
-        <li>↖ Select: click an ROI, then drag to move it; Delete removes it.</li>
+        <li>↖ Select: click an ROI, then drag to move it; Delete removes it. Shift-click to select several and drag them together. When a polygon, bendable line or line is selected, drag its square handles to edit individual vertices.</li>
         <li>Click the colour square to recolour, set a per-ROI emissivity and reflected temperature (values are re-corrected from the camera's setting); double-click the name to rename; ◉ hides an ROI on the image and plot without removing it.</li>
       </ul>
     </Disclosure>
@@ -92,7 +102,7 @@ export function RoiRows({ rois, stats, selected, dispatch, extremes, onExtremes,
       <div className="roi-rows">
         {rois.map((r, i) => (
           [
-            <span key={`l${r.id}`} className={`lbl ${selected === r.id ? "sel" : ""}`} title={where(r)}>
+            <span key={`l${r.id}`} className={`lbl ${isSel(r.id) ? "sel" : ""}`} title={where(r)}>
               <button type="button" className="sw" style={{ background: roiColor(r, i), border: "none" }} aria-label={`colour of ${roiLabel(r)}`}
                 onClick={() => setPicking(picking === r.id ? null : r.id)} />
               {editing === r.id ? (
@@ -100,19 +110,21 @@ export function RoiRows({ rois, stats, selected, dispatch, extremes, onExtremes,
                   onBlur={(e) => { dispatch({ type: "rename", id: r.id, name: e.target.value }); setEditing(null); }}
                   onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setEditing(null); }} />
               ) : (
-                <button type="button" className="lbl" style={{ border: "none", padding: 0 }} aria-pressed={selected === r.id}
-                  onClick={() => dispatch({ type: "select", id: selected === r.id ? null : r.id })} onDoubleClick={() => setEditing(r.id)} title={`${where(r)} · double-click to rename`}>
+                <button type="button" className="lbl" style={{ border: "none", padding: 0 }} aria-pressed={isSel(r.id)}
+                  onClick={(e) => dispatch(e.shiftKey ? { type: "toggleSelect", id: r.id } : { type: "select", id: selected === r.id && selectedIds?.length === 1 ? null : r.id })} onDoubleClick={() => setEditing(r.id)} title={`${where(r)} · double-click to rename`}>
                   {roiLabel(r)}{r.name ? <small className="muted"> {roiId(r)}</small> : null}{r.emissivity !== undefined ? <small className="muted" title={`per-ROI emissivity ${r.emissivity}`}> ε{r.emissivity}</small> : null}
                 </button>
               )}
             </span>,
             <Values key={`v${r.id}`} s={stats.get(r.id)} units={units} conv={conv} />,
             <span key={`x${r.id}`} style={{ display: "flex", gap: 4 }}>
+              <button className="secondary" type="button" onClick={() => setOptics(optics === r.id ? null : r.id)} aria-pressed={optics === r.id} aria-label={`Optics for ${roiLabel(r)}`} title="Per-ROI emissivity, reflected temperature and distance (for accuracy on this region)" style={{ fontWeight: (r.emissivity !== undefined || r.reflected_c !== undefined || r.distance_m !== undefined) ? 700 : 400, color: (r.emissivity !== undefined || r.reflected_c !== undefined || r.distance_m !== undefined) ? "var(--accent)" : undefined }}>ε</button>
               <button className="secondary" type="button" onClick={() => dispatch({ type: "toggleHidden", id: r.id })} aria-pressed={!!r.hidden} aria-label={`${r.hidden ? "Show" : "Hide"} ${roiLabel(r)}`} title={r.hidden ? "Hidden on the image (still measured and recorded) · click to show" : "Hide on the image (still measured and recorded)"} style={{ opacity: r.hidden ? 0.5 : 1 }}>{r.hidden ? "◌" : "◉"}</button>
               <button className="secondary" type="button" onClick={() => dispatch({ type: "remove", id: r.id })} aria-label={`Remove ${roiLabel(r)}`} title="Remove">×</button>
             </span>,
             <StatsLine key={`s${r.id}`} r={r} s={stats.get(r.id)} units={units} conv={conv} />,
             picking === r.id ? <div key={`c${r.id}`} style={{ gridColumn: "1 / -1" }}><ColorPicker r={r} i={i} dispatch={dispatch} onDone={() => setPicking(null)} /></div> : null,
+            optics === r.id ? <div key={`o${r.id}`} style={{ gridColumn: "1 / -1" }}><OpticsEditor r={r} dispatch={dispatch} /></div> : null,
           ]
         ))}
       </div>

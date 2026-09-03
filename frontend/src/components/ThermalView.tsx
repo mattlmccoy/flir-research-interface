@@ -15,7 +15,7 @@ import { countsToCelsius } from "../lib/radiometry.ts";
 import { buildLut, mapToRgba, type PaletteName } from "../lib/palette.ts";
 import { autoScale, resolveScale, type Range, type ScaleMode } from "../lib/scale.ts";
 import { normalizeRect, roiStats, type Roi, type RoiAction, type RoiInput, type RoiStats, visibleRois } from "../lib/roi.ts";
-import { clientToImage, hitTest, type Box } from "../lib/overlay.ts";
+import { clientToImage, hitTest, vertexHit, type Box, type VertexHit } from "../lib/overlay.ts";
 import type { Tool } from "../lib/layout.ts";
 import { RoiOverlay, type Draft } from "./RoiOverlay.tsx";
 import { displaySize, type Zoom } from "../lib/zoom.ts";
@@ -23,6 +23,7 @@ import { toCssMatrix3d, type H3 } from "../lib/homography.ts";
 
 export type StatsMap = Map<number, RoiStats>;
 const HIT_TOL_PX = 6;
+const NO_IDS: number[] = [];
 const NO_ROIS: Roi[] = [];
 type Pt = { x: number; y: number };
 
@@ -34,6 +35,7 @@ interface Props {
   onScale: (r: Range) => void;
   rois?: Roi[];
   selected?: number | null;
+  selectedIds?: number[];
   tool?: Tool;
   /** "fit" scales the image to the cell (up or down); 1 / 2 are exact pixel factors (scrollable). */
   zoom?: Zoom;
@@ -94,7 +96,7 @@ export function dragShape(tool: Tool, a: Pt, b: Pt, w: number, h: number): RoiIn
 /** Renders raw counts -> °C -> palette on a canvas, with an ROI overlay layer. Data arrays are never mutated. */
 const divergingLut = buildLut("diverging");
 
-export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois = NO_ROIS, selected = null, tool = "select", zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null, hold = "off", flipH = false, flipV = false, agc = LINEAR_AGC, valid = null, filter = "off", units = "C" }: Props) {
+export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois = NO_ROIS, selected = null, selectedIds = NO_IDS, tool = "select", zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null, hold = "off", flipH = false, flipV = false, agc = LINEAR_AGC, valid = null, filter = "off", units = "C" }: Props) {
   const viewRef = useRef<HTMLDivElement>(null);
   const holdRef = useRef<HoldBuffer | null>(null);
   const freehand = useRef<[number, number][] | null>(null);
@@ -110,7 +112,8 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
   const [cell, setCell] = useState({ w: 0, h: 0 });
   const [draft, setDraft] = useState<Draft | null>(null);
   const [vertices, setVertices] = useState<[number, number][]>([]); // polygon in progress
-  const moving = useRef<{ id: number; last: Pt } | null>(null);
+  const moving = useRef<{ ids: number[]; last: Pt } | null>(null);
+  const editing = useRef<{ id: number; hit: VertexHit } | null>(null);
   const [stats, setStats] = useState<StatsMap>(new Map());
   const hdr = frame?.header;
 
@@ -209,14 +212,28 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
       try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
       return;
     }
+    // vertex editing: grabbing a handle of the selected polygon/polyline/line drags that point
+    const vtol = box ? Math.max(2, Math.round((HIT_TOL_PX * hdr.width) / box.width)) : HIT_TOL_PX;
+    if (selected !== null) {
+      const selRoi = visibleRois(rois).find((r) => r.id === selected);
+      const vh = selRoi ? vertexHit(selRoi, p.x, p.y, vtol) : null;
+      if (vh) { editing.current = { id: selected, hit: vh }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ } return; }
+    }
     const hit = hitTest(visibleRois(rois), p.x, p.y, HIT_TOL_PX);
-    onRoi({ type: "select", id: hit });
-    if (hit !== null) { moving.current = { id: hit, last: p }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ } }
-    else if (zoom !== "fit" && viewRef.current) {
+    if (hit !== null && e.shiftKey) { onRoi({ type: "toggleSelect", id: hit }); return; }
+    if (hit !== null) {
+      const inGroup = selectedIds.includes(hit) && selectedIds.length > 1;
+      if (!inGroup) onRoi({ type: "select", id: hit });
+      moving.current = { ids: inGroup ? selectedIds.slice() : [hit], last: p };
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    } else {
+      onRoi({ type: "select", id: null });
+      if (zoom !== "fit" && viewRef.current) {
       // empty spot while zoomed in: drag pans the image
       const v = viewRef.current;
       panning.current = { cx: e.clientX, cy: e.clientY, sl: v.scrollLeft, st: v.scrollTop };
       try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+      }
     }
   }
   function onMove(e: RPointerEvent<HTMLCanvasElement>) {
@@ -230,10 +247,16 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
     const c = celsiusRef.current;
     if (!p || !hdr) return setHover(null);
     setHover({ x: p.x, y: p.y, t: c ? c[p.y * hdr.width + p.x] : NaN });
+    const ed = editing.current;
+    if (ed && onRoi) {
+      if (ed.hit.kind === "vertex") onRoi({ type: "setVertex", id: ed.id, index: ed.hit.index, x: p.x, y: p.y });
+      else onRoi({ type: "setEndpoint", id: ed.id, end: ed.hit.end, x: p.x, y: p.y });
+      return;
+    }
     const mv = moving.current;
     if (mv && onRoi) {
       const dx = p.x - mv.last.x, dy = p.y - mv.last.y;
-      if (dx || dy) { onRoi({ type: "move", id: mv.id, dx, dy }); mv.last = p; }
+      if (dx || dy) { if (mv.ids.length > 1) onRoi({ type: "moveMany", ids: mv.ids, dx, dy }); else onRoi({ type: "move", id: mv.ids[0], dx, dy }); mv.last = p; }
       return;
     }
     const s = dragStart.current;
@@ -252,6 +275,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
       if (pts.length >= 3 && onRoi) onRoi({ type: "add", roi: { kind: "polygon", points: pts } });
       return;
     }
+    if (editing.current) { editing.current = null; return; }
     if (moving.current) { moving.current = null; return; }
     const s = dragStart.current;
     if (!s || !hdr) return;
@@ -268,7 +292,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
       if (e.key === "Backspace") { e.preventDefault(); const v = vertices.slice(0, -1); setVertices(v); setDraft(v.length >= 2 ? { kind: tool, points: v } : null); return; }
     }
     if (!onRoi || selected === null) return;
-    if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); onRoi({ type: "remove", id: selected }); }
+    if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); for (const id of (selectedIds.length ? selectedIds : [selected])) onRoi({ type: "remove", id }); }
     else if (e.key === "Escape") onRoi({ type: "select", id: null });
   }
 
@@ -309,8 +333,8 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
         </div>
       )}
       {hdr && box && (
-        <RoiOverlay box={box} width={hdr.width} height={hdr.height} rois={rois} selected={selected} stats={stats} draft={draft} extremes={extremes} flipH={flipH} flipV={flipV} cursor={drawing ? "crosshair" : selected !== null ? "move" : zoom !== "fit" ? "grab" : "default"}
-          onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => { setHover(null); moving.current = null; panning.current = null; }} onKeyDown={onKey}
+        <RoiOverlay box={box} width={hdr.width} height={hdr.height} rois={rois} selected={selected} selectedIds={selectedIds} stats={stats} draft={draft} extremes={extremes} flipH={flipH} flipV={flipV} cursor={drawing ? "crosshair" : selected !== null ? "move" : zoom !== "fit" ? "grab" : "default"}
+          onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => { setHover(null); moving.current = null; panning.current = null; editing.current = null; }} onKeyDown={onKey}
           onDoubleClick={() => { if (tool === "polygon" || tool === "polyline") finishPolygon(vertices); }} />
       )}
       {topLayer && box && <div className="top-layer" style={{ left: box.left, top: box.top, width: box.width, height: box.height }}>{topLayer}</div>}

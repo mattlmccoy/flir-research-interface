@@ -217,3 +217,7 @@ ul.help li { line-height: 1.35; }
 
 /* ---- Minimap (zoomed) ------------------------------------------------------------- */
 .view .minimap { position: absolute; right: 12px; top: 12px; width: 160px; border: 1px solid var(--line-control); background: var(--scrim); opacity: 0.9; cursor: crosshair; image-rendering: auto; z-index: 3; }
+
+/* ---- Per-ROI optics editor ---------------------------------------------------------- */
+.roi-rows .optics { background: var(--bg-deep); border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 8px; margin: 2px 0 6px; }
+.roi-rows .optics input { background: var(--panel); }

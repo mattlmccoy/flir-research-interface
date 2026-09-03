@@ -211,7 +211,7 @@ export function App() {
       center={
         <div className={`center-split ${(layout.visibleMode === "side" || calibrating) && visibleAvailable ? "on" : ""}`}>
           <ThermalView frame={frame} palette={palette} scaleMode={scaleMode} manual={manual} onScale={setShown}
-            rois={rois.rois} selected={rois.selected} tool={layout.tool} zoom={layout.zoom} onRoi={roiDispatch} onStats={onStats} rad={rad} extremes={layout.extremes} isotherm={layout.isotherm} onField={setField} reference={reference} hold={layout.hold} flipH={layout.flipH} flipV={layout.flipV} agc={layout.agc} filter={layout.filter} units={layout.units} valid={layout.segment.on ? { min: layout.segment.min, max: layout.segment.max } : null}
+            rois={rois.rois} selected={rois.selected} selectedIds={rois.selectedIds} tool={layout.tool} zoom={layout.zoom} onRoi={roiDispatch} onStats={onStats} rad={rad} extremes={layout.extremes} isotherm={layout.isotherm} onField={setField} reference={reference} hold={layout.hold} flipH={layout.flipH} flipV={layout.flipV} agc={layout.agc} filter={layout.filter} units={layout.units} valid={layout.segment.on ? { min: layout.segment.min, max: layout.segment.max } : null}
             overlay={layout.visibleMode === "overlay" && !calibrating && visibleAvailable ? <VisibleLive plain /> : undefined} overlayStyle={layout.overlay} overlayH={align.H}
             topLayer={calibrating ? <PickLayer label="IR" color="var(--live)" points={align.pairs.map((p) => p.ir)} pending={align.pending?.ir} onPick={(p) => alignDispatch({ type: "pick", side: "ir", p })} /> : undefined} />
           {(layout.visibleMode === "side" || calibrating) && visibleAvailable && (
@@ -244,7 +244,7 @@ export function App() {
             ) : <div className="muted">waiting for frames…</div>}
             {hdr && hdr.kelvin_per_count === null && <div className="errbox">Stream is not temperature-linear; raw counts only.</div>}
             {nearLimit && <div className="warnbox">Max within 10 °C of the range limit ({active?.high_c} °C).</div>}
-            <RoiRows rois={rois.rois} units={layout.units} conv={field?.conv ?? null} stats={liveStats} selected={rois.selected} extremes={layout.extremes} onExtremes={(on) => dispatch({ type: "setExtremes", on })}
+            <RoiRows rois={rois.rois} units={layout.units} conv={field?.conv ?? null} stats={liveStats} selected={rois.selected} selectedIds={rois.selectedIds} extremes={layout.extremes} onExtremes={(on) => dispatch({ type: "setExtremes", on })}
               dispatch={roiDispatch} />
             <DeltaPicker rois={rois.rois} delta={layout.delta} onChange={(delta) => dispatch({ type: "setDelta", delta })} />
           </RailSection>

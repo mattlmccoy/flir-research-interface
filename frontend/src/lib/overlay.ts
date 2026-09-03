@@ -65,3 +65,26 @@ export const TRACE_TOKENS = ["--live", "--accent", "--trace-3", "--trace-4", "--
 export function traceColor(i: number): string {
   return `var(${TRACE_TOKENS[((i % TRACE_TOKENS.length) + TRACE_TOKENS.length) % TRACE_TOKENS.length]})`;
 }
+
+export type VertexHit = { kind: "vertex"; index: number } | { kind: "endpoint"; end: 0 | 1 };
+
+/** A polygon/polyline vertex or line endpoint within `tol` image-pixels of (x, y), or null. */
+export function vertexHit(roi: Roi, x: number, y: number, tol: number): VertexHit | null {
+  const near = (vx: number, vy: number) => Math.abs(vx - x) <= tol && Math.abs(vy - y) <= tol;
+  if (roi.kind === "polygon" || roi.kind === "polyline") {
+    for (let i = 0; i < roi.points.length; i++) if (near(roi.points[i][0], roi.points[i][1])) return { kind: "vertex", index: i };
+    return null;
+  }
+  if (roi.kind === "line") {
+    if (near(roi.x0, roi.y0)) return { kind: "endpoint", end: 0 };
+    if (near(roi.x1, roi.y1)) return { kind: "endpoint", end: 1 };
+  }
+  return null;
+}
+
+/** Vertex/endpoint image-space points of an editable ROI, for drawing drag handles. */
+export function vertexHandles(roi: Roi): [number, number][] {
+  if (roi.kind === "polygon" || roi.kind === "polyline") return roi.points.map((p) => [p[0], p[1]]);
+  if (roi.kind === "line") return [[roi.x0, roi.y0], [roi.x1, roi.y1]];
+  return [];
+}

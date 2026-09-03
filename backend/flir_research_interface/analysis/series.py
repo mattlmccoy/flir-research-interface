@@ -110,6 +110,11 @@ def _optical(src: dict[str, Any], dst: dict[str, Any]) -> None:
         if isinstance(eps, bool) or not isinstance(eps, int | float) or not 0.01 <= eps <= 1.0:
             raise ValueError("emissivity must be a number between 0.01 and 1")
         dst["emissivity"] = float(eps)
+    dist = src.get("distance_m")
+    if dist is not None:
+        if isinstance(dist, bool) or not isinstance(dist, int | float) or dist <= 0:
+            raise ValueError("distance_m must be a positive number of metres")
+        dst["distance_m"] = float(dist)
     trefl = src.get("reflected_c")
     if trefl is not None:
         if (
