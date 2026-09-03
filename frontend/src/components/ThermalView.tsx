@@ -1,3 +1,4 @@
+import { VerticalColorBar } from "./VerticalColorBar.tsx";
 import { fmtTemp, type Conversion, type Units } from "../lib/units.ts";
 import { simplifyPath } from "../lib/geometry.ts";
 import { applyFilter, type FilterName } from "../lib/filters.ts";
@@ -109,6 +110,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
   const dragStart = useRef<Pt | null>(null);
   const [hover, setHover] = useState<{ x: number; y: number; t: number } | null>(null);
   const [box, setBox] = useState<Box | null>(null);
+  const [barRange, setBarRange] = useState<Range | null>(null);
   const [cell, setCell] = useState({ w: 0, h: 0 });
   const [draft, setDraft] = useState<Draft | null>(null);
   const [vertices, setVertices] = useState<[number, number][]>([]); // polygon in progress
@@ -149,6 +151,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
     const shownField = sub?.delta ?? held;
     const range = sub?.delta ? sub.range : resolveScale(scaleMode, manual, autoScale(held));
     onScale(range);
+    setBarRange(range);
     const canvas = canvasRef.current;
     if (!canvas) return;
     if (canvas.width !== header.width || canvas.height !== header.height) {
@@ -344,6 +347,10 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
       {zoom !== "fit" && frame && (
         <canvas ref={miniRef} className="minimap" aria-label="minimap: drag to move the view" title="Minimap: click or drag to move the view"
           onPointerDown={(e) => { (e.currentTarget as HTMLCanvasElement).setPointerCapture(e.pointerId); miniJump(e); }} onPointerMove={miniJump} />
+      )}
+      {frame && barRange && (
+        <VerticalColorBar palette={reference ? "diverging" : palette} range={barRange} units={units}
+          conv={hdr && hdr.kelvin_per_count != null ? { kelvin_per_count: hdr.kelvin_per_count, kelvin_offset: hdr.kelvin_offset } : null} />
       )}
       {!frame && <div className="readout">no frames</div>}
     </div>

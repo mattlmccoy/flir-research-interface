@@ -216,8 +216,15 @@ ul.help li { line-height: 1.35; }
 .dock .dock-foot select { height: 22px; padding: 0 4px; }
 
 /* ---- Minimap (zoomed) ------------------------------------------------------------- */
-.view .minimap { position: absolute; right: 12px; top: 12px; width: 160px; border: 1px solid var(--line-control); background: var(--scrim); opacity: 0.9; cursor: crosshair; image-rendering: auto; z-index: 3; }
+.view .minimap { position: absolute; left: 12px; bottom: 12px; width: 160px; border: 1px solid var(--line-control); background: var(--scrim); opacity: 0.9; cursor: crosshair; image-rendering: auto; z-index: 3; }
 
 /* ---- Per-ROI optics editor ---------------------------------------------------------- */
 .roi-rows .optics { background: var(--bg-deep); border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 8px; margin: 2px 0 6px; }
 .roi-rows .optics input { background: var(--panel); }
+
+/* ---- Vertical colour scale beside the image --------------------------------------- */
+.view .vbar { position: absolute; right: 12px; top: 12px; bottom: 12px; display: flex; align-items: stretch; gap: 4px; z-index: 3; pointer-events: none; }
+.view .vbar-gradient { width: 14px; height: 100%; border: 1px solid var(--line-control); image-rendering: auto; }
+.view .vbar-ticks { position: relative; width: 40px; font-family: var(--font-mono); font-size: 10px; color: var(--fg); }
+.view .vbar-ticks span { position: absolute; left: 0; transform: translateY(-50%); text-shadow: 0 0 3px var(--scrim), 0 0 3px var(--scrim); white-space: nowrap; }
+.view .vbar-unit { position: absolute; right: 0; bottom: -14px; font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
