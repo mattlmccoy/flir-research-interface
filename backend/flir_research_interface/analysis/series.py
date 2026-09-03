@@ -63,6 +63,15 @@ def parse_rois(raw: str) -> list[dict[str, Any]]:
             if isinstance(radius, bool) or not isinstance(radius, int | float) or radius < 1:
                 raise ValueError("circle r must be a number >= 1")
             out.append({"id": rid, "kind": "circle", "cx": cx, "cy": cy, "r": float(radius)})
+        elif kind == "ellipse":
+            cx, cy = _int(it.get("cx"), "cx"), _int(it.get("cy"), "cy")
+            radii: dict[str, float] = {}
+            for nm in ("rx", "ry"):
+                v = it.get(nm)
+                if isinstance(v, bool) or not isinstance(v, int | float) or v < 1:
+                    raise ValueError(f"ellipse {nm} must be a number >= 1")
+                radii[nm] = float(v)
+            out.append({"id": rid, "kind": "ellipse", "cx": cx, "cy": cy, **radii})
         elif kind == "line":
             r = {k: _int(it.get(k), k) for k in ("x0", "y0", "x1", "y1")}
             if (r["x0"], r["y0"]) == (r["x1"], r["y1"]):
@@ -146,6 +155,14 @@ def roi_index(roi: dict[str, Any], w: int, h: int) -> tuple[np.ndarray, np.ndarr
     pts: list[tuple[int, int]]
     if kind == "spot":
         pts = [(int(roi["x"]), int(roi["y"]))]
+    elif kind == "ellipse":
+        cx, cy, rx, ry = roi["cx"], roi["cy"], roi["rx"], roi["ry"]
+        ys, xs = np.mgrid[
+            max(0, int(np.floor(cy - ry))) : min(h, int(np.ceil(cy + ry)) + 1),
+            max(0, int(np.floor(cx - rx))) : min(w, int(np.ceil(cx + rx)) + 1),
+        ]
+        m = ((xs - cx) / rx) ** 2 + ((ys - cy) / ry) ** 2 <= 1.0
+        return ys[m].astype(np.intp), xs[m].astype(np.intp)
     elif kind == "circle":
         cx, cy, r = roi["cx"], roi["cy"], roi["r"]
         ys, xs = np.mgrid[

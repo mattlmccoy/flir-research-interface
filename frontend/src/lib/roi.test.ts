@@ -9,8 +9,7 @@ import {
   saveRois,
   visibleRois,
   type Roi,
-  type RoiState,
-} from "./roi.ts";
+  type RoiState, roiPixels, moveRoi } from "./roi.ts";
 
 const EMPTY: RoiState = { rois: [], selected: null, nextId: 1 };
 
@@ -275,4 +274,18 @@ test("a spot with box 3 measures the 3×3 neighbourhood (clamped at the edge) an
   const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); } } as unknown as Storage;
   saveRois(storage, { rois: [{ id: 1, kind: "spot", x: 1, y: 1, box: 3 }], selected: null, nextId: 2 });
   assert.equal((loadRois(storage).rois[0] as { box?: number }).box, 3);
+});
+
+test("ellipse ROI: pixel centres inside (dx/rx)²+(dy/ry)² ≤ 1, movable, persisted", () => {
+  const e = { id: 1, kind: "ellipse" as const, cx: 5, cy: 5, rx: 3, ry: 1 };
+  const px = roiPixels(e, 11, 11);
+  assert.ok(px.includes(5 * 11 + 8) && px.includes(5 * 11 + 2), "reaches ±rx horizontally");
+  assert.ok(!px.includes(3 * 11 + 5), "does not reach ±2 vertically when ry = 1");
+  assert.ok(px.includes(6 * 11 + 5) && px.includes(4 * 11 + 5));
+  assert.deepEqual(moveRoi(e, 2, -1), { ...e, cx: 7, cy: 4 });
+  const store = new Map<string, string>();
+  const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); } } as unknown as Storage;
+  saveRois(storage, { rois: [e], selected: null, nextId: 2 });
+  assert.deepEqual(loadRois(storage).rois[0], e);
+  assert.equal(roiLabel(e), "E1");
 });

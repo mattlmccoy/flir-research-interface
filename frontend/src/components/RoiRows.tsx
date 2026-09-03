@@ -33,6 +33,7 @@ function where(r: Roi): string {
     case "spot": return `spot x ${r.x} y ${r.y}`;
     case "rect": return `rect x ${r.x0}…${r.x1 - 1} y ${r.y0}…${r.y1 - 1} (${r.x1 - r.x0}×${r.y1 - r.y0} px)`;
     case "circle": return `circle centre (${r.cx}, ${r.cy}) r ${r.r.toFixed(1)} px`;
+    case "ellipse": return `ellipse centre (${r.cx}, ${r.cy}) rx ${r.rx} ry ${r.ry} px`;
     case "line": return `line (${r.x0}, ${r.y0}) → (${r.x1}, ${r.y1})`;
     case "polygon": return `polygon with ${r.points.length} vertices`;
   }
@@ -72,7 +73,7 @@ export function RoiRows({ rois, stats, selected, dispatch, extremes, onExtremes 
       <ul className="help">
         <li>◎ Spot: click a pixel.</li>
         <li>▭ Rectangle: drag corner to corner.</li>
-        <li>◯ Circle: drag from the centre outwards.</li>
+        <li>◯ Circle: drag from the centre outwards. ⬭ Ellipse: drag its bounding box corner to corner.</li>
         <li>╱ Line: drag from one end to the other; the pixels along it are measured.</li>
         <li>⬠ Polygon: click each vertex; double-click places the last one and closes the shape (Enter closes, Esc cancels, Backspace undoes a vertex).</li>
         <li>↖ Select: click an ROI, then drag to move it; Delete removes it.</li>

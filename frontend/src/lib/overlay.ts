@@ -35,6 +35,7 @@ export function hitTest(rois: Roi[], x: number, y: number, tol: number): number 
     const r = rois[i];
     if (r.kind === "rect" && x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1) return r.id;
     if (r.kind === "circle" && Math.hypot(x - r.cx, y - r.cy) <= r.r) return r.id;
+    if (r.kind === "ellipse" && ((x - r.cx) / r.rx) ** 2 + ((y - r.cy) / r.ry) ** 2 <= 1) return r.id;
     if (r.kind === "polygon" && pointInPolygon(x, y, r.points)) return r.id;
   }
   return null;

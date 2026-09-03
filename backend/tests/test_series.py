@@ -176,3 +176,18 @@ def test_spot_with_box_3_averages_its_neighbourhood(tmp_path: Path) -> None:
     assert len(s["2"]["value"]) == r.n_frames
     with pytest.raises(ValueError):
         parse_rois('[{"id":1,"kind":"spot","x":1,"y":1,"box":4}]')  # only 1 or 3
+
+
+def test_ellipse_roi_is_parsed_and_indexed(tmp_path: Path) -> None:
+    from flir_research_interface.analysis.series import parse_rois, roi_index, roi_series
+    from flir_research_interface.playback.reader import ExperimentReader
+
+    rois = parse_rois('[{"id":1,"kind":"ellipse","cx":5,"cy":5,"rx":3,"ry":1}]')
+    ys, xs = roi_index(rois[0], 11, 11)
+    pts = set(zip(ys.tolist(), xs.tolist(), strict=True))
+    assert (5, 8) in pts and (5, 2) in pts and (3, 5) not in pts and (6, 5) in pts
+    r = ExperimentReader(_make_experiment(tmp_path))
+    s = roi_series(r, rois)["series"]["1"]
+    assert "mean" in s and len(s["mean"]) == r.n_frames
+    with pytest.raises(ValueError):
+        parse_rois('[{"id":1,"kind":"ellipse","cx":5,"cy":5,"rx":0,"ry":1}]')

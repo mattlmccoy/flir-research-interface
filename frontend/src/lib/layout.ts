@@ -1,7 +1,7 @@
 import { DEFAULT_ISOTHERM, parseIsotherm, type Isotherm } from "./isotherm.ts";
 /** Studio layout state (spec §3): which panels are open, which rail sections, which tool, image zoom. */
 import { isZoom, type Zoom } from "./zoom.ts";
-export const TOOLS = ["select", "spot", "rect", "circle", "line", "polygon"] as const;
+export const TOOLS = ["select", "spot", "rect", "circle", "ellipse", "line", "polygon"] as const;
 const isDelta = (v: unknown): v is { a: number; b: number } => !!v && typeof v === "object" && Number.isInteger((v as { a: unknown }).a) && Number.isInteger((v as { b: unknown }).b);
 export interface Agc { mode: "linear" | "plateau"; plateau: number; }
 function parseAgc(v: unknown): Agc {

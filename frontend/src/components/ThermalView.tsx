@@ -72,6 +72,10 @@ export function dragShape(tool: Tool, a: Pt, b: Pt, w: number, h: number): RoiIn
     const r = Math.round(Math.hypot(b.x - a.x, b.y - a.y));
     return r >= 1 ? { kind: "circle", cx: a.x, cy: a.y, r } : null;
   }
+  if (tool === "ellipse") {  // drag the bounding box corner to corner
+    const rx = Math.round(Math.abs(b.x - a.x) / 2), ry = Math.round(Math.abs(b.y - a.y) / 2);
+    return rx >= 1 && ry >= 1 ? { kind: "ellipse", cx: Math.round((a.x + b.x) / 2), cy: Math.round((a.y + b.y) / 2), rx, ry } : null;
+  }
   if (tool === "line") {
     return a.x !== b.x || a.y !== b.y ? { kind: "line", x0: a.x, y0: a.y, x1: b.x, y1: b.y } : null;
   }
@@ -167,7 +171,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
     if (!p || !onRoi || !hdr) return;
     e.currentTarget.focus();
     if (tool === "spot") { onRoi({ type: "add", roi: { kind: "spot", x: p.x, y: p.y } }); return; }
-    if (tool === "rect" || tool === "circle" || tool === "line") {
+    if (tool === "rect" || tool === "circle" || tool === "ellipse" || tool === "line") {
       dragStart.current = p;
       setDraft(dragShape(tool, p, p, hdr.width, hdr.height) ?? (tool === "circle" ? { kind: "circle", cx: p.x, cy: p.y, r: 1 } : null));
       try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* synthetic or already-released pointer */ }
@@ -210,7 +214,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
       return;
     }
     const s = dragStart.current;
-    if (s && (tool === "rect" || tool === "circle" || tool === "line")) setDraft(dragShape(tool, s, p, hdr.width, hdr.height));
+    if (s && (tool === "rect" || tool === "circle" || tool === "ellipse" || tool === "line")) setDraft(dragShape(tool, s, p, hdr.width, hdr.height));
     else if (tool === "polygon" && vertices.length >= 1) setDraft({ kind: "polygon", points: [...vertices, [p.x, p.y]] });
   }
   function onUp(e: RPointerEvent<HTMLCanvasElement>) {

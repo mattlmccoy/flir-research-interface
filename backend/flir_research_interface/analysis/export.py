@@ -67,6 +67,8 @@ def _roi_geom(r: dict[str, Any]) -> str:
         return f"S{r['id']}: spot x={r['x']} y={r['y']}{box}"
     if k == "rect":
         return f"R{r['id']}: rect x0={r['x0']} y0={r['y0']} x1={r['x1']} y1={r['y1']} (half-open)"
+    if k == "ellipse":
+        return f"E{r['id']}: ellipse cx={r['cx']} cy={r['cy']} rx={r['rx']} ry={r['ry']}"
     if k == "circle":
         return f"C{r['id']}: circle cx={r['cx']} cy={r['cy']} r={r['r']} (pixel centres within r)"
     if k == "line":

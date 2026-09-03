@@ -60,6 +60,12 @@ function drawShape(ctx: CanvasRenderingContext2D, r: RoiInput, sx: number, sy: n
       ctx.beginPath(); ctx.moveTo(x - 11, y); ctx.lineTo(x + 11, y); ctx.moveTo(x, y - 11); ctx.lineTo(x, y + 11); ctx.stroke();
       return [x + 10, y - 8];
     }
+    case "ellipse": {
+      const x = (r.cx + 0.5) * sx, y = (r.cy + 0.5) * sy;
+      ctx.beginPath(); ctx.ellipse(x, y, r.rx * sx, r.ry * sy, 0, 0, Math.PI * 2); tint(); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x - 4, y); ctx.lineTo(x + 4, y); ctx.moveTo(x, y - 4); ctx.lineTo(x, y + 4); ctx.stroke();
+      return [x - r.rx * sx, y - r.ry * sy - 3];
+    }
     case "circle": {
       const x = (r.cx + 0.5) * sx, y = (r.cy + 0.5) * sy;
       ctx.beginPath(); ctx.ellipse(x, y, r.r * sx, r.r * sy, 0, 0, Math.PI * 2); tint(); ctx.stroke();

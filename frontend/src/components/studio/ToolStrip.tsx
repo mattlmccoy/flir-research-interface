@@ -8,6 +8,7 @@ const TOOL_META: Record<Tool, { glyph: string; title: string; enabled: boolean }
   spot: { glyph: "◎", title: "Spot: click to place a single-pixel measurement", enabled: true },
   rect: { glyph: "▭", title: "Rectangle: drag corner to corner", enabled: true },
   circle: { glyph: "◯", title: "Circle: drag from the centre outwards", enabled: true },
+  ellipse: { glyph: "⬭", title: "Ellipse: drag the bounding box corner to corner", enabled: true },
   line: { glyph: "╱", title: "Line: drag from one end to the other (pixels along the segment)", enabled: true },
   polygon: { glyph: "⬠", title: "Polygon: click each vertex; double-click places the last one and closes the shape (Enter closes, Esc cancels)", enabled: true },
 };

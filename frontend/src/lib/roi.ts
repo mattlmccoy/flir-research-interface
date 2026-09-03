@@ -21,12 +21,14 @@ export interface Spot extends Meta { id: number; kind: "spot"; x: number; y: num
 export interface Rect extends Meta { id: number; kind: "rect"; x0: number; y0: number; x1: number; y1: number; }
 /** Disc of radius r (pixels) around (cx, cy); a pixel belongs when its centre is within r. */
 export interface Circle extends Meta { id: number; kind: "circle"; cx: number; cy: number; r: number; }
+/** Axis-aligned ellipse: a pixel belongs when (dx/rx)² + (dy/ry)² ≤ 1 for its centre. */
+export interface Ellipse extends Meta { id: number; kind: "ellipse"; cx: number; cy: number; rx: number; ry: number; }
 /** Segment from (x0, y0) to (x1, y1), both endpoints inclusive, sampled with Bresenham. */
 export interface Line extends Meta { id: number; kind: "line"; x0: number; y0: number; x1: number; y1: number; }
 /** Closed polygon through `points` (≥ 3); pixels inside (even-odd) or on the boundary belong. */
 export interface Polygon extends Meta { id: number; kind: "polygon"; points: [number, number][]; }
-export type Roi = Spot | Rect | Circle | Line | Polygon;
-export type RoiInput = Omit<Spot, "id"> | Omit<Rect, "id"> | Omit<Circle, "id"> | Omit<Line, "id"> | Omit<Polygon, "id">;
+export type Roi = Spot | Rect | Circle | Ellipse | Line | Polygon;
+export type RoiInput = Omit<Spot, "id"> | Omit<Rect, "id"> | Omit<Circle, "id"> | Omit<Ellipse, "id"> | Omit<Line, "id"> | Omit<Polygon, "id">;
 /** Kinds whose stats are a mean/min/max over several pixels (everything but a spot). */
 export function isArea(roi: Roi): boolean { return roi.kind !== "spot"; }
 
@@ -52,13 +54,13 @@ export function visibleRois(rois: Roi[]): Roi[] { return rois.filter((r) => !r.h
 
 /** The same shape shifted by (dx, dy); shifts are clamped so no coordinate goes below zero. */
 export function moveRoi(roi: Roi, dx: number, dy: number): Roi {
-  const xs = (r: Roi): number[] => r.kind === "spot" ? [r.x] : r.kind === "circle" ? [r.cx] : r.kind === "polygon" ? r.points.map((p) => p[0]) : [r.x0, r.x1];
-  const ys = (r: Roi): number[] => r.kind === "spot" ? [r.y] : r.kind === "circle" ? [r.cy] : r.kind === "polygon" ? r.points.map((p) => p[1]) : [r.y0, r.y1];
+  const xs = (r: Roi): number[] => r.kind === "spot" ? [r.x] : r.kind === "circle" || r.kind === "ellipse" ? [r.cx] : r.kind === "polygon" ? r.points.map((p) => p[0]) : [r.x0, r.x1];
+  const ys = (r: Roi): number[] => r.kind === "spot" ? [r.y] : r.kind === "circle" || r.kind === "ellipse" ? [r.cy] : r.kind === "polygon" ? r.points.map((p) => p[1]) : [r.y0, r.y1];
   const ddx = Math.max(dx, -Math.min(...xs(roi)));
   const ddy = Math.max(dy, -Math.min(...ys(roi)));
   switch (roi.kind) {
     case "spot": return { ...roi, x: roi.x + ddx, y: roi.y + ddy };
-    case "circle": return { ...roi, cx: roi.cx + ddx, cy: roi.cy + ddy };
+    case "circle": case "ellipse": return { ...roi, cx: roi.cx + ddx, cy: roi.cy + ddy };
     case "rect": case "line": return { ...roi, x0: roi.x0 + ddx, y0: roi.y0 + ddy, x1: roi.x1 + ddx, y1: roi.y1 + ddy };
     case "polygon": return { ...roi, points: roi.points.map(([x, y]) => [x + ddx, y + ddy] as [number, number]) };
   }
@@ -190,6 +192,16 @@ export function roiPixels(roi: Roi, w: number, h: number): number[] {
       for (let y = Math.max(0, roi.y0); y < Math.min(h, roi.y1); y++) for (let x = Math.max(0, roi.x0); x < Math.min(w, roi.x1); x++) out.push(y * w + x);
       return out;
     }
+    case "ellipse": {
+      const out: number[] = [];
+      for (let y = Math.max(0, Math.floor(roi.cy - roi.ry)); y <= Math.min(h - 1, Math.ceil(roi.cy + roi.ry)); y++) {
+        for (let x = Math.max(0, Math.floor(roi.cx - roi.rx)); x <= Math.min(w - 1, Math.ceil(roi.cx + roi.rx)); x++) {
+          const dx = (x - roi.cx) / roi.rx, dy = (y - roi.cy) / roi.ry;
+          if (dx * dx + dy * dy <= 1) out.push(y * w + x);
+        }
+      }
+      return out;
+    }
     case "circle": {
       const out: number[] = [];
       const r2 = roi.r * roi.r;
@@ -230,7 +242,7 @@ export function roiStats(field: Float32Array, w: number, h: number, roi: Roi, ra
   return out;
 }
 
-const PREFIX: Record<Roi["kind"], string> = { spot: "S", rect: "R", circle: "C", line: "L", polygon: "P" };
+const PREFIX: Record<Roi["kind"], string> = { spot: "S", rect: "R", circle: "C", ellipse: "E", line: "L", polygon: "P" };
 /** The user's name when set, else a short id like S1 / R2 / C3 / L4 / P5. */
 export function roiLabel(roi: Roi): string {
   return roi.name || `${PREFIX[roi.kind]}${roi.id}`;
@@ -262,6 +274,8 @@ function asRoi(v: unknown): Roi | null {
     shape = { id: r.id, kind: "rect", x0: r.x0, y0: r.y0, x1: r.x1, y1: r.y1 };
   } else if (r.kind === "circle" && isInt(r.cx) && isInt(r.cy) && typeof r.r === "number" && Number.isFinite(r.r) && r.r >= 1) {
     shape = { id: r.id, kind: "circle", cx: r.cx, cy: r.cy, r: r.r };
+  } else if (r.kind === "ellipse" && isInt(r.cx) && isInt(r.cy) && typeof r.rx === "number" && typeof r.ry === "number" && r.rx >= 1 && r.ry >= 1) {
+    shape = { id: r.id, kind: "ellipse", cx: r.cx, cy: r.cy, rx: r.rx, ry: r.ry };
   } else if (r.kind === "line" && isInt(r.x0) && isInt(r.y0) && isInt(r.x1) && isInt(r.y1) && (r.x0 !== r.x1 || r.y0 !== r.y1)) {
     shape = { id: r.id, kind: "line", x0: r.x0, y0: r.y0, x1: r.x1, y1: r.y1 };
   } else if (r.kind === "polygon" && Array.isArray(r.points) && r.points.length >= 3 && r.points.every((p) => Array.isArray(p) && p.length === 2 && isInt(p[0]) && isInt(p[1]))) {
