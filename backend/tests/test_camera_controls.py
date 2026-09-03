@@ -146,7 +146,10 @@ def test_parameters_locked_while_recording_but_nuc_allowed_and_logged(tmp_path: 
     with _client(tmp_path) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
-        assert c.post("/api/recording/start", json={"name": "lock", "nuc_hold": False}).status_code == 200
+        assert (
+            c.post("/api/recording/start", json={"name": "lock", "nuc_hold": False}).status_code
+            == 200
+        )
         locked = c.post("/api/camera/parameters", json={"values": {"ObjectEmissivity": 0.9}})
         assert locked.status_code == 409 and "recording" in locked.json()["detail"]
         nuc = c.post("/api/camera/nuc")
