@@ -183,7 +183,19 @@ export function polygonPixels(points: [number, number][], w: number, h: number):
 }
 
 /** Every pixel index (y*w+x) the ROI covers inside a w×h image, without duplicates. */
+const _pixelCache = new WeakMap<Roi, { w: number; h: number; px: number[] }>();
+
+/** Pixel indices of an ROI, memoised per ROI object (stable during playback) so a fixed ROI's
+ * mask is enumerated once, not every frame. Editing an ROI makes a new object and re-computes. */
 export function roiPixels(roi: Roi, w: number, h: number): number[] {
+  const c = _pixelCache.get(roi);
+  if (c && c.w === w && c.h === h) return c.px;
+  const px = computeRoiPixels(roi, w, h);
+  _pixelCache.set(roi, { w, h, px });
+  return px;
+}
+
+function computeRoiPixels(roi: Roi, w: number, h: number): number[] {
   const inside = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h;
   switch (roi.kind) {
     case "spot": {
