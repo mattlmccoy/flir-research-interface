@@ -22,6 +22,12 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
   const [err, setErr] = useState<string | null>(null);
   const [tv, setTv] = useState<ThermalVideoExport | null>(null);
   const [tvBusy, setTvBusy] = useState(false);
+  const [rng, setRng] = useState({ start: 0, stop: nFrames, step: 1, format: "csv" });
+  const [rngOut, setRngOut] = useState<string | null>(null);
+  async function exportRange() {
+    setBusy(true); setErr(null); setRngOut(null);
+    try { const r = await api.exportFrames(name, rng.start, Math.min(rng.stop, nFrames), Math.max(1, rng.step), rng.format); setRngOut(`${r.n} frames → ${r.path} (${fmtBytes(r.size_bytes)})`); } catch (e) { setErr(String(e)); } finally { setBusy(false); }
+  }
   const haveVideo = !!thermalPreview || !!tv;
 
   async function renderThermalVideo() {
@@ -52,6 +58,18 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
         <span className="v plain" style={{ textAlign: "right" }}>
           <button className="secondary" disabled={busy || nFrames === 0} onClick={exportHdf5} title="HDF5: uint16 counts + time axes + metadata, for MATLAB / Python">{busy ? "writing…" : "HDF5"}</button>
         </span>
+        <span>frame range</span>
+        <span className="v plain" style={{ textAlign: "right", display: "flex", gap: 4, justifyContent: "flex-end", alignItems: "center", flexWrap: "wrap" }} title="Export frames start..stop (half-open, 0-based) every step-th frame as a zip of per-frame files, or as one multi-page float TIFF stack">
+          <input type="number" min={0} max={Math.max(0, nFrames - 1)} value={rng.start} style={{ width: 60 }} aria-label="range start" onChange={(e) => setRng({ ...rng, start: Number(e.target.value) })} />
+          <span className="hint">to</span>
+          <input type="number" min={1} max={nFrames} value={rng.stop} style={{ width: 60 }} aria-label="range stop" onChange={(e) => setRng({ ...rng, stop: Number(e.target.value) })} />
+          <span className="hint">every</span>
+          <input type="number" min={1} value={rng.step} style={{ width: 48 }} aria-label="range step" onChange={(e) => setRng({ ...rng, step: Number(e.target.value) })} />
+          <select value={rng.format} aria-label="range format" onChange={(e) => setRng({ ...rng, format: e.target.value })}>
+            <option value="csv">CSV zip</option><option value="tiff">TIFF zip</option><option value="tiff-stack">TIFF stack</option><option value="png">PNG zip</option><option value="npy">NPY zip</option>
+          </select>
+          <button className="secondary" disabled={busy || nFrames === 0} onClick={exportRange}>export</button>
+        </span>
         <span>thermal video</span>
         <span className="v plain" style={{ textAlign: "right", display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
           {haveVideo && <a className="dl" href={api.thermalVideoUrl(name)} download={`${name}_thermal_preview.mp4`} title="exports/thermal_preview.mp4: iron palette, fixed °C scale for the run, colour bar + time label. A viewing copy only; the raw counts stay in thermal.zarr">MP4{fmtBytes(tv?.bytes ?? thermalPreview?.bytes ?? 0) !== "0 kB" ? ` · ${fmtBytes(tv?.bytes ?? thermalPreview?.bytes ?? 0)}` : ""}</a>}
@@ -59,6 +77,7 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
         </span>
       </div>
       {!celsius && <div className="warnbox">This recording is not temperature-linear: CSV and TIFF carry raw counts.</div>}
+      {rngOut && <div className="hint" style={{ wordBreak: "break-all" }}>{rngOut}</div>}
       {h5 && (
         <div className="hint" style={{ wordBreak: "break-all" }}>
           wrote {fmtBytes(h5.size_bytes)} · {h5.n_frames} frames<br />{h5.path}<br />

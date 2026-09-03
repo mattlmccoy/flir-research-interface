@@ -126,6 +126,7 @@ All exports are derived from the read-only reader; the Zarr store is never modif
 | Frame PNG | `format=png` | 16-bit raw counts |
 | Frame NPY | `format=npy` | uint16 raw counts |
 | Thermal preview video | `POST …/export/thermal-video` → `exports/thermal_preview.mp4`; served at `GET …/thermal_preview.mp4` | H.264 (yuv420p, CRF 23, ≤30 fps) of every frame; iron palette on a fixed scale; not radiometric |
+| Frame range | `POST …/export/frames` {start, stop, step, format: csv/tiff/png/npy/tiff-stack} → `exports/frames_<a>-<b>_step<n>_<fmt>.zip` or a multi-page float TIFF `.tif` | every step-th frame of the half-open range |
 | Whole run HDF5 | `POST …/export/hdf5` → `<experiment>/exports/<name>.h5` | `counts` (uint16, gzip, chunked by 32 frames), `t_s`, `frame_id`, `device_timestamp_ns`, `host_timestamp_ns`; attrs `ir_format`, `kelvin_per_count`, `kelvin_offset`, `conversion`, `metadata_json`, `events_json` |
 
 MATLAB:

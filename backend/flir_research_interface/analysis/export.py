@@ -13,6 +13,7 @@ import hashlib
 import io
 import json
 import os
+import zipfile
 from typing import Any
 
 import h5py
@@ -143,6 +144,50 @@ def frame_bytes(reader: ExperimentReader, index: int, fmt: str) -> tuple[bytes, 
     else:
         np.save(out, np.ascontiguousarray(frame.counts, dtype=np.uint16))
     return out.getvalue(), media, filename
+
+
+RANGE_FORMATS = ("csv", "tiff", "png", "npy", "tiff-stack")
+
+
+def export_frame_range(
+    reader: ExperimentReader, start: int, stop: int, step: int, fmt: str
+) -> dict[str, Any]:
+    """Frames ``range(start, stop, step)`` as a zip of per-frame files (csv/tiff/png/npy) or a
+    multi-page float TIFF stack (``tiff-stack``), written under ``exports/``."""
+    if fmt not in RANGE_FORMATS:
+        raise ValueError(f"unknown format {fmt!r}; choose one of {RANGE_FORMATS}")
+    if step < 1 or start < 0 or stop > reader.n_frames or start >= stop:
+        raise ValueError("need 0 <= start < stop <= n_frames and step >= 1")
+    indices = list(range(start, stop, step))
+    out_dir = reader.path / "exports"
+    out_dir.mkdir(exist_ok=True)
+    tag = f"frames_{start:04d}-{indices[-1]:04d}_step{step}"
+    if fmt == "tiff-stack":
+        linear = _linear_format(reader)
+        pages = []
+        for i in indices:
+            fr = reader.frame(i)
+            arr = counts_to_celsius(fr.counts, linear) if linear is not None else fr.counts
+            pages.append(
+                Image.fromarray(np.ascontiguousarray(arr, dtype=np.float32), mode="F")
+                if linear is not None
+                else Image.fromarray(np.ascontiguousarray(arr, dtype=np.uint16))
+            )
+        path = out_dir / f"{tag}.tif"
+        pages[0].save(path, format="TIFF", save_all=True, append_images=pages[1:])
+    else:
+        path = out_dir / f"{tag}_{fmt}.zip"
+        with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as z:
+            for i in indices:
+                data, _media, _name = frame_bytes(reader, i, fmt)
+                z.writestr(f"frame_{i:04d}{FRAME_FORMATS[fmt][1]}", data)
+    return {
+        "path": str(path),
+        "frames": indices,
+        "n": len(indices),
+        "format": fmt,
+        "size_bytes": path.stat().st_size,
+    }
 
 
 def export_hdf5(reader: ExperimentReader, *, batch: int = 64) -> dict[str, Any]:

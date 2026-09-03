@@ -109,6 +109,13 @@ class RecordingStartRequest(BaseModel):
     every_nth: int = Field(default=1, ge=1, le=100000)
 
 
+class FrameRangeRequest(BaseModel):
+    start: int = 0
+    stop: int
+    step: int = 1
+    format: str = "csv"
+
+
 class ArmRequest(RecordingStartRequest):
     trigger: dict[str, Any] = {}
 
@@ -1025,6 +1032,18 @@ def create_app(
         await run_in_threadpool(shutil.rmtree, d)
         logger.warning("deleted experiment %s", d)
         return {"deleted": name}
+
+    @app.post("/api/experiments/{name}/export/frames")
+    async def export_frames_route(name: str, req: FrameRangeRequest) -> dict[str, Any]:
+        from flir_research_interface.analysis.export import export_frame_range
+
+        r = _open(name)
+        try:
+            return await run_in_threadpool(
+                export_frame_range, r, req.start, req.stop, req.step, req.format
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/experiments/{name}/export/thermal-video")
     async def export_thermal_video_route(name: str) -> dict[str, Any]:
