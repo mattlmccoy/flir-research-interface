@@ -988,7 +988,9 @@ def create_app(
             raise HTTPException(400, str(exc)) from exc
 
     @app.get("/api/experiments/{name}/series")
-    async def experiment_series(name: str, rois: str, valid: str | None = None) -> dict[str, Any]:
+    async def experiment_series(
+        name: str, rois: str, valid: str | None = None, max_points: int = 0
+    ) -> dict[str, Any]:
         """ROI values on every frame of a recording (spots: value; areas: min/max/mean/std/n).
         ``valid=lo,hi`` (°C) applies segmentation: pixels outside the range are ignored."""
         from flir_research_interface.analysis.series import parse_rois, roi_series
@@ -1005,7 +1007,10 @@ def create_app(
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail="valid must be 'lo,hi'") from exc
         r = _open(name)
-        out = await run_in_threadpool(lambda: roi_series(r, parsed, valid_c=valid_c))
+        stride = 1
+        if max_points and r.n_frames > max_points:
+            stride = -(-r.n_frames // max_points)  # ceil; keeps ~max_points plot points
+        out = await run_in_threadpool(lambda: roi_series(r, parsed, valid_c=valid_c, stride=stride))
         out["events"] = r.events
         return out
 

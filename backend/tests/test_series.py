@@ -220,3 +220,17 @@ def test_polyline_roi_is_parsed_and_indexed(tmp_path: Path) -> None:
     ]
     with pytest.raises(ValueError):
         parse_rois('[{"id":1,"kind":"polyline","points":[[0,0]]}]')
+
+
+def test_roi_series_stride_subsamples_frames_for_the_plot(tmp_path: Path) -> None:
+    from flir_research_interface.analysis.series import roi_series
+    from flir_research_interface.playback.reader import ExperimentReader
+
+    r = ExperimentReader(_make_experiment(tmp_path, n=20))
+    full = roi_series(r, [{"id": 1, "kind": "rect", "x0": 0, "y0": 0, "x1": 4, "y1": 3}])
+    strided = roi_series(
+        r, [{"id": 1, "kind": "rect", "x0": 0, "y0": 0, "x1": 4, "y1": 3}], stride=4
+    )
+    assert len(strided["t_s"]) == 5 and len(full["t_s"]) == 20
+    assert strided["t_s"] == full["t_s"][::4]
+    assert strided["series"]["1"]["mean"] == full["series"]["1"]["mean"][::4]

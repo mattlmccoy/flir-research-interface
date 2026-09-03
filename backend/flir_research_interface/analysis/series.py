@@ -237,13 +237,18 @@ def roi_series(
     *,
     batch: int = 64,
     valid_c: tuple[float, float] | None = None,
+    stride: int = 1,
 ) -> dict[str, Any]:
     """Per-frame ROI values for every frame of ``reader``.
 
     Spots return ``value``; rectangles return ``min``/``max``/``mean``. Batches of frames are
-    read at once so the store is touched chunk-wise, never frame-by-frame.
+    read at once so the store is touched chunk-wise, never frame-by-frame. ``stride`` keeps every
+    Nth frame (for a plot that cannot show more points than pixels); the CSV export uses stride 1.
     """
+    stride = max(1, int(stride))
     n = reader.n_frames
+    keep = np.arange(0, n, stride)  # frames actually computed
+    m = len(keep)
     fmt: IRFormat | None
     try:
         fmt = IRFormat(reader.ir_format or "")
@@ -252,15 +257,29 @@ def roi_series(
     except ValueError:
         fmt = None
     cam = reader.metadata.get("camera")
+    _, h0, w0 = reader.counts_block(0, 1).shape if n else (0, 0, 0)
     acc: dict[int, dict[str, np.ndarray]] = {}
+    # Precompute each ROI's pixel index ONCE (geometry is fixed for the run); recomputing the
+    # polygon/circle masks per batch was ~2/3 of this function's cost.
+    index: dict[int, tuple[np.ndarray, np.ndarray] | None] = {}
     for r in rois:
         keys = ("value",) if r["kind"] == "spot" else ("min", "max", "mean", "std", "n")
-        acc[r["id"]] = {k: np.full(n, np.nan) for k in keys}
-    for start in range(0, n, max(1, batch)):
-        stop = min(n, start + batch)
-        block = reader.counts_block(start, stop)
+        acc[r["id"]] = {k: np.full(m, np.nan) for k in keys}
+        if r["kind"] not in ("spot", "rect"):
+            ys, xs = roi_index(r, w0, h0)
+            index[r["id"]] = (ys, xs) if len(ys) else None
+    step = max(1, batch) * stride  # read a wide block, keep every stride-th frame from it
+    for start in range(0, n, step):
+        stop = min(n, start + step)
+        local = np.arange(start, stop, stride) - start  # kept rows within this block
+        pos = start // stride  # first strided position this block writes
+        block = (
+            reader.counts_block(start, stop)[local]
+            if stride > 1
+            else reader.counts_block(start, stop)
+        )
         field0 = counts_to_celsius(block, fmt) if fmt is not None else block.astype(np.float64)
-        _, h, w = field0.shape
+        b, h, w = field0.shape  # b == number of kept frames in this block
         for r in rois:
             field = roi_field(field0, r, cam, fmt is not None)
             if valid_c is not None:  # segmentation: outside the valid range → ignored (NaN)
@@ -273,34 +292,34 @@ def roi_series(
                     x0, x1 = max(0, r["x"] - 1), min(w, r["x"] + 2)
                     if y1 > y0 and x1 > x0:
                         with np.errstate(all="ignore"):
-                            dst["value"][start:stop] = np.nanmean(
-                                field[:, y0:y1, x0:x1].reshape(stop - start, -1), axis=1
+                            dst["value"][pos : pos + b] = np.nanmean(
+                                field[:, y0:y1, x0:x1].reshape(b, -1), axis=1
                             )
                 elif 0 <= r["x"] < w and 0 <= r["y"] < h:
-                    dst["value"][start:stop] = field[:, r["y"], r["x"]]
+                    dst["value"][pos : pos + b] = field[:, r["y"], r["x"]]
                 continue
             if r["kind"] == "rect":
                 x0, y0 = max(0, r["x0"]), max(0, r["y0"])
                 x1, y1 = min(w, r["x1"]), min(h, r["y1"])
                 if x1 <= x0 or y1 <= y0:
                     continue
-                sub = field[:, y0:y1, x0:x1].reshape(stop - start, -1)
+                sub = field[:, y0:y1, x0:x1].reshape(b, -1)
             else:
-                ys, xs = roi_index(r, w, h)
-                if len(ys) == 0:
+                ix = index.get(r["id"])
+                if ix is None:
                     continue
-                sub = field[:, ys, xs]
+                sub = field[:, ix[0], ix[1]]
             with np.errstate(all="ignore"):
-                dst["min"][start:stop] = np.nanmin(sub, axis=1)
-                dst["max"][start:stop] = np.nanmax(sub, axis=1)
-                dst["mean"][start:stop] = np.nanmean(sub, axis=1)
-                dst["std"][start:stop] = np.nanstd(sub, axis=1)  # population, as the browser
-                dst["n"][start:stop] = np.sum(~np.isnan(sub), axis=1)
+                dst["min"][pos : pos + b] = np.nanmin(sub, axis=1)
+                dst["max"][pos : pos + b] = np.nanmax(sub, axis=1)
+                dst["mean"][pos : pos + b] = np.nanmean(sub, axis=1)
+                dst["std"][pos : pos + b] = np.nanstd(sub, axis=1)  # population, as the browser
+                dst["n"][pos : pos + b] = np.sum(~np.isnan(sub), axis=1)
     tl = reader.timeline()
     return {
         "units": "celsius" if fmt is not None else "counts",
-        "t_s": tl["t_s"],
-        "frame_id": tl["frame_id"],
+        "t_s": [tl["t_s"][int(i)] for i in keep],
+        "frame_id": [tl["frame_id"][int(i)] for i in keep],
         "series": {str(rid): {k: _clean(v) for k, v in d.items()} for rid, d in acc.items()},
     }
 

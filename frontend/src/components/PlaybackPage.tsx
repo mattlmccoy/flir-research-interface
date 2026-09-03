@@ -82,7 +82,7 @@ export function PlaybackPage(p: Props) {
     if (!info || p.rois.rois.length === 0) { setSeries(null); return; }
     let alive = true;
     const id = window.setTimeout(() => {
-      api.series(p.name, p.rois.rois, p.layout.segment.on ? { min: p.layout.segment.min, max: p.layout.segment.max } : null).then((s) => { if (alive) setSeries(s); }).catch((e) => { if (alive) setErr(String(e)); });
+      api.series(p.name, p.rois.rois, p.layout.segment.on ? { min: p.layout.segment.min, max: p.layout.segment.max } : null, 800).then((s) => { if (alive) setSeries(s); }).catch((e) => { if (alive) setErr(String(e)); });
     }, 250);
     return () => { alive = false; window.clearTimeout(id); };
   }, [p.name, info, p.rois.rois, p.layout.segment.on, p.layout.segment.min, p.layout.segment.max]);
