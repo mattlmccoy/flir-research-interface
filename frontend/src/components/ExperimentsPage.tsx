@@ -36,7 +36,7 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) 
   const filtering = q.trim().length > 0;
 
   return (
-    <div className="page-body">
+    <div className="page-body wide">
       <div className="exp-head">
         <span>{items ? (filtering ? `${shown.length} / ${items.length} experiments` : `${items.length} experiments`) : "loading…"}{items && totalBytes > 0 ? ` · ${(totalBytes / 1e9).toFixed(2)} GB on disk` : ""}</span>
         <span className="right">
