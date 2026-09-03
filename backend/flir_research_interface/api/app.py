@@ -22,7 +22,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from flir_research_interface import __version__
 from flir_research_interface.acquisition.service import AcquisitionService, ServiceState
@@ -105,6 +105,8 @@ class RecordingStartRequest(BaseModel):
     # NUC right before the recording, then NUCMode=Off until stop so the camera never freezes
     # mid-run (the A70 repeats its image for ~2 s during a NUC); the previous mode is restored.
     nuc_hold: bool = True
+    # Periodic (time-lapse) recording: keep every Nth frame (1 = every frame).
+    every_nth: int = Field(default=1, ge=1, le=100000)
 
 
 class ArmRequest(RecordingStartRequest):
@@ -616,6 +618,7 @@ def create_app(
             svc if attach_service else None,
             experiments_root=app.state.experiments_root,
             min_free_gb=app.state.min_free_gb,
+            every_nth=req.every_nth,
         )
         kwargs: dict[str, Any] = {
             "name": req.name,

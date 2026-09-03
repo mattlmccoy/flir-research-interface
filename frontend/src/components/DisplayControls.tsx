@@ -14,10 +14,16 @@ interface Props {
   hasReference?: boolean; onSetReference?: () => void; onClearReference?: () => void;
   /** Save the image with its ROI overlay as a PNG (Research Studio "save image"). */
   onSnapshot?: () => void;
+  /** Lock the range to the selected ROI's min/max (ResearchIR "scale limits from active ROI"). */
+  onRangeFromRoi?: (() => void) | null;
+  hold?: "off" | "max" | "min"; setHold?: (h: "off" | "max" | "min") => void;
+  flipH?: boolean; flipV?: boolean; setFlip?: (h: boolean, v: boolean) => void;
+  /** Pixels at/beyond the camera's calibrated case limits in the current frame. */
+  saturation?: { low: number; high: number; lowC: number; highC: number } | null;
 }
 
 /** Palette + display-range controls shared by live view and playback. Visualization only. */
-export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, manual, setManual, shown, isotherm, setIsotherm, hasReference, onSetReference, onClearReference, onSnapshot }: Props) {
+export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, manual, setManual, shown, isotherm, setIsotherm, hasReference, onSetReference, onClearReference, onSnapshot, onRangeFromRoi, hold = "off", setHold, flipH = false, flipV = false, setFlip, saturation }: Props) {
   const iso = isotherm ?? DEFAULT_ISOTHERM;
   const upd = (patch: Partial<Isotherm>) => setIsotherm?.({ ...iso, ...patch });
   const isoRow = setIsotherm && (
@@ -45,6 +51,22 @@ export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, 
         <div className="row">
           <button className="secondary" onClick={onSnapshot} title="Download the thermal image with its ROIs, palette and a caption line as a PNG at native resolution">⤓ save image</button>
         </div>
+      )}
+      {(setHold || setFlip || onRangeFromRoi !== undefined) && (
+        <div className="row" aria-label="enhancement">
+          {onRangeFromRoi !== undefined && <button className="secondary" disabled={!onRangeFromRoi} onClick={() => onRangeFromRoi?.()} title="Lock the colour range to the selected ROI's min and max (select an area ROI first)">range ← ROI</button>}
+          {setHold && (
+            <select value={hold} onChange={(e) => setHold(e.target.value as "off" | "max" | "min")} aria-label="temporal hold" title="Show the hottest (or coldest) value each pixel has reached since you switched this on — a peak-temperature map. Measurements stay live.">
+              <option value="off">live frame</option><option value="max">max hold</option><option value="min">min hold</option>
+            </select>
+          )}
+          {setHold && hold !== "off" && <button className="secondary" onClick={() => { setHold("off"); setTimeout(() => setHold(hold), 0); }} title="Restart the hold from the next frame">reset</button>}
+          {setFlip && <button className="secondary" aria-pressed={flipH} onClick={() => setFlip(!flipH, flipV)} title="Mirror the image left–right (display only)">⇋ H</button>}
+          {setFlip && <button className="secondary" aria-pressed={flipV} onClick={() => setFlip(flipH, !flipV)} title="Mirror the image top–bottom (display only)">⇅ V</button>}
+        </div>
+      )}
+      {saturation && (saturation.low > 0 || saturation.high > 0) && (
+        <div className="warnbox">{saturation.high > 0 ? `${saturation.high} px at/above the case limit (${saturation.highC.toFixed(0)} °C)` : ""}{saturation.high > 0 && saturation.low > 0 ? " · " : ""}{saturation.low > 0 ? `${saturation.low} px at/below ${saturation.lowC.toFixed(0)} °C` : ""} — outside the calibrated range; switch measurement case.</div>
       )}
       {refRow}
       {isoRow}

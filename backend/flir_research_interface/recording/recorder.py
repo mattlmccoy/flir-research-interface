@@ -133,6 +133,7 @@ class Recorder:
         *,
         experiments_root: Path,
         chunk_frames: int = 32,
+        every_nth: int = 1,
         queue_frames: int = 600,
         min_free_gb: float = 2.0,
         free_space_gb: Callable[[Path], float] = _default_free_space_gb,
@@ -142,6 +143,7 @@ class Recorder:
         self._service = service
         self._root = Path(experiments_root)
         self._chunk = chunk_frames
+        self._every_nth = max(1, int(every_nth))  # periodic (time-lapse) recording
         self._queue: queue.Queue[Frame | None] = queue.Queue(maxsize=queue_frames)
         self._min_free_gb = min_free_gb
         self._free_space_gb = free_space_gb
@@ -165,6 +167,7 @@ class Recorder:
         self._queue_dropped = 0
         self._gap_events: list[dict[str, int]] = []
         self._repeated_frames = 0
+        self._frames_skipped_interval = 0
         self._frozen_runs: list[dict[str, int]] = []
         self._open_frozen: dict[str, int] | None = None
         self._last_counts: Any = None
@@ -203,6 +206,8 @@ class Recorder:
                 "queue_dropped": self._queue_dropped,
                 "frame_id_gaps": sum(g["missing"] for g in self._gap_events),
                 "repeated_frames": self._repeated_frames,
+                "every_nth": self._every_nth,
+                "frames_skipped_interval": self._frames_skipped_interval,
                 "duration_s": dur,
                 "recorded_fps": (self._frames_written - 1) / dur
                 if dur > 0 and self._frames_written > 1
@@ -280,6 +285,7 @@ class Recorder:
                 "path": STORE_NAME,
                 "zarr_format": 2,
                 "chunk_frames": self._chunk,
+                "every_nth": self._every_nth,
                 "compressor": str(self._compressor),
                 "arrays": {
                     "counts": "uint16[time,y,x]",
@@ -320,6 +326,9 @@ class Recorder:
             return
         with self._lock:
             self._frames_received += 1
+            if self._every_nth > 1 and (self._frames_received - 1) % self._every_nth != 0:
+                self._frames_skipped_interval += 1  # intentional: periodic recording
+                return
         try:
             self._queue.put_nowait(frame)
             with self._lock:
@@ -543,6 +552,8 @@ class Recorder:
                 "frames_written": self._frames_written,
                 "queue_dropped": self._queue_dropped,
                 "frame_id_gaps": gaps,
+                "every_nth": self._every_nth,
+                "frames_skipped_interval": self._frames_skipped_interval,
                 "repeated_frames": self._repeated_frames,
                 "frozen_runs": len(self._frozen_runs),
                 "frozen_events": self._frozen_runs,
@@ -551,7 +562,7 @@ class Recorder:
                 "error": self._error,
                 "complete": self._error is None
                 and self._queue_dropped == 0
-                and self._frames_written == self._frames_received,
+                and self._frames_written == self._frames_received - self._frames_skipped_interval,
             }
         manifest["checksums"] = {
             "metadata.json": _sha256(self._exp_dir / "metadata.json"),

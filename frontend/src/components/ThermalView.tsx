@@ -1,3 +1,4 @@
+import { HoldBuffer } from "../lib/enhance.ts";
 import { subtractReference } from "../lib/reference.ts";
 import { applyIsotherm, type Isotherm } from "../lib/isotherm.ts";
 import type { Radiometry } from "../lib/emissivity.ts";
@@ -50,6 +51,10 @@ interface Props {
   onField?: (snap: { c: Float32Array; w: number; h: number }) => void;
   /** Captured °C field: when set, the image shows (frame − reference) on a diverging scale. */
   reference?: Float32Array | null;
+  /** Temporal hold mode; the shown field becomes the per-pixel max/min since the last reset. */
+  hold?: "off" | "max" | "min";
+  /** Software flip of the displayed image (ROIs stay in sensor coordinates). */
+  flipH?: boolean; flipV?: boolean;
 }
 
 /** The shape a drag from `a` to `b` produces for the active tool (null when degenerate). */
@@ -71,8 +76,9 @@ export function dragShape(tool: Tool, a: Pt, b: Pt, w: number, h: number): RoiIn
 /** Renders raw counts -> °C -> palette on a canvas, with an ROI overlay layer. Data arrays are never mutated. */
 const divergingLut = buildLut("diverging");
 
-export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois = NO_ROIS, selected = null, tool = "select", zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null }: Props) {
+export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois = NO_ROIS, selected = null, tool = "select", zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null, hold = "off", flipH = false, flipV = false }: Props) {
   const viewRef = useRef<HTMLDivElement>(null);
+  const holdRef = useRef<HoldBuffer | null>(null);
   const panning = useRef<{ cx: number; cy: number; sl: number; st: number } | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const celsiusRef = useRef<Float32Array | null>(null);
@@ -111,9 +117,12 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
     const c = countsToCelsius(counts, header.kelvin_per_count, header.kelvin_offset);
     celsiusRef.current = c;
     onField?.({ c, w: header.width, h: header.height });
-    const sub = reference ? subtractReference(c, reference) : null;
-    const shownField = sub?.delta ?? c;
-    const range = sub?.delta ? sub.range : resolveScale(scaleMode, manual, autoScale(c));
+    if (hold === "off") holdRef.current = null;
+    else if (!holdRef.current || holdRef.current.mode !== hold) holdRef.current = new HoldBuffer(hold);
+    const held = holdRef.current ? holdRef.current.push(c) : c;
+    const sub = reference ? subtractReference(held, reference) : null;
+    const shownField = sub?.delta ?? held;
+    const range = sub?.delta ? sub.range : resolveScale(scaleMode, manual, autoScale(held));
     onScale(range);
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -127,7 +136,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
     mapToRgba(shownField, range.min, range.max, sub?.delta ? divergingLut : lutRef.current, img.data);
     if (isotherm) applyIsotherm(c, img.data, isotherm);
     ctx.putImageData(img, 0, 0);
-  }, [frame, palette, scaleMode, manual.min, manual.max, isotherm, reference]);
+  }, [frame, palette, scaleMode, manual.min, manual.max, isotherm, reference, hold]);
 
   useEffect(() => {
     const c = celsiusRef.current;
@@ -224,7 +233,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
   const help = tool === "polygon" && vertices.length ? `${vertices.length} point${vertices.length > 1 ? "s" : ""} · double-click or Enter closes the polygon · Esc cancels` : null;
   return (
     <div className={`view ${zoom === "fit" ? "" : "scroll"}`} ref={viewRef}>
-      <canvas ref={canvasRef} style={size ? { width: size.width, height: size.height } : undefined} />
+      <canvas ref={canvasRef} style={{ ...(size ? { width: size.width, height: size.height } : {}), transform: flipH || flipV ? `scale(${flipH ? -1 : 1}, ${flipV ? -1 : 1})` : undefined }} />
       {overlay && box && (
         <div className="visible-overlay" style={{ left: box.left, top: box.top, width: box.width, height: box.height, opacity: overlayStyle?.opacity ?? 0.5 }}>
           <div className="visible-overlay-inner" style={overlayH

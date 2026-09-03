@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { roiId, roiLabel, type Roi, type RoiAction, type RoiStats } from "../lib/roi.ts";
+import { roiId, roiLabel, type Roi, type RoiAction, type RoiStats, loadRois } from "../lib/roi.ts";
 import { COLOR_PRESETS, roiColor } from "../lib/overlay.ts";
 import { Disclosure } from "./Disclosure.tsx";
 
@@ -108,6 +108,20 @@ export function RoiRows({ rois, stats, selected, dispatch, extremes, onExtremes 
       <div className="row">
         <button className="secondary" type="button" onClick={() => dispatch({ type: "setHiddenAll", hidden: !rois.every((r) => r.hidden) })} title="Hide or show every ROI on the image; measurements, recording and exports are unaffected">{rois.every((r) => r.hidden) ? "show all" : "hide all"}</button>
         <button className="secondary" type="button" onClick={() => dispatch({ type: "clear" })}>clear all</button>
+        <button className="secondary" type="button" title="Save this ROI set as a JSON file (load it on any machine or recording)" onClick={() => {
+          const blob = new Blob([JSON.stringify({ format: "fri-rois-1", rois }, null, 2)], { type: "application/json" });
+          const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "rois.json"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+        }}>save…</button>
+        <label className="secondary" style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", padding: "5px 10px", border: "1px solid var(--line-control)", borderRadius: "var(--radius)", fontFamily: "var(--font-mono)", fontSize: 12 }} title="Load an ROI set from a JSON file (replaces the current set)">
+          load…<input type="file" accept="application/json,.json" style={{ display: "none" }} onChange={(e) => {
+            const f = e.target.files?.[0]; if (!f) return;
+            void f.text().then((txt) => {
+              const parsed = loadRois({ getItem: () => JSON.stringify({ rois: (JSON.parse(txt) as { rois?: unknown }).rois ?? JSON.parse(txt), nextId: 1 }), setItem: () => undefined } as unknown as Storage);
+              dispatch({ type: "replace", rois: parsed.rois });
+            }).catch(() => undefined);
+            e.target.value = "";
+          }} />
+        </label>
         {onExtremes && <button className="secondary" type="button" aria-pressed={!!extremes} onClick={() => onExtremes(!extremes)} title="Mark the hottest (▲) and coldest (▽) pixel inside every area ROI" style={{ marginLeft: "auto", opacity: extremes ? 1 : 0.6 }}>▲▽ hot/cold</button>}
       </div>
       {help}

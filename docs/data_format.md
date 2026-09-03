@@ -88,7 +88,9 @@ experiments/<YYYYMMDD_HHMMSS>_<name>/
                          identical pixels) for ~2 s while it performs a NUC; those frames are
                          kept but counted (`repeated_frames`, `frozen_runs` in manifest.json
                          and the live status) so a flat stretch in a trace is explained
-  manifest.json          written at clean stop: frames written, gaps, drops, complete flag,
+  manifest.json          written at clean stop: frames written, gaps, drops, `every_nth` and
+                         `frames_skipped_interval` (periodic recording keeps every Nth frame;
+                         skipped frames are intentional, not drops), complete flag,
                          file checksums, visible-video summary
   visible.mp4 + .json    the visible camera (H.264 stream copy) when "visible video" was ticked,
                          with host-clock start/stop, measured fps and hash

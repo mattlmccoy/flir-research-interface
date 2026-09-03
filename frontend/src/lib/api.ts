@@ -38,7 +38,7 @@ async function j<T>(r: Promise<Response>): Promise<T> {
 }
 export interface VisibleStatus { state: string; restarts?: number; file?: string | null; started_host_ns?: number | null; url?: string; error?: string | null; reason?: string; }
 export interface ArmedStatus { trigger: Record<string, unknown>; machine: { state: string; frames_recorded: number; reason: string | null; sustain: number }; watched_value: number | null; watched_roi: number | null; ring_frames: number; pretrigger_frames: number; }
-export interface RecordingStatus { state: string; armed?: ArmedStatus; visible?: VisibleStatus; experiment_dir?: string | null; frames_received?: number; frames_written?: number; queue_depth?: number; queue_dropped?: number; frame_id_gaps?: number; repeated_frames?: number; duration_s?: number; recorded_fps?: number | null; free_space_gb?: number | null; min_free_gb?: number; error?: string | null; experiments_root?: string; }
+export interface RecordingStatus { state: string; armed?: ArmedStatus; visible?: VisibleStatus; experiment_dir?: string | null; frames_received?: number; frames_written?: number; queue_depth?: number; queue_dropped?: number; frame_id_gaps?: number; repeated_frames?: number; every_nth?: number; frames_skipped_interval?: number; duration_s?: number; recorded_fps?: number | null; free_space_gb?: number | null; min_free_gb?: number; error?: string | null; experiments_root?: string; }
 export interface Previews {
   units: "celsius" | "counts";
   preview: { file: string; frame_index: number; t_s: number; size?: [number, number]; units?: string; sha256: string };
@@ -97,8 +97,8 @@ export const api = {
     if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
     return res.arrayBuffer();
   },
-  recordingStart: (name: string, metadata: Record<string, unknown>, visible = false, rois: unknown[] | null = null, nucHold = true) =>
-    j<{ state: string; experiment_dir: string; visible?: VisibleStatus }>(req("/api/recording/start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, metadata, visible, rois, nuc_hold: nucHold }) })),
+  recordingStart: (name: string, metadata: Record<string, unknown>, visible = false, rois: unknown[] | null = null, nucHold = true, everyNth = 1) =>
+    j<{ state: string; experiment_dir: string; visible?: VisibleStatus }>(req("/api/recording/start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, metadata, visible, rois, nuc_hold: nucHold, every_nth: everyNth }) })),
   recordingStop: () => j<Record<string, unknown>>(req("/api/recording/stop", { method: "POST" })),
   recordingArm: (name: string, metadata: Record<string, unknown>, visible: boolean, rois: unknown[] | null, trigger: unknown, nucHold = true) =>
     j<{ state: string }>(req("/api/recording/arm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, metadata, visible, rois, trigger, nuc_hold: nucHold }) })),

@@ -25,6 +25,7 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: Roi
   const [showForm, setShowForm] = useState(false);
   const [withVisible, setWithVisible] = useState(true);
   const [nucHold, setNucHold] = useState(true);
+  const [everyNth, setEveryNth] = useState(1);
 
   useEffect(() => {
     const tick = async () => { try { setStatus(await api.recordingStatus()); } catch { /* keep last */ } };
@@ -63,7 +64,7 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: Roi
         const v = meta[f.key];
         if (v !== undefined && v !== "") m[f.key] = f.type === "number" ? Number(v) : v;
       }
-      await api.recordingStart(name, m, withVisible && visibleAvailable, rois, nucHold);
+      await api.recordingStart(name, m, withVisible && visibleAvailable, rois, nucHold, everyNth);
       setStatus(await api.recordingStatus());
     } catch (e) { setErr(String(e)); } finally { setBusy(false); }
   }
@@ -116,6 +117,9 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: Roi
             </label>
             <label className="hint" title="Run a NUC right before the recording, then hold NUCMode=Off until stop so the camera never freezes its image mid-run (~2 s per NUC). The previous mode is restored at stop.">
               <input type="checkbox" checked={nucHold} onChange={(e) => setNucHold(e.target.checked)} /> NUC before, none during
+            </label>
+            <label className="hint" title="Periodic (time-lapse) recording: keep every Nth frame. 1 = every frame (30 fps); 30 = one frame per second; 1800 = one per minute. Skipped frames are intentional and do not count as drops.">
+              every <input type="number" min={1} max={100000} step={1} value={everyNth} style={{ width: 64 }} onChange={(e) => setEveryNth(Math.max(1, Math.floor(Number(e.target.value) || 1)))} /> frame{everyNth === 1 ? "" : "s"}{everyNth > 1 ? <small className="muted"> ≈ {(30 / everyNth).toPrecision(2)} fps</small> : null}
             </label>
           </>
         ) : recording && !armed ? (

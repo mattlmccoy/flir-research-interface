@@ -38,6 +38,10 @@ export interface LayoutState {
   delta: { a: number; b: number } | null;
   /** Rail sections popped out into floating, resizable windows (viewport px). */
   floating: Partial<Record<Section, FloatRect>>;
+  /** Software image flip (display only). */
+  flipH: boolean; flipV: boolean;
+  /** Temporal hold: show the per-pixel max/min since reset instead of the live frame. */
+  hold: "off" | "max" | "min";
   /** Overlay registration: opacity 0–1, scale 0.5–2 and offsets in % of the image (visible lens ≠ IR lens). */
   overlay: Overlay;
   sections: Record<Section, boolean>;
@@ -80,6 +84,9 @@ export const DEFAULT_LAYOUT: LayoutState = {
   isotherm: DEFAULT_ISOTHERM,
   delta: null,
   floating: {},
+  flipH: false,
+  flipV: false,
+  hold: "off",
   overlay: DEFAULT_OVERLAY,
   sections: { measurements: true, profile: false, camera: true, experiment: true, recording: true, display: true, export: true, visible: true },
 };
@@ -98,6 +105,8 @@ export type LayoutAction =
   | { type: "popOut"; section: Section }
   | { type: "moveFloat"; section: Section; rect: FloatRect }
   | { type: "dockBack"; section: Section }
+  | { type: "setFlip"; h: boolean; v: boolean }
+  | { type: "setHold"; hold: "off" | "max" | "min" }
   | { type: "setVisibleMode"; mode: VisibleMode }
   | { type: "setOverlay"; patch: Partial<Overlay> }
   | { type: "collapseAll" }
@@ -120,6 +129,8 @@ export function layoutReducer(s: LayoutState, a: LayoutAction): LayoutState {
       return { ...s, floating: { ...s.floating, [a.section]: s.floating[a.section] ?? { x: 80 + n * 30, y: 80 + n * 30, w: 420, h: 360 } } };
     }
     case "moveFloat": return { ...s, floating: { ...s.floating, [a.section]: clampRect(a.rect) } };
+    case "setFlip": return { ...s, flipH: a.h, flipV: a.v };
+    case "setHold": return { ...s, hold: a.hold };
     case "dockBack": { const { [a.section]: _gone, ...rest } = s.floating; return { ...s, floating: rest }; }
     case "setOverlay": return { ...s, overlay: clampOverlay({ ...s.overlay, ...a.patch }) };
     case "collapseAll": return { ...s, strip: false, rail: false, dock: false };
@@ -166,6 +177,9 @@ export function loadLayout(storage: Storage | null): LayoutState {
       isotherm: parseIsotherm(parsed.isotherm),
       delta: isDelta(parsed.delta) ? parsed.delta : null,
       floating: parseFloating(parsed.floating),
+      flipH: parsed.flipH === true,
+      flipV: parsed.flipV === true,
+      hold: "off",
       overlay: clampOverlay({
         opacity: num(ov.opacity, DEFAULT_OVERLAY.opacity),
         scale: num(ov.scale, DEFAULT_OVERLAY.scale),

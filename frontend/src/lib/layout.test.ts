@@ -188,3 +188,17 @@ test("rail sections can pop out into floating windows, move/resize, and dock bac
   const s3 = layoutReducer(s2, { type: "dockBack", section: "measurements" });
   assert.equal(s3.floating.measurements, undefined);
 });
+
+test("flip and temporal hold live in the layout with safe defaults", () => {
+  assert.equal(DEFAULT_LAYOUT.flipH, false);
+  assert.equal(DEFAULT_LAYOUT.hold, "off");
+  const s1 = layoutReducer(DEFAULT_LAYOUT, { type: "setFlip", h: true, v: false });
+  assert.equal(s1.flipH, true);
+  const s2 = layoutReducer(s1, { type: "setHold", hold: "max" });
+  assert.equal(s2.hold, "max");
+  const store = new Map<string, string>();
+  const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); } } as unknown as Storage;
+  saveLayout(storage, s2);
+  assert.equal(loadLayout(storage).flipH, true);
+  assert.equal(loadLayout(storage).hold, "off", "hold is a session choice: never restored");
+});
