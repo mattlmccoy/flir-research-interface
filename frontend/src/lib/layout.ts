@@ -41,6 +41,9 @@ export interface LayoutState {
   strip: boolean;
   rail: boolean;
   dock: boolean;
+  /** Right rail width and bottom dock height in px (drag-to-resize, snap near the default). */
+  railW: number;
+  dockH: number;
   tool: Tool;
   zoom: Zoom;
   /** Where the visible camera shows: small in the rail, beside the thermal image, or blended over it. */
@@ -69,6 +72,17 @@ export interface LayoutState {
   overlay: Overlay;
   sections: Record<Section, boolean>;
 }
+/** Drag-to-resize bounds (px) for the right rail and the bottom plot dock, with a snap-back
+ * window around the default so a resize clicks back to the tidy layout. */
+export const RAIL_W = { min: 280, max: 760, default: 400, snap: 24 } as const;
+export const DOCK_H = { min: 140, max: 620, default: 260, snap: 24 } as const;
+function snapClamp(v: number, cfg: { min: number; max: number; default: number; snap: number }): number {
+  const snapped = Math.abs(v - cfg.default) <= cfg.snap ? cfg.default : v;
+  return Math.min(cfg.max, Math.max(cfg.min, snapped));
+}
+export const clampRailW = (w: number): number => snapClamp(w, RAIL_W);
+export const clampDockH = (h: number): number => snapClamp(h, DOCK_H);
+
 export const VISIBLE_MODES = ["rail", "side", "overlay"] as const;
 export type VisibleMode = (typeof VISIBLE_MODES)[number];
 export interface Overlay { opacity: number; scale: number; dx: number; dy: number; }
@@ -100,6 +114,8 @@ export const DEFAULT_LAYOUT: LayoutState = {
   strip: true,
   rail: true,
   dock: true,
+  railW: RAIL_W.default,
+  dockH: DOCK_H.default,
   tool: "select",
   zoom: "fit",
   visibleMode: "rail",
@@ -122,6 +138,8 @@ Object.freeze(DEFAULT_LAYOUT);
 
 export type LayoutAction =
   | { type: "toggle"; panel: Panel }
+  | { type: "setRailW"; w: number }
+  | { type: "setDockH"; h: number }
   | { type: "toggleSection"; section: Section }
   | { type: "openSection"; section: Section }
   | { type: "setTool"; tool: Tool }
@@ -147,6 +165,8 @@ export type LayoutAction =
 export function layoutReducer(s: LayoutState, a: LayoutAction): LayoutState {
   switch (a.type) {
     case "toggle": return { ...s, [a.panel]: !s[a.panel] };
+    case "setRailW": return { ...s, railW: clampRailW(a.w) };
+    case "setDockH": return { ...s, dockH: clampDockH(a.h) };
     case "toggleSection": return { ...s, sections: { ...s.sections, [a.section]: !s.sections[a.section] } };
     case "openSection": return { ...s, rail: true, sections: { ...s.sections, [a.section]: true } };
     case "setTool": return { ...s, tool: a.tool };
@@ -205,6 +225,8 @@ export function loadLayout(storage: Storage | null): LayoutState {
       strip: bool(parsed.strip, DEFAULT_LAYOUT.strip),
       rail: bool(parsed.rail, DEFAULT_LAYOUT.rail),
       dock: bool(parsed.dock, DEFAULT_LAYOUT.dock),
+      railW: clampRailW(num(parsed.railW, DEFAULT_LAYOUT.railW)),
+      dockH: clampDockH(num(parsed.dockH, DEFAULT_LAYOUT.dockH)),
       tool: isTool(parsed.tool) ? parsed.tool : DEFAULT_LAYOUT.tool,
       zoom: isZoom(parsed.zoom) ? parsed.zoom : DEFAULT_LAYOUT.zoom,
       visibleMode: isVisibleMode(parsed.visibleMode) ? parsed.visibleMode : parsed.visibleSide === true ? "side" : DEFAULT_LAYOUT.visibleMode,

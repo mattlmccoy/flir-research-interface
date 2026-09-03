@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import { studioClasses, type LayoutAction, type LayoutState } from "../../lib/layout.ts";
+import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import { DOCK_H, RAIL_W, studioClasses, type LayoutAction, type LayoutState } from "../../lib/layout.ts";
 import { FloatContext } from "./FloatContext.tsx";
 
 interface Props {
@@ -24,6 +24,25 @@ interface Props {
   dockFoot?: ReactNode;
 }
 
+/**
+ * Drives a pointer drag on a resize handle. `measure` reads the moving edge's size in px from the
+ * event; the result is clamped by the reducer. Double-click resets to the default.
+ */
+function dragHandler(measure: (e: PointerEvent) => number, apply: (px: number) => void) {
+  return (e: ReactPointerEvent) => {
+    e.preventDefault();
+    const move = (ev: PointerEvent) => apply(measure(ev));
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      document.body.style.userSelect = "";
+    };
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+}
+
 /** The Studio grid (spec §3). Panels collapse via layout flags; grid areas are fixed. */
 export function StudioFrame({ layout, page = false, topbar, strip, center, dock, rail, statusbar, dispatch, dockFoot }: Props) {
   const { className, showStrip, showRail, showDock } = studioClasses(layout, {
@@ -32,12 +51,35 @@ export function StudioFrame({ layout, page = false, topbar, strip, center, dock,
     hasRail: !!rail,
     hasDock: !!dock,
   });
+  const style: CSSProperties = {
+    ...(showRail ? { ["--rail-w" as string]: `${layout.railW}px` } : {}),
+    ...(showDock ? { ["--dock-h" as string]: `${layout.dockH}px` } : {}),
+  };
+  const railResize = dispatch && showRail && (
+    <div className="rail-resizer" role="separator" aria-orientation="vertical" aria-label="Drag to resize the panel"
+      title="Drag to resize · double-click to reset"
+      onPointerDown={dragHandler(
+        (ev) => (document.querySelector(".studio > .rail")?.getBoundingClientRect().right ?? window.innerWidth) - ev.clientX,
+        (px) => dispatch({ type: "setRailW", w: px }),
+      )}
+      onDoubleClick={() => dispatch({ type: "setRailW", w: RAIL_W.default })} />
+  );
+  const dockResize = dispatch && showDock && (
+    <div className="dock-resizer" role="separator" aria-orientation="horizontal" aria-label="Drag to resize the plot"
+      title="Drag to resize · double-click to reset"
+      onPointerDown={dragHandler(
+        (ev) => (document.querySelector(".studio .dock")?.getBoundingClientRect().bottom ?? window.innerHeight) - ev.clientY,
+        (px) => dispatch({ type: "setDockH", h: px }),
+      )}
+      onDoubleClick={() => dispatch({ type: "setDockH", h: DOCK_H.default })} />
+  );
   const body = (
-    <div className={className}>
+    <div className={className} style={style}>
       <div className="topbar">{topbar}</div>
       {showStrip && strip}
       <div className="center">
         {center}
+        {dockResize}
         {showDock && dock}
         {!showDock && dock && dispatch && (
           <div className="dock-collapsed">
@@ -46,6 +88,7 @@ export function StudioFrame({ layout, page = false, topbar, strip, center, dock,
           </div>
         )}
       </div>
+      {railResize}
       {showRail && rail}
       {statusbar}
     </div>

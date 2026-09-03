@@ -99,6 +99,12 @@ export const api = {
   reportUrl: (name: string) => u(`/api/experiments/${encodeURIComponent(name)}/report.pdf`),
   exportThermalVideo: (name: string) =>
     j<ThermalVideoExport>(req(`/api/experiments/${encodeURIComponent(name)}/export/thermal-video`, { method: "POST" })),
+  /** Persist the ROIs currently on screen into the recording so derived files can match them. */
+  putRois: (name: string, rois: unknown[]) =>
+    j<{ rois: number }>(req(`/api/experiments/${encodeURIComponent(name)}/rois`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ rois }) })),
+  /** Re-generate every ROI-dependent derived file from the recording's stored ROIs. */
+  exportDerived: (name: string) =>
+    j<ExperimentInfo>(req(`/api/experiments/${encodeURIComponent(name)}/export/derived`, { method: "POST" })),
   exportFileUrl: (name: string, file: string) => u(`/api/experiments/${encodeURIComponent(name)}/exports/${encodeURIComponent(file)}`),
   thermalVideoUrl: (name: string) => u(`/api/experiments/${encodeURIComponent(name)}/thermal_preview.mp4`),
   frameBuffer: async (name: string, index: number): Promise<ArrayBuffer> => {

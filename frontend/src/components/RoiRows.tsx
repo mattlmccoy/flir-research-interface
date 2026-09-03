@@ -67,13 +67,22 @@ function ColorPicker({ r, i, dispatch, onDone }: { r: Roi; i: number; dispatch: 
 function OpticsEditor({ r, dispatch }: { r: Roi; dispatch: (a: RoiAction) => void }) {
   const set = (patch: { emissivity?: number | null; reflected_c?: number | null; distance_m?: number | null }) => dispatch({ type: "setOptics", id: r.id, ...patch });
   return (
-    <div className="optics" title="Emissivity and reflected temperature re-correct this region's reading live using the camera's R,B,F constants (emissivity has the largest effect). Distance is recorded with the ROI for your own atmospheric correction; at bench range (under ~2 m) its effect on the reading is under a few tenths of a degree. Blank = use the camera's global setting.">
-      <div className="hint" style={{ marginBottom: 4 }}>Optics for {roiLabel(r)} — ε and reflected re-correct the reading live; distance is recorded for your processing. Blank = camera setting.</div>
-      <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-        <label className="hint">ε <NumberField min={0.01} max={1} step={0.01} value={r.emissivity ?? null} placeholder="camera" style={{ width: 70 }} aria-label={`emissivity of ${roiLabel(r)}`} onChange={(n) => set({ emissivity: n })} /></label>
-        <label className="hint">reflected <NumberField step={0.5} value={r.reflected_c ?? null} placeholder="camera" style={{ width: 70 }} aria-label={`reflected temperature of ${roiLabel(r)} in °C`} onChange={(n) => set({ reflected_c: n })} /> °C</label>
-        <label className="hint">distance <NumberField min={0.01} step={0.1} value={r.distance_m ?? null} placeholder="camera" style={{ width: 70 }} aria-label={`object distance of ${roiLabel(r)} in metres`} onChange={(n) => set({ distance_m: n })} /> m</label>
+    <div className="optics">
+      <div className="optics-title">Optics · {roiLabel(r)}</div>
+      <div className="optics-grid">
+        <label htmlFor={`eps-${r.id}`}>emissivity</label>
+        <NumberField id={`eps-${r.id}`} min={0.01} max={1} step={0.01} value={r.emissivity ?? null} placeholder="camera" aria-label={`emissivity of ${roiLabel(r)}`} onChange={(n) => set({ emissivity: n })} />
+        <span className="optics-unit" title="Corrects this region's reading live (largest effect). 0.01–1.">ε</span>
+
+        <label htmlFor={`refl-${r.id}`}>reflected</label>
+        <NumberField id={`refl-${r.id}`} step={0.5} value={r.reflected_c ?? null} placeholder="camera" aria-label={`reflected temperature of ${roiLabel(r)} in °C`} onChange={(n) => set({ reflected_c: n })} />
+        <span className="optics-unit" title="Reflected apparent temperature of the surroundings. Corrects the reading live.">°C</span>
+
+        <label htmlFor={`dist-${r.id}`}>distance</label>
+        <NumberField id={`dist-${r.id}`} min={0.01} step={0.1} value={r.distance_m ?? null} placeholder="camera" aria-label={`object distance of ${roiLabel(r)} in metres`} onChange={(n) => set({ distance_m: n })} />
+        <span className="optics-unit" title="Recorded with the ROI for your own atmospheric correction. Under ~2 m it changes the reading by under a few tenths of a degree.">m</span>
       </div>
+      <div className="optics-foot">Blank = use the camera's global setting.</div>
     </div>
   );
 }

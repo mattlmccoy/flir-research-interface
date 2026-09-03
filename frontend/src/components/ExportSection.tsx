@@ -3,7 +3,7 @@ import { useState } from "react";
 import { api, type Hdf5Export, type ThermalVideoExport } from "../lib/api.ts";
 import type { Roi } from "../lib/roi.ts";
 
-interface Props { name: string; index: number; nFrames: number; rois: Roi[]; celsius: boolean; thermalPreview?: { bytes: number } | null; onThermalPreview?: () => void; files?: { name: string; bytes: number }[]; }
+interface Props { name: string; index: number; nFrames: number; rois: Roi[]; celsius: boolean; thermalPreview?: { bytes: number } | null; onThermalPreview?: () => void; files?: { name: string; bytes: number }[]; onRefresh?: () => void; }
 
 const FRAME_FORMATS = [
   { f: "csv", label: "CSV", title: "°C grid (raw counts if not temperature-linear)" },
@@ -17,7 +17,7 @@ function fmtBytes(n: number): string {
 }
 
 /** Playback rail section: downloads derived from the recording (the store itself is never touched). */
-export function ExportSection({ name, index, nFrames, rois, celsius, thermalPreview, onThermalPreview, files = [] }: Props) {
+export function ExportSection({ name, index, nFrames, rois, celsius, thermalPreview, onThermalPreview, files = [], onRefresh }: Props) {
   const [busy, setBusy] = useState(false);
   const [h5, setH5] = useState<Hdf5Export | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -26,6 +26,19 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
   const [rng, setRng] = useState({ start: 0, stop: nFrames, step: 1, format: "csv" });
   const [rngOut, setRngOut] = useState<string | null>(null);
   const [report, setReport] = useState<{ path: string; pages: number; size_bytes: number } | null>(null);
+  const [derivedBusy, setDerivedBusy] = useState(false);
+  const [derivedOut, setDerivedOut] = useState<string | null>(null);
+  // The derived files (ROI plot, peak frames, videos, roi_series.csv) are generated at record
+  // time from the ROIs that existed then. Persist the on-screen ROIs, then regenerate.
+  async function regenerateDerived() {
+    setDerivedBusy(true); setErr(null); setDerivedOut(null);
+    try {
+      await api.putRois(name, rois);
+      await api.exportDerived(name);
+      onThermalPreview?.(); onRefresh?.();
+      setDerivedOut(`updated to match ${rois.length} ROI${rois.length === 1 ? "" : "s"} on screen`);
+    } catch (e) { setErr(String(e)); } finally { setDerivedBusy(false); }
+  }
   async function makeReport() {
     setBusy(true); setErr(null);
     try { setReport(await api.exportReport(name)); } catch (e) { setErr(String(e)); } finally { setBusy(false); }
@@ -87,9 +100,19 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
           <button className="secondary" disabled={tvBusy || nFrames === 0} onClick={renderThermalVideo} title="Render (or re-render) the small H.264 viewing copy of the thermal run">{tvBusy ? "rendering…" : haveVideo ? "re-render" : "render"}</button>
         </span>
       </div>
+      <div className="derived-refresh" style={{ marginTop: 8 }}>
+        <button className="secondary" disabled={derivedBusy || nFrames === 0} onClick={regenerateDerived}
+          title="The ROI plot, peak-frame images, thermal videos and roi_series.csv were generated from the ROIs present at record time. This saves the ROIs currently on screen into the run and regenerates all of them to match.">
+          {derivedBusy ? "regenerating…" : "update derived files to match ROIs on screen"}
+        </button>
+        <div className="hint" style={{ marginTop: 3 }}>
+          {rois.length ? `${rois.length} ROI${rois.length === 1 ? "" : "s"} on screen` : "no ROIs on screen — regenerates the clean video and images"} · ROI plot, peak frames, videos and roi_series.csv
+        </div>
+        {derivedOut && <div className="hint" style={{ color: "var(--accent)" }}>{derivedOut}</div>}
+      </div>
       {files.length > 0 && (
         <div className="hint" style={{ marginTop: 6 }}>
-          <b>Files in this run's exports folder</b> (written at stop, regenerable):
+          <b>Files in this run's exports folder</b> (regenerable; reflect the last regenerate):
           <div className="row" style={{ marginTop: 4 }}>
             {files.map((f) => <a key={f.name} className="dl" href={api.exportFileUrl(name, f.name)} target="_blank" rel="noreferrer" title={fmtBytes(f.bytes)}>{f.name}</a>)}
           </div>

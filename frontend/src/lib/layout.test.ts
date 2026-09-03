@@ -232,3 +232,36 @@ test("display units live in the layout (°C default) and persist; unknown falls 
   assert.equal(loadLayout(storage).units, "K");
   assert.equal(loadLayout({ getItem: () => JSON.stringify({ units: "rankine" }), setItem: () => undefined } as unknown as Storage).units, "C");
 });
+
+test("clampRailW snaps to the default near it and clamps to the bounds", async () => {
+  const { clampRailW, RAIL_W } = await import("./layout.ts");
+  assert.equal(clampRailW(RAIL_W.default + 10), RAIL_W.default, "within snap → default");
+  assert.equal(clampRailW(RAIL_W.default - RAIL_W.snap - 20), RAIL_W.default - RAIL_W.snap - 20, "outside snap → kept");
+  assert.equal(clampRailW(50), RAIL_W.min, "below min clamps up");
+  assert.equal(clampRailW(5000), RAIL_W.max, "above max clamps down");
+});
+
+test("clampDockH snaps to the default near it and clamps to the bounds", async () => {
+  const { clampDockH, DOCK_H } = await import("./layout.ts");
+  assert.equal(clampDockH(DOCK_H.default - 8), DOCK_H.default, "within snap → default");
+  assert.equal(clampDockH(50), DOCK_H.min, "below min clamps up");
+  assert.equal(clampDockH(9000), DOCK_H.max, "above max clamps down");
+});
+
+test("setRailW / setDockH actions update state through the reducer, clamped", async () => {
+  const { layoutReducer, RAIL_W } = await import("./layout.ts");
+  const s = layoutReducer(DEFAULT_LAYOUT, { type: "setRailW", w: 5000 });
+  assert.equal(s.railW, RAIL_W.max);
+  const s2 = layoutReducer(s, { type: "setDockH", h: 300 });
+  assert.equal(s2.dockH, 300);
+});
+
+test("railW / dockH survive a save/load round-trip and default when absent", async () => {
+  const { saveLayout, loadLayout, DEFAULT_LAYOUT: DL } = await import("./layout.ts");
+  const st = memStorage();
+  saveLayout(st, { ...DL, railW: 520, dockH: 320 });
+  const back = loadLayout(st);
+  assert.equal(back.railW, 520);
+  assert.equal(back.dockH, 320);
+  assert.equal(loadLayout(memStorage()).railW, DL.railW, "absent → default");
+});

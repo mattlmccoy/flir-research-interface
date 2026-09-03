@@ -134,6 +134,10 @@ class MetadataPatch(BaseModel):
     experiment: Any
 
 
+class RoisRequest(BaseModel):
+    rois: list[dict[str, Any]]
+
+
 class ForceIpRequest(BaseModel):
     mac: str
     ip: str
@@ -577,7 +581,6 @@ def create_app(
     def _recording_extra(req: RecordingStartRequest) -> dict[str, Any]:
         from flir_research_interface.analysis.calibration import load_alignment
         from flir_research_interface.analysis.profile import load_profile
-        from flir_research_interface.analysis.series import parse_rois
 
         extra: dict[str, Any] = {}
         prof = load_profile(app.state.experiments_root)
@@ -586,20 +589,25 @@ def create_app(
         if alignment:
             extra["visible_alignment"] = alignment
         if req.rois is not None:
-            try:
-                parsed = parse_rois(json.dumps(req.rois))
-            except ValueError as exc:
-                raise HTTPException(400, f"rois: {exc}") from exc
-            # keep the operator's names/colours alongside the validated geometry
-            by_id = {r["id"]: r for r in req.rois}
-            for r in parsed:
-                src = by_id.get(r["id"], {})
-                if isinstance(src.get("name"), str) and src["name"].strip():
-                    r["name"] = src["name"].strip()[:40]
-                if isinstance(src.get("color"), str):
-                    r["color"] = src["color"]
-            extra["rois"] = parsed
+            extra["rois"] = _rois_with_labels(req.rois)
         return extra
+
+    def _rois_with_labels(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Validate ROI geometry/optics (parse_rois) and re-attach the operator's names/colours."""
+        from flir_research_interface.analysis.series import parse_rois
+
+        try:
+            parsed = parse_rois(json.dumps(raw))
+        except ValueError as exc:
+            raise HTTPException(400, f"rois: {exc}") from exc
+        by_id = {r["id"]: r for r in raw}
+        for r in parsed:
+            src = by_id.get(r["id"], {})
+            if isinstance(src.get("name"), str) and src["name"].strip():
+                r["name"] = src["name"].strip()[:40]
+            if isinstance(src.get("color"), str):
+                r["color"] = src["color"]
+        return parsed
 
     app.state.nuc_restore = None
     nuc_settle_s = 2.5  # the A70 freezes its image for ~2 s while it performs a NUC
@@ -986,6 +994,40 @@ def create_app(
             raise HTTPException(404, str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+
+    @app.put("/api/experiments/{name}/rois")
+    def experiment_rois_put(name: str, req: RoisRequest) -> dict[str, Any]:
+        """Persist the ROIs from playback into the recording so derived exports can match them.
+
+        The store's counts are never touched — only ``metadata.json['rois']``. Geometry and
+        per-ROI optics (emissivity / reflected / distance) are validated by ``parse_rois``.
+        """
+        from flir_research_interface.recording.metadata import set_experiment_rois
+
+        d = _exp_dir(name)
+        rois = _rois_with_labels(req.rois)
+        try:
+            set_experiment_rois(d, rois)
+        except FileNotFoundError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return {"rois": len(rois)}
+
+    @app.post("/api/experiments/{name}/export/derived")
+    async def export_derived_route(name: str) -> dict[str, Any]:
+        """Re-generate every ROI-dependent derived file from the recording's stored ROIs.
+
+        roi_series.csv, README/roi_plot/peak-frame images and the thermal videos. Pair with
+        ``PUT /rois`` to refresh them after editing ROIs in playback.
+        """
+
+        def _work() -> dict[str, Any]:
+            exp_dir = _exp_dir(name)
+            _export_roi_series(exp_dir)
+            _write_run_summary(exp_dir)
+            _render_thermal_video(exp_dir)
+            return experiment_info(name)
+
+        return await run_in_threadpool(_work)
 
     @app.get("/api/experiments/{name}/series")
     async def experiment_series(

@@ -6,7 +6,7 @@ button, select, input { font: inherit; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
 /* ---- Studio frame -------------------------------------------------------- */
-.studio { display: grid; height: 100vh; grid-template-rows: var(--topbar-h) minmax(0, 1fr) var(--statusbar-h);
+.studio { position: relative; display: grid; height: 100vh; grid-template-rows: var(--topbar-h) minmax(0, 1fr) var(--statusbar-h);
   grid-template-columns: var(--strip-w) minmax(0, 1fr) var(--rail-w);
   grid-template-areas: "top top top" "strip center rail" "status status status"; }
 .studio.no-strip { grid-template-columns: 0 minmax(0, 1fr) var(--rail-w); }
@@ -14,10 +14,18 @@ button, select, input { font: inherit; }
 .studio.no-strip.no-rail { grid-template-columns: 0 minmax(0, 1fr) 0; }
 .studio > .topbar { grid-area: top; }
 .studio > .strip { grid-area: strip; }
-.studio > .center { grid-area: center; display: grid; grid-template-rows: minmax(0, 1fr) var(--dock-h); min-width: 0; min-height: 0; overflow: hidden; }
+.studio > .center { grid-area: center; position: relative; display: grid; grid-template-rows: minmax(0, 1fr) var(--dock-h); min-width: 0; min-height: 0; overflow: hidden; }
 .studio.no-dock > .center { grid-template-rows: minmax(0, 1fr) auto; }
 .studio > .rail { grid-area: rail; }
 .studio > .statusbar { grid-area: status; }
+
+/* Drag handles that sit on the rail / dock boundary (absolute so they never add a grid track). */
+.studio > .rail-resizer { position: absolute; top: var(--topbar-h); bottom: var(--statusbar-h); right: var(--rail-w); width: 9px; margin-right: -5px; cursor: col-resize; z-index: 30; touch-action: none; }
+.studio > .center > .dock-resizer { position: absolute; left: 0; right: 0; bottom: var(--dock-h); height: 9px; margin-bottom: -5px; cursor: row-resize; z-index: 30; touch-action: none; }
+.rail-resizer::after, .dock-resizer::after { content: ""; position: absolute; background: var(--line-control); transition: background 0.12s; }
+.rail-resizer::after { top: 0; bottom: 0; left: 50%; width: 1px; transform: translateX(-0.5px); }
+.dock-resizer::after { left: 0; right: 0; top: 50%; height: 1px; transform: translateY(-0.5px); }
+.rail-resizer:hover::after, .dock-resizer:hover::after { background: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .studio.page > .center { grid-template-rows: minmax(0, 1fr); }   /* non-image pages: no dock */
 
 /* ---- Top bar --------------------------------------------------------------- */
@@ -219,8 +227,13 @@ ul.help li { line-height: 1.35; }
 .view .minimap { position: absolute; left: 12px; bottom: 12px; width: 160px; border: 1px solid var(--line-control); background: var(--scrim); opacity: 0.9; cursor: crosshair; image-rendering: auto; z-index: 3; }
 
 /* ---- Per-ROI optics editor ---------------------------------------------------------- */
-.roi-rows .optics { background: var(--bg-deep); border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 8px; margin: 2px 0 6px; }
-.roi-rows .optics input { background: var(--panel); }
+.roi-rows .optics { background: var(--bg-deep); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px; margin: 2px 0 8px; }
+.roi-rows .optics-title { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+.roi-rows .optics-grid { display: grid; grid-template-columns: max-content 1fr max-content; gap: 8px 10px; align-items: center; }
+.roi-rows .optics-grid label { font-size: 12px; color: var(--fg); }
+.roi-rows .optics-grid input { background: var(--panel); width: 100%; box-sizing: border-box; padding: 3px 6px; }
+.roi-rows .optics-grid .optics-unit { font-family: var(--font-mono); font-size: 12px; color: var(--muted); min-width: 24px; }
+.roi-rows .optics-foot { font-size: 11px; color: var(--muted); margin-top: 8px; }
 
 
 /* ---- Vertical colour scale beside the image --------------------------------------- */
