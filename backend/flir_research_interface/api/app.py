@@ -516,6 +516,13 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
+    @app.get("/api/profile/suggest")
+    def profile_suggest(q: str = "") -> dict[str, Any]:
+        """Offline profile builder: fields + marks suggested for a free-text description."""
+        from flir_research_interface.analysis.profile_library import suggest
+
+        return suggest(q[:500])
+
     @app.get("/api/profile")
     def get_profile() -> dict[str, Any]:
         from flir_research_interface.analysis.profile import load_profile

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, DEFAULT_PROFILE, type Profile, type ProfileField } from "../lib/api.ts";
+import { api, DEFAULT_PROFILE, type Profile, type ProfileField, type ProfileSuggestion } from "../lib/api.ts";
 
 const KEY_RE = /^[a-z][a-z0-9_]{0,39}$/;
 const slug = (label: string) => label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").replace(/^[^a-z]/, "f$&").slice(0, 40);
@@ -11,6 +11,17 @@ export function ProfileEditor() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => { api.profile().then(setP).catch((e) => setErr(String(e))); }, []);
+  const [desc, setDesc] = useState("");
+  const [sug, setSug] = useState<ProfileSuggestion | null>(null);
+  useEffect(() => {
+    if (!desc.trim()) { setSug(null); return; }
+    const id = setTimeout(() => { api.profileSuggest(desc).then(setSug).catch(() => setSug(null)); }, 250);
+    return () => clearTimeout(id);
+  }, [desc]);
+  const hasField = (key: string) => p.fields.some((f) => f.key === key);
+  const hasMark = (label: string) => p.marks.some((m) => m.label === label);
+  const addField = (f: ProfileField) => { if (!hasField(f.key)) setP({ ...p, fields: [...p.fields, { key: f.key, label: f.label, type: f.type }] }); };
+  const addMark = (m: { label: string; key?: string }) => { if (!hasMark(m.label)) setP({ ...p, marks: [...p.marks, m.key ? { label: m.label, key: m.key } : { label: m.label }] }); };
   const setField = (i: number, patch: Partial<ProfileField>) => setP({ ...p, fields: p.fields.map((f, j) => (j === i ? { ...f, ...patch } : f)) });
   const setMark = (i: number, patch: { label?: string; key?: string }) => setP({ ...p, marks: p.marks.map((m, j) => (j === i ? { ...m, ...patch } : m)) });
   async function save() {
@@ -26,6 +37,30 @@ export function ProfileEditor() {
       <div className="muted" style={{ marginBottom: 8 }}>The tool assumes nothing about your experiment. This profile decides which metadata fields the record panel asks for and which mark buttons (with hotkeys) appear while recording. Recordings stamp the profile name; the data format does not depend on it.</div>
       <div className="kv">
         <span>profile name</span><span className="v plain"><input type="text" value={p.name} maxLength={60} style={{ width: 220 }} aria-label="profile name" onChange={(e) => setP({ ...p, name: e.target.value })} /></span>
+      </div>
+      <div className="card" style={{ marginTop: 12, background: "var(--bg-deep)" }}>
+        <div className="hint"><b>Profile builder</b> — describe the experiment in a few words (material, process, what heats it) and pick from the suggested fields and marks. Works offline from a built-in library; you can also skip this and add fields by hand below.</div>
+        <input type="text" value={desc} placeholder="e.g. nylon PA12 powder heated by RF at 13.56 MHz" style={{ width: "100%", marginTop: 6 }} aria-label="describe the experiment" onChange={(e) => setDesc(e.target.value)} />
+        {sug && desc.trim() && (
+          <div style={{ marginTop: 8 }}>
+            <div className="hint">{sug.matches.length ? <>recognised: {sug.matches.map((m) => <span key={m.id} className="badge ok" style={{ marginRight: 6 }} title={`matched: ${m.hits.join(", ")}`}>{m.title}</span>)}</> : "no specific application recognised — showing the general fields; try naming the material or the heat source"}</div>
+            <div className="hint" style={{ marginTop: 6 }}><b>Suggested fields</b> (click to add; greyed = already in the profile)</div>
+            <div className="row" style={{ marginTop: 4 }}>
+              {sug.fields.map((f) => (
+                <button key={f.key} className="secondary" disabled={hasField(f.key)} onClick={() => addField(f)} title={`${f.why} · from: ${f.source}`}>{f.label}</button>
+              ))}
+              <button className="primary" onClick={() => setP({ ...p, fields: [...p.fields, ...sug.fields.filter((f) => !hasField(f.key)).map((f) => ({ key: f.key, label: f.label, type: f.type }))] })}>add all</button>
+            </div>
+            {sug.marks.length > 0 && (
+              <>
+                <div className="hint" style={{ marginTop: 6 }}><b>Suggested marks</b></div>
+                <div className="row" style={{ marginTop: 4 }}>
+                  {sug.marks.map((m) => <button key={m.label} className="secondary" disabled={hasMark(m.label)} onClick={() => addMark(m)} title={`hotkey ${m.key ?? "none"} · from: ${m.source}`}>{m.label}{m.key ? <small className="muted"> {m.key}</small> : null}</button>)}
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
       <div className="hint" style={{ marginTop: 10 }}><b>Metadata fields</b> (label shown in the form · key stored in metadata.json · type)</div>
       {p.fields.map((f, i) => (

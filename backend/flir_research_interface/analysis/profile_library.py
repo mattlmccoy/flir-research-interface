@@ -1,0 +1,793 @@
+"""Profile builder library: applications and materials → suggested metadata fields and marks.
+
+Fully offline. ``suggest(text)`` matches keywords in a free-text description against the
+entries below and merges their fields (first proposer wins on duplicate keys). The general
+entry is always included. Entries are deliberately conservative: fields a thermographer would
+want on record to interpret the run later, not a full LIMS.
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Any
+
+F = dict  # shorthand for field dicts
+
+
+def _f(key: str, label: str, type_: str, why: str) -> dict[str, str]:
+    return {"key": key, "label": label, "type": type_, "why": why}
+
+
+GENERAL: dict[str, Any] = {
+    "id": "general",
+    "title": "Every thermal recording",
+    "keywords": [],
+    "fields": [
+        _f("operator", "Operator", "text", "who ran it"),
+        _f("sample_id", "Sample ID", "text", "ties the run to the physical sample / notebook"),
+        _f(
+            "ambient_temp_c", "Ambient temperature (°C)", "number", "reflected-temperature baseline"
+        ),
+        _f("relative_humidity_pct", "Relative humidity (%)", "number", "atmospheric correction"),
+        _f(
+            "camera_distance_m",
+            "Camera distance (m)",
+            "number",
+            "atmospheric correction and pixel size",
+        ),
+        _f(
+            "emissivity_basis",
+            "Emissivity basis",
+            "text",
+            "where the emissivity value came from (table, tape, coating)",
+        ),
+        _f("notes", "Notes", "text", "anything unusual"),
+    ],
+    "marks": [{"label": "event A", "key": "a"}, {"label": "event B", "key": "b"}],
+}
+
+LIBRARY: list[dict[str, Any]] = [
+    # ---- materials --------------------------------------------------------------------
+    {
+        "id": "metal",
+        "title": "Metals and alloys",
+        "keywords": [
+            "metal",
+            "steel",
+            "stainless",
+            "aluminium",
+            "aluminum",
+            "copper",
+            "brass",
+            "titanium",
+            "alloy",
+            "iron",
+            "nickel",
+            "inconel",
+            "tungsten",
+            "plate",
+            "sheet",
+            "bar",
+        ],
+        "fields": [
+            _f(
+                "alloy",
+                "Alloy / grade",
+                "text",
+                "e.g. 316L, 6061-T6; emissivity and conductivity depend on it",
+            ),
+            _f(
+                "surface_finish",
+                "Surface finish",
+                "text",
+                "polished / machined / oxidised / painted: dominates emissivity",
+            ),
+            _f("emissivity_coating", "Emissivity coating", "text", "black paint, tape, none"),
+            _f("thickness_mm", "Thickness (mm)", "number", "thermal mass and through-heating time"),
+            _f("mass_g", "Mass (g)", "number", "energy balance"),
+        ],
+        "marks": [],
+    },
+    {
+        "id": "polymer",
+        "title": "Polymers (nylon/PA12, PEEK, ABS, PLA, PC…)",
+        "keywords": [
+            "polymer",
+            "plastic",
+            "nylon",
+            "pa12",
+            "pa11",
+            "pa6",
+            "peek",
+            "abs",
+            "pla",
+            "polycarbonate",
+            "pc",
+            "polypropylene",
+            "pp",
+            "polyethylene",
+            "pe",
+            "tpu",
+            "thermoplastic",
+            "filament",
+        ],
+        "fields": [
+            _f("polymer_grade", "Polymer grade", "text", "supplier grade, e.g. PA2200"),
+            _f("filler", "Filler / additive", "text", "glass, carbon, graphite, none"),
+            _f(
+                "filler_fraction_wt_pct",
+                "Filler fraction (wt%)",
+                "number",
+                "dielectric and thermal properties",
+            ),
+            _f(
+                "moisture_conditioning",
+                "Moisture conditioning",
+                "text",
+                "dry-as-moulded / conditioned / unknown",
+            ),
+            _f("thickness_mm", "Thickness (mm)", "number", "through-heating time"),
+        ],
+        "marks": [],
+    },
+    {
+        "id": "resin",
+        "title": "Resins, epoxies, silicones",
+        "keywords": [
+            "resin",
+            "epoxy",
+            "silicone",
+            "urethane",
+            "polyurethane",
+            "pdms",
+            "acrylic",
+            "photopolymer",
+            "adhesive",
+            "potting",
+            "gel",
+        ],
+        "fields": [
+            _f(
+                "resin_system",
+                "Resin system",
+                "text",
+                "product / part numbers of resin and hardener",
+            ),
+            _f("mix_ratio", "Mix ratio", "text", "by weight or volume"),
+            _f("catalyst_pct", "Catalyst / hardener (%)", "number", "exotherm and cure rate"),
+            _f("pot_life_min", "Pot life (min)", "number", "when the exotherm is expected"),
+            _f(
+                "cast_thickness_mm",
+                "Cast thickness (mm)",
+                "number",
+                "exotherm peak scales with thickness",
+            ),
+            _f("mould_material", "Mould material", "text", "heat sink behaviour"),
+        ],
+        "marks": [{"label": "mixed", "key": "m"}, {"label": "poured", "key": "p"}],
+    },
+    {
+        "id": "powder",
+        "title": "Powders and powder beds",
+        "keywords": [
+            "powder",
+            "powdered",
+            "bed",
+            "granule",
+            "granular",
+            "particle",
+            "sls",
+            "binder jet",
+            "mps",
+            "sintering powder",
+        ],
+        "fields": [
+            _f(
+                "particle_size_d50_um",
+                "Particle size D50 (µm)",
+                "number",
+                "packing, absorption, thermal contact",
+            ),
+            _f("bed_depth_mm", "Bed depth (mm)", "number", "heat capacity of the bed"),
+            _f("packing_density_pct", "Packing density (%)", "number", "effective conductivity"),
+            _f("powder_lot", "Powder lot / supplier", "text", "reuse and batch effects"),
+            _f(
+                "recycled_fraction_pct",
+                "Recycled fraction (%)",
+                "number",
+                "aged powder behaves differently",
+            ),
+        ],
+        "marks": [],
+    },
+    {
+        "id": "ceramic",
+        "title": "Ceramics and glass",
+        "keywords": [
+            "ceramic",
+            "glass",
+            "alumina",
+            "zirconia",
+            "silica",
+            "quartz",
+            "porcelain",
+            "brick",
+            "refractory",
+        ],
+        "fields": [
+            _f("ceramic_type", "Ceramic / glass type", "text", "composition"),
+            _f(
+                "thickness_mm",
+                "Thickness (mm)",
+                "number",
+                "glass is semi-transparent in LWIR only when thin",
+            ),
+            _f("surface_finish", "Surface finish", "text", "glazed / matte"),
+        ],
+        "marks": [],
+    },
+    {
+        "id": "composite",
+        "title": "Composites (CFRP, GFRP)",
+        "keywords": [
+            "composite",
+            "cfrp",
+            "gfrp",
+            "carbon fibre",
+            "carbon fiber",
+            "fibre",
+            "fiber",
+            "laminate",
+            "prepreg",
+            "ply",
+        ],
+        "fields": [
+            _f("layup", "Layup", "text", "e.g. [0/90]2s"),
+            _f("fibre_type", "Fibre type", "text", "carbon / glass / aramid"),
+            _f("matrix", "Matrix", "text", "epoxy, PEEK…"),
+            _f("ply_count", "Ply count", "number", "thickness and through-thickness conduction"),
+        ],
+        "marks": [],
+    },
+    {
+        "id": "liquid",
+        "title": "Liquids and coolants",
+        "keywords": ["liquid", "water", "coolant", "oil", "fluid", "bath", "flow", "pipe", "tank"],
+        "fields": [
+            _f("fluid", "Fluid", "text", "water / oil / mixture"),
+            _f("flow_rate_l_min", "Flow rate (L/min)", "number", "convective heat removal"),
+            _f("fluid_inlet_temp_c", "Inlet temperature (°C)", "number", "boundary condition"),
+        ],
+        "marks": [{"label": "flow on", "key": "o"}, {"label": "flow off", "key": "x"}],
+    },
+    {
+        "id": "biological",
+        "title": "Biological / skin / plants",
+        "keywords": [
+            "skin",
+            "human",
+            "subject",
+            "animal",
+            "plant",
+            "leaf",
+            "tissue",
+            "medical",
+            "physiolog",
+            "biolog",
+            "hand",
+            "face",
+        ],
+        "fields": [
+            _f("subject_id", "Subject ID (anonymised)", "text", "never a name"),
+            _f("protocol_id", "Protocol / IRB", "text", "approval reference"),
+            _f(
+                "acclimatisation_min",
+                "Acclimatisation (min)",
+                "number",
+                "skin temperature settles slowly",
+            ),
+            _f("room_temp_c", "Room temperature (°C)", "number", "physiological baseline"),
+        ],
+        "marks": [{"label": "stimulus on", "key": "s"}, {"label": "stimulus off", "key": "d"}],
+    },
+    # ---- processes --------------------------------------------------------------------
+    {
+        "id": "rf_dielectric",
+        "title": "RF / dielectric / microwave heating",
+        "keywords": [
+            "rf",
+            "radio frequency",
+            "dielectric",
+            "13.56",
+            "27.12",
+            "microwave",
+            "2.45",
+            "electrode",
+            "applicator",
+            "capacitive",
+            "plasma",
+        ],
+        "fields": [
+            _f(
+                "rf_frequency_mhz",
+                "RF frequency (MHz)",
+                "number",
+                "dielectric loss is frequency dependent",
+            ),
+            _f("rf_forward_power_w", "RF forward power (W)", "number", "input energy"),
+            _f("rf_reflected_power_w", "RF reflected power (W)", "number", "matching quality"),
+            _f("electrode_gap_mm", "Electrode gap (mm)", "number", "field strength"),
+            _f("matching_network", "Matching network setting", "text", "series / shunt values"),
+            _f("exposure_s", "Planned exposure (s)", "number", "dose"),
+        ],
+        "marks": [{"label": "RF ON", "key": "r"}, {"label": "RF OFF", "key": "f"}],
+    },
+    {
+        "id": "induction",
+        "title": "Induction heating",
+        "keywords": ["induction", "coil", "eddy", "inductive"],
+        "fields": [
+            _f("induction_frequency_khz", "Induction frequency (kHz)", "number", "skin depth"),
+            _f("coil_current_a", "Coil current (A)", "number", "field strength"),
+            _f("coil_power_kw", "Coil power (kW)", "number", "input energy"),
+            _f("coil_geometry", "Coil geometry", "text", "turns, diameter, standoff"),
+            _f("workpiece_standoff_mm", "Standoff (mm)", "number", "coupling"),
+        ],
+        "marks": [{"label": "coil on", "key": "r"}, {"label": "coil off", "key": "f"}],
+    },
+    {
+        "id": "laser",
+        "title": "Laser processing",
+        "keywords": [
+            "laser",
+            "beam",
+            "wavelength",
+            "spot size",
+            "scan speed",
+            "irradiat",
+            "led",
+            "lamp",
+            "flash",
+        ],
+        "fields": [
+            _f("laser_wavelength_nm", "Wavelength (nm)", "number", "absorption"),
+            _f("laser_power_w", "Laser power (W)", "number", "input"),
+            _f("spot_diameter_mm", "Spot diameter (mm)", "number", "irradiance"),
+            _f("scan_speed_mm_s", "Scan speed (mm/s)", "number", "dwell time"),
+            _f("duty_cycle_pct", "Duty cycle (%)", "number", "pulsed sources"),
+        ],
+        "marks": [{"label": "laser on", "key": "l"}, {"label": "laser off", "key": "f"}],
+    },
+    {
+        "id": "additive",
+        "title": "Additive manufacturing (SLS, FDM, DED, LPBF)",
+        "keywords": [
+            "3d print",
+            "3d-print",
+            "additive",
+            "am",
+            "sls",
+            "fdm",
+            "fff",
+            "lpbf",
+            "slm",
+            "ded",
+            "print",
+            "printer",
+            "layer",
+            "hatch",
+            "nozzle",
+            "extruder",
+        ],
+        "fields": [
+            _f("process", "Process", "text", "SLS / FDM / LPBF / DED"),
+            _f("layer_thickness_um", "Layer thickness (µm)", "number", "per-layer energy"),
+            _f("scan_speed_mm_s", "Scan / print speed (mm/s)", "number", "dwell"),
+            _f(
+                "energy_source_power_w",
+                "Energy source power (W)",
+                "number",
+                "laser / nozzle heater",
+            ),
+            _f("hatch_spacing_mm", "Hatch spacing (mm)", "number", "overlap"),
+            _f("bed_temp_c", "Bed / chamber temperature (°C)", "number", "preheat"),
+            _f("part_id", "Part / build ID", "text", "traceability"),
+        ],
+        "marks": [{"label": "layer start", "key": "l"}, {"label": "recoat", "key": "c"}],
+    },
+    {
+        "id": "curing",
+        "title": "Curing and exotherms",
+        "keywords": ["cure", "curing", "cured", "exotherm", "gel", "post-cure", "oven", "uv cure"],
+        "fields": [
+            _f("cure_schedule", "Cure schedule", "text", "temperature / time profile"),
+            _f("cure_temp_c", "Cure temperature (°C)", "number", "setpoint"),
+            _f("uv_intensity_mw_cm2", "UV intensity (mW/cm²)", "number", "for UV cures"),
+        ],
+        "marks": [{"label": "cure start", "key": "c"}, {"label": "gel", "key": "g"}],
+    },
+    {
+        "id": "welding",
+        "title": "Welding and brazing",
+        "keywords": [
+            "weld",
+            "welding",
+            "braze",
+            "brazing",
+            "solder",
+            "soldering",
+            "arc",
+            "tig",
+            "mig",
+            "friction stir",
+        ],
+        "fields": [
+            _f("weld_process", "Process", "text", "TIG / MIG / FSW / laser"),
+            _f("weld_current_a", "Current (A)", "number", "heat input"),
+            _f("weld_voltage_v", "Voltage (V)", "number", "heat input"),
+            _f("travel_speed_mm_s", "Travel speed (mm/s)", "number", "heat input per length"),
+            _f("filler_material", "Filler material", "text", "composition"),
+        ],
+        "marks": [{"label": "arc on", "key": "r"}, {"label": "arc off", "key": "f"}],
+    },
+    {
+        "id": "quench",
+        "title": "Cooling, quenching, heat treatment",
+        "keywords": [
+            "quench",
+            "cooling",
+            "cool",
+            "heat treat",
+            "anneal",
+            "temper",
+            "furnace",
+            "kiln",
+            "oven",
+        ],
+        "fields": [
+            _f("start_temp_c", "Start temperature (°C)", "number", "initial condition"),
+            _f("quench_medium", "Quench / cooling medium", "text", "air, water, oil, fan"),
+            _f("hold_time_min", "Hold time (min)", "number", "soak"),
+        ],
+        "marks": [{"label": "removed from heat", "key": "q"}],
+    },
+    {
+        "id": "electronics",
+        "title": "Electronics and PCBs",
+        "keywords": [
+            "pcb",
+            "board",
+            "circuit",
+            "electronic",
+            "chip",
+            "ic",
+            "resistor",
+            "mosfet",
+            "transistor",
+            "led driver",
+            "power supply",
+            "heatsink",
+            "heat sink",
+        ],
+        "fields": [
+            _f("supply_voltage_v", "Supply voltage (V)", "number", "dissipation"),
+            _f("supply_current_a", "Supply current (A)", "number", "dissipation"),
+            _f("load_condition", "Load condition", "text", "idle / full / duty cycle"),
+            _f("board_revision", "Board revision", "text", "traceability"),
+            _f("conformal_coating", "Conformal coating", "text", "changes emissivity"),
+        ],
+        "marks": [{"label": "power on", "key": "r"}, {"label": "power off", "key": "f"}],
+    },
+    {
+        "id": "battery",
+        "title": "Batteries and cells",
+        "keywords": [
+            "battery",
+            "cell",
+            "lithium",
+            "li-ion",
+            "pouch",
+            "cylindrical",
+            "pack",
+            "charge",
+            "discharge",
+            "c-rate",
+        ],
+        "fields": [
+            _f("cell_type", "Cell type", "text", "chemistry and format"),
+            _f("c_rate", "C-rate", "number", "heat generation"),
+            _f("state_of_charge_pct", "State of charge (%)", "number", "initial condition"),
+            _f("cycle_number", "Cycle number", "number", "ageing"),
+        ],
+        "marks": [
+            {"label": "charge start", "key": "c"},
+            {"label": "discharge start", "key": "d"},
+            {"label": "rest", "key": "x"},
+        ],
+    },
+    {
+        "id": "motor",
+        "title": "Motors, bearings, rotating machinery",
+        "keywords": [
+            "motor",
+            "bearing",
+            "gearbox",
+            "spindle",
+            "rotat",
+            "rpm",
+            "shaft",
+            "pump",
+            "fan",
+        ],
+        "fields": [
+            _f("speed_rpm", "Speed (rpm)", "number", "load"),
+            _f("load_torque_nm", "Load torque (N·m)", "number", "dissipation"),
+            _f("lubricant", "Lubricant", "text", "friction"),
+            _f(
+                "run_time_before_min",
+                "Run time before recording (min)",
+                "number",
+                "thermal steady state",
+            ),
+        ],
+        "marks": [{"label": "start", "key": "s"}, {"label": "stop", "key": "x"}],
+    },
+    {
+        "id": "building",
+        "title": "Buildings, HVAC, insulation",
+        "keywords": [
+            "building",
+            "wall",
+            "roof",
+            "window",
+            "insulation",
+            "hvac",
+            "duct",
+            "envelope",
+            "thermal bridge",
+            "house",
+        ],
+        "fields": [
+            _f("outdoor_temp_c", "Outdoor temperature (°C)", "number", "ΔT across the envelope"),
+            _f("indoor_temp_c", "Indoor temperature (°C)", "number", "ΔT across the envelope"),
+            _f("wind_speed_m_s", "Wind speed (m/s)", "number", "convection"),
+            _f("sky_condition", "Sky condition", "text", "clear sky lowers reflected temperature"),
+            _f("orientation", "Wall orientation", "text", "solar loading"),
+        ],
+        "marks": [],
+    },
+    {
+        "id": "solar",
+        "title": "Solar panels / PV",
+        "keywords": ["solar", "pv", "photovoltaic", "module", "panel", "irradiance", "hotspot"],
+        "fields": [
+            _f("irradiance_w_m2", "Irradiance (W/m²)", "number", "operating point"),
+            _f("module_type", "Module type", "text", "mono / poly / thin film"),
+            _f("string_current_a", "String current (A)", "number", "hot-spot power"),
+            _f("tilt_deg", "Tilt (°)", "number", "reflection geometry"),
+        ],
+        "marks": [],
+    },
+    {
+        "id": "friction",
+        "title": "Friction, wear, braking",
+        "keywords": [
+            "friction",
+            "wear",
+            "brake",
+            "braking",
+            "tribolog",
+            "pad",
+            "disc",
+            "sliding",
+            "rub",
+        ],
+        "fields": [
+            _f("normal_load_n", "Normal load (N)", "number", "frictional power"),
+            _f("sliding_speed_m_s", "Sliding speed (m/s)", "number", "frictional power"),
+            _f("counterface", "Counterface material", "text", "pair"),
+        ],
+        "marks": [{"label": "contact", "key": "c"}, {"label": "release", "key": "x"}],
+    },
+    {
+        "id": "fluid_jet",
+        "title": "Sprays, jets, nozzles",
+        "keywords": ["spray", "jet", "nozzle", "impinge", "impingement", "mist", "coolant jet"],
+        "fields": [
+            _f("nozzle_diameter_mm", "Nozzle diameter (mm)", "number", "jet momentum"),
+            _f("supply_pressure_bar", "Supply pressure (bar)", "number", "flow"),
+            _f("standoff_mm", "Standoff (mm)", "number", "impingement heat transfer"),
+        ],
+        "marks": [{"label": "jet on", "key": "j"}, {"label": "jet off", "key": "x"}],
+    },
+    {
+        "id": "calibration",
+        "title": "Calibration / blackbody / validation",
+        "keywords": [
+            "blackbody",
+            "black body",
+            "calibrat",
+            "reference source",
+            "validation",
+            "thermocouple",
+            "rtd",
+            "compare",
+        ],
+        "fields": [
+            _f("reference_source", "Reference source", "text", "blackbody model / thermocouple ID"),
+            _f("reference_setpoint_c", "Reference setpoint (°C)", "number", "truth value"),
+            _f("reference_reading_c", "Reference reading (°C)", "number", "as measured"),
+            _f("reference_emissivity", "Reference emissivity", "number", "of the source"),
+        ],
+        "marks": [{"label": "stable", "key": "s"}],
+    },
+    {
+        "id": "textile",
+        "title": "Textiles, paper, wood",
+        "keywords": [
+            "textile",
+            "fabric",
+            "cloth",
+            "paper",
+            "cardboard",
+            "wood",
+            "timber",
+            "leather",
+            "foam",
+        ],
+        "fields": [
+            _f("material_spec", "Material specification", "text", "weave / grammage / species"),
+            _f("moisture_content_pct", "Moisture content (%)", "number", "evaporative cooling"),
+            _f("thickness_mm", "Thickness (mm)", "number", "conduction"),
+        ],
+        "marks": [],
+    },
+    {
+        "id": "food",
+        "title": "Food and agriculture",
+        "keywords": [
+            "food",
+            "cook",
+            "bak",
+            "fruit",
+            "vegetable",
+            "meat",
+            "grain",
+            "crop",
+            "soil",
+            "greenhouse",
+        ],
+        "fields": [
+            _f("product", "Product", "text", "what is being heated / cooled"),
+            _f(
+                "initial_core_temp_c",
+                "Initial core temperature (°C)",
+                "number",
+                "starting condition",
+            ),
+            _f("water_activity", "Water activity / moisture", "text", "evaporation"),
+        ],
+        "marks": [{"label": "in", "key": "i"}, {"label": "out", "key": "o"}],
+    },
+    {
+        "id": "chemistry",
+        "title": "Chemical reactions and reactors",
+        "keywords": [
+            "reaction",
+            "reactor",
+            "catalyst",
+            "exothermic",
+            "endothermic",
+            "vessel",
+            "beaker",
+            "flask",
+            "stir",
+        ],
+        "fields": [
+            _f("reagents", "Reagents", "text", "what was mixed"),
+            _f("concentration", "Concentration", "text", "mol/L or wt%"),
+            _f("stir_speed_rpm", "Stir speed (rpm)", "number", "mixing"),
+            _f("vessel_material", "Vessel material", "text", "emissivity / conduction"),
+        ],
+        "marks": [{"label": "reagent added", "key": "a"}],
+    },
+    {
+        "id": "mechanical_test",
+        "title": "Mechanical testing (tensile, fatigue, impact)",
+        "keywords": [
+            "tensile",
+            "fatigue",
+            "impact",
+            "strain",
+            "stress",
+            "load frame",
+            "instron",
+            "mts",
+            "specimen",
+            "crack",
+        ],
+        "fields": [
+            _f("specimen_geometry", "Specimen geometry", "text", "standard / dimensions"),
+            _f("strain_rate", "Strain rate (1/s)", "number", "adiabatic heating"),
+            _f("load_amplitude_kn", "Load amplitude (kN)", "number", "fatigue heating"),
+            _f("cycle_frequency_hz", "Cycle frequency (Hz)", "number", "fatigue heating"),
+        ],
+        "marks": [{"label": "load start", "key": "s"}, {"label": "fracture", "key": "x"}],
+    },
+    {
+        "id": "environmental",
+        "title": "Outdoor / environmental / wildlife",
+        "keywords": [
+            "outdoor",
+            "field",
+            "wildlife",
+            "animal",
+            "drone",
+            "uav",
+            "vegetation",
+            "water body",
+            "lake",
+            "river",
+            "weather",
+        ],
+        "fields": [
+            _f("location", "Location", "text", "site"),
+            _f("air_temp_c", "Air temperature (°C)", "number", "baseline"),
+            _f("wind_speed_m_s", "Wind speed (m/s)", "number", "convection"),
+            _f("sky_condition", "Sky condition", "text", "reflected temperature"),
+            _f("time_of_day", "Time of day", "text", "solar loading"),
+        ],
+        "marks": [],
+    },
+]
+
+_WORD = re.compile(r"[a-z0-9.]+")
+
+
+def _tokens(text: str) -> list[str]:
+    return _WORD.findall(text.lower())
+
+
+def _hits(entry: dict[str, Any], text: str, tokens: list[str]) -> list[str]:
+    hits = []
+    for kw in entry["keywords"]:
+        k = kw.lower()
+        if " " in k or "." in k or len(k) <= 2:
+            if k in text or (len(k) <= 2 and k in tokens):
+                hits.append(kw)
+        elif any(t.startswith(k) for t in tokens):
+            hits.append(kw)
+    return hits
+
+
+def suggest(text: str) -> dict[str, Any]:
+    """Match a description against the library; merged fields (general first) and marks."""
+    low = text.lower()
+    tokens = _tokens(low)
+    matches: list[dict[str, Any]] = []
+    for e in LIBRARY:
+        hits = _hits(e, low, tokens) if tokens else []
+        if hits:
+            matches.append({"id": e["id"], "title": e["title"], "hits": sorted(set(hits))})
+    matches.sort(key=lambda m: -len(m["hits"]))
+    fields: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    marks: list[dict[str, Any]] = []
+    seen_marks: set[str] = set()
+    for src in [GENERAL] + [e for e in LIBRARY if any(m["id"] == e["id"] for m in matches)]:
+        for f in src["fields"]:
+            if f["key"] in seen:
+                continue
+            seen.add(f["key"])
+            fields.append({**f, "source": src["id"]})
+        for m in src["marks"]:
+            if m["label"] in seen_marks:
+                continue
+            seen_marks.add(m["label"])
+            marks.append({**m, "source": src["id"]})
+    if len(matches) > 0:  # general marks are placeholders; drop them when a real process matched
+        marks = [m for m in marks if m["source"] != "general"] or marks
+    return {"matches": matches, "fields": fields, "marks": marks}
+
+
+__all__ = ["GENERAL", "LIBRARY", "suggest"]
