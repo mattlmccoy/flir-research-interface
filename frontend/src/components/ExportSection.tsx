@@ -1,3 +1,4 @@
+import { NumberField } from "./NumberField.tsx";
 import { useState } from "react";
 import { api, type Hdf5Export, type ThermalVideoExport } from "../lib/api.ts";
 import type { Roi } from "../lib/roi.ts";
@@ -65,11 +66,11 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
         </span>
         <span>frame range</span>
         <span className="v plain" style={{ textAlign: "right", display: "flex", gap: 4, justifyContent: "flex-end", alignItems: "center", flexWrap: "wrap" }} title="Export frames start..stop (half-open, 0-based) every step-th frame as a zip of per-frame files, or as one multi-page float TIFF stack">
-          <input type="number" min={0} max={Math.max(0, nFrames - 1)} value={rng.start} style={{ width: 60 }} aria-label="range start" onChange={(e) => setRng({ ...rng, start: Number(e.target.value) })} />
+          <NumberField min={0} max={Math.max(0, nFrames - 1)} value={rng.start} style={{ width: 60 }} aria-label="range start" onChange={(n) => setRng({ ...rng, start: n })} />
           <span className="hint">to</span>
-          <input type="number" min={1} max={nFrames} value={rng.stop} style={{ width: 60 }} aria-label="range stop" onChange={(e) => setRng({ ...rng, stop: Number(e.target.value) })} />
+          <NumberField min={1} max={nFrames} value={rng.stop} style={{ width: 60 }} aria-label="range stop" onChange={(n) => setRng({ ...rng, stop: n })} />
           <span className="hint">every</span>
-          <input type="number" min={1} value={rng.step} style={{ width: 48 }} aria-label="range step" onChange={(e) => setRng({ ...rng, step: Number(e.target.value) })} />
+          <NumberField min={1} value={rng.step} style={{ width: 48 }} aria-label="range step" onChange={(n) => setRng({ ...rng, step: n })} />
           <select value={rng.format} aria-label="range format" onChange={(e) => setRng({ ...rng, format: e.target.value })}>
             <option value="csv">CSV zip</option><option value="tiff">TIFF zip</option><option value="tiff-stack">TIFF stack</option><option value="png">PNG zip</option><option value="npy">NPY zip</option>
           </select>

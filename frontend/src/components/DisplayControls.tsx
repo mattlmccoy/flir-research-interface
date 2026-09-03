@@ -1,3 +1,4 @@
+import { NumberField } from "./NumberField.tsx";
 import { UNITS, UNIT_LABEL, type Conversion, type Units } from "../lib/units.ts";
 import type { FilterName } from "../lib/filters.ts";
 import type { Agc } from "../lib/layout.ts";
@@ -39,8 +40,8 @@ export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, 
       <select value={iso.mode} onChange={(e) => upd({ mode: e.target.value as Isotherm["mode"] })} aria-label="isotherm mode">
         <option value="off">off</option><option value="above">above</option><option value="below">below</option><option value="between">between</option>
       </select>
-      {iso.mode !== "off" && <input type="number" step={0.5} value={iso.lo} style={{ width: 64 }} aria-label={iso.mode === "between" ? "isotherm low limit °C" : "isotherm limit °C"} onChange={(e) => upd({ lo: Number(e.target.value) })} />}
-      {iso.mode === "between" && <input type="number" step={0.5} value={iso.hi} style={{ width: 64 }} aria-label="isotherm high limit °C" onChange={(e) => upd({ hi: Number(e.target.value) })} />}
+      {iso.mode !== "off" && <NumberField step={0.5} value={iso.lo} style={{ width: 64 }} aria-label={iso.mode === "between" ? "isotherm low limit °C" : "isotherm limit °C"} onChange={(n) => upd({ lo: n })} />}
+      {iso.mode === "between" && <NumberField step={0.5} value={iso.hi} style={{ width: 64 }} aria-label="isotherm high limit °C" onChange={(n) => upd({ hi: n })} />}
       {iso.mode !== "off" && <span className="hint">°C</span>}
       {iso.mode !== "off" && <input type="color" value={iso.color} aria-label="isotherm colour" onChange={(e) => upd({ color: e.target.value })} />}
     </div>
@@ -96,9 +97,9 @@ export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, 
       {setSegment && segment && (
         <div className="row" aria-label="segmentation" title="Only pixels within this temperature range count in ROI statistics (ResearchIR segmentation); excluded pixels are reported per ROI. Recording and exports are unaffected.">
           <label className="hint"><input type="checkbox" checked={segment.on} onChange={(e) => setSegment({ ...segment, on: e.target.checked })} /> stats only within</label>
-          <input type="number" step={0.5} value={segment.min} style={{ width: 64 }} aria-label="segmentation min °C" disabled={!segment.on} onChange={(e) => setSegment({ ...segment, min: Number(e.target.value) })} />
+          <NumberField step={0.5} value={segment.min} style={{ width: 64 }} aria-label="segmentation min °C" disabled={!segment.on} onChange={(n) => setSegment({ ...segment, min: n })} />
           <span className="hint">to</span>
-          <input type="number" step={0.5} value={segment.max} style={{ width: 64 }} aria-label="segmentation max °C" disabled={!segment.on} onChange={(e) => setSegment({ ...segment, max: Number(e.target.value) })} />
+          <NumberField step={0.5} value={segment.max} style={{ width: 64 }} aria-label="segmentation max °C" disabled={!segment.on} onChange={(n) => setSegment({ ...segment, max: n })} />
           <span className="hint">°C</span>
         </div>
       )}
@@ -119,10 +120,10 @@ export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, 
       </div>
       <div className="hint">{PALETTE_NOTES[palette]}</div>
       <div className="row">
-        <label>min <input type="number" step={0.5} aria-label="range minimum °C" value={scaleMode === "manual" ? manual.min : Math.round(shown.min * 10) / 10}
-          onChange={(e) => { const base = scaleMode === "manual" ? manual : { min: shown.min, max: Math.round(shown.max * 10) / 10 }; setManual({ ...base, min: Number(e.target.value) }); setScaleMode("manual"); }} /> °C</label>
-        <label>max <input type="number" step={0.5} aria-label="range maximum °C" value={scaleMode === "manual" ? manual.max : Math.round(shown.max * 10) / 10}
-          onChange={(e) => { const base = scaleMode === "manual" ? manual : { min: Math.round(shown.min * 10) / 10, max: shown.max }; setManual({ ...base, max: Number(e.target.value) }); setScaleMode("manual"); }} /> °C</label>
+        <label>min <NumberField step={0.5} aria-label="range minimum °C" value={scaleMode === "manual" ? manual.min : Math.round(shown.min * 10) / 10}
+          onChange={(n) => { const base = scaleMode === "manual" ? manual : { min: shown.min, max: Math.round(shown.max * 10) / 10 }; setManual({ ...base, min: n }); setScaleMode("manual"); }} /> °C</label>
+        <label>max <NumberField step={0.5} aria-label="range maximum °C" value={scaleMode === "manual" ? manual.max : Math.round(shown.max * 10) / 10}
+          onChange={(n) => { const base = scaleMode === "manual" ? manual : { min: Math.round(shown.min * 10) / 10, max: shown.max }; setManual({ ...base, max: n }); setScaleMode("manual"); }} /> °C</label>
       </div>
       <div className="hint">{scaleMode === "auto" ? "Auto: the range follows each frame's min and max. Type a limit to lock it." : "Locked: colours stay fixed at these limits; values outside clip. \"Auto range\" returns to per-frame scaling."}</div>
       <ColorBar palette={palette} range={shown} units={units} conv={conv} />

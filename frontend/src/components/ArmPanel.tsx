@@ -1,3 +1,4 @@
+import { NumberField } from "./NumberField.tsx";
 import { useState } from "react";
 import { DEFAULT_TRIGGER_FORM, triggerFromForm, triggerSummary, type TriggerForm } from "../lib/trigger.ts";
 import { roiLabel, type Roi } from "../lib/roi.ts";
@@ -8,7 +9,6 @@ interface Props {
   onArm: (trigger: unknown) => void; onDisarm: () => void; onStartNow: () => void;
 }
 
-const num = (v: string, d: number) => (v === "" || Number.isNaN(Number(v)) ? d : Number(v));
 
 /** Armed recording: pick a start and an end condition, arm, and let the trigger run the recording. */
 export function ArmPanel({ rois, armed, recording, disabled, busy, onArm, onDisarm, onStartNow }: Props) {
@@ -51,13 +51,13 @@ export function ArmPanel({ rois, armed, recording, disabled, busy, onArm, onDisa
             <select value={f.startKind} aria-label="start condition" onChange={(e) => upd({ startKind: e.target.value as TriggerForm["startKind"] })}>
               <option value="manual">manually</option><option value="after">after a delay</option><option value="threshold">on temperature</option>
             </select>
-            {f.startKind === "after" && <><input type="number" min={0} step={1} value={f.afterS} style={{ width: 60 }} aria-label="delay s" onChange={(e) => upd({ afterS: num(e.target.value, 0) })} /><span className="hint">s</span></>}
+            {f.startKind === "after" && <><NumberField min={0} step={1} value={f.afterS} style={{ width: 60 }} aria-label="delay s" onChange={(n) => upd({ afterS: n })} /><span className="hint">s</span></>}
             {f.startKind === "threshold" && <>
               {roiSel(f.roi, (roi) => upd({ roi }), "start ROI")}
               <select value={f.stat} aria-label="start statistic" onChange={(e) => upd({ stat: e.target.value as TriggerForm["stat"] })}><option value="max">max</option><option value="mean">mean</option><option value="min">min</option><option value="value">value</option></select>
               <select value={f.direction} aria-label="start direction" onChange={(e) => upd({ direction: e.target.value as TriggerForm["direction"] })}><option value="rising">rises above</option><option value="falling">falls below</option></select>
-              <input type="number" step={0.5} value={f.level} style={{ width: 64 }} aria-label="start level °C" onChange={(e) => upd({ level: num(e.target.value, 0) })} /><span className="hint">°C for</span>
-              <input type="number" min={1} step={1} value={f.sustain} style={{ width: 48 }} aria-label="sustain frames" onChange={(e) => upd({ sustain: Math.max(1, num(e.target.value, 3)) })} /><span className="hint">frames</span>
+              <NumberField step={0.5} value={f.level} style={{ width: 64 }} aria-label="start level °C" onChange={(n) => upd({ level: n })} /><span className="hint">°C for</span>
+              <NumberField min={1} step={1} value={f.sustain} style={{ width: 48 }} aria-label="sustain frames" onChange={(n) => upd({ sustain: Math.max(1, n) })} /><span className="hint">frames</span>
             </>}
           </span>
           <span>stop</span>
@@ -65,19 +65,19 @@ export function ArmPanel({ rois, armed, recording, disabled, busy, onArm, onDisa
             <select value={f.endKind} aria-label="end condition" onChange={(e) => upd({ endKind: e.target.value as TriggerForm["endKind"] })}>
               <option value="manual">manually</option><option value="duration">after a duration</option><option value="frames">after N frames</option><option value="threshold">on temperature</option>
             </select>
-            {f.endKind === "duration" && <><input type="number" min={1} step={1} value={f.seconds} style={{ width: 64 }} aria-label="duration s" onChange={(e) => upd({ seconds: num(e.target.value, 60) })} /><span className="hint">s</span></>}
-            {f.endKind === "frames" && <input type="number" min={1} step={1} value={f.frames} style={{ width: 72 }} aria-label="frames" onChange={(e) => upd({ frames: num(e.target.value, 300) })} />}
+            {f.endKind === "duration" && <><NumberField min={1} step={1} value={f.seconds} style={{ width: 64 }} aria-label="duration s" onChange={(n) => upd({ seconds: n })} /><span className="hint">s</span></>}
+            {f.endKind === "frames" && <NumberField min={1} step={1} value={f.frames} style={{ width: 72 }} aria-label="frames" onChange={(n) => upd({ frames: n })} />}
             {f.endKind === "threshold" && <>
               {roiSel(f.endRoi ?? f.roi, (endRoi) => upd({ endRoi }), "end ROI")}
               <select value={f.endStat} aria-label="end statistic" onChange={(e) => upd({ endStat: e.target.value as TriggerForm["stat"] })}><option value="max">max</option><option value="mean">mean</option><option value="min">min</option><option value="value">value</option></select>
               <select value={f.endDirection} aria-label="end direction" onChange={(e) => upd({ endDirection: e.target.value as TriggerForm["direction"] })}><option value="falling">falls below</option><option value="rising">rises above</option></select>
-              <input type="number" step={0.5} value={f.endLevel} style={{ width: 64 }} aria-label="end level °C" onChange={(e) => upd({ endLevel: num(e.target.value, 0) })} /><span className="hint">°C</span>
+              <NumberField step={0.5} value={f.endLevel} style={{ width: 64 }} aria-label="end level °C" onChange={(n) => upd({ endLevel: n })} /><span className="hint">°C</span>
             </>}
           </span>
           <span>pre-trigger</span>
-          <span className="v plain"><input type="number" min={0} max={10} step={0.5} value={f.pretrigger} style={{ width: 56 }} aria-label="pre-trigger seconds" onChange={(e) => upd({ pretrigger: num(e.target.value, 2) })} /> <span className="hint">s kept from before the start</span></span>
+          <span className="v plain"><NumberField min={0} max={10} step={0.5} value={f.pretrigger} style={{ width: 56 }} aria-label="pre-trigger seconds" onChange={(n) => upd({ pretrigger: n })} /> <span className="hint">s kept from before the start</span></span>
           <span>safety cap</span>
-          <span className="v plain"><input type="number" min={1} step={60} value={f.maxSeconds} style={{ width: 72 }} aria-label="max seconds" onChange={(e) => upd({ maxSeconds: Math.max(1, num(e.target.value, 1800)) })} /> <span className="hint">s, always stops</span></span>
+          <span className="v plain"><NumberField min={1} step={60} value={f.maxSeconds} style={{ width: 72 }} aria-label="max seconds" onChange={(n) => upd({ maxSeconds: Math.max(1, n) })} /> <span className="hint">s, always stops</span></span>
           <span className="hint" style={{ gridColumn: "1 / -1" }}>{triggerSummary(spec)}</span>
         </div>
       )}

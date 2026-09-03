@@ -352,7 +352,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
       {frame && barRange && (
         <VerticalColorBar palette={reference ? "diverging" : palette} range={barRange} units={units}
           conv={hdr && hdr.kelvin_per_count != null ? { kelvin_per_count: hdr.kelvin_per_count, kelvin_offset: hdr.kelvin_offset } : null}
-          scaleMode={scaleMode} manual={manual} setManual={reference ? undefined : setManual} setScaleMode={reference ? undefined : setScaleMode} />
+          scaleMode={scaleMode} manual={manual} setManual={reference ? undefined : setManual} setScaleMode={reference ? undefined : setScaleMode} box={box} />
       )}
       {!frame && <div className="readout">no frames</div>}
     </div>

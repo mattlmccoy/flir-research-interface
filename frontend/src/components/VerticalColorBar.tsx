@@ -1,3 +1,4 @@
+import { NumberField } from "./NumberField.tsx";
 import { useEffect, useRef } from "react";
 import { buildLut, type PaletteName } from "../lib/palette.ts";
 import { niceTicks } from "../lib/plot.ts";
@@ -9,11 +10,13 @@ interface Props {
   /** When provided, the bar's endpoints become editable and gain a lock toggle. */
   scaleMode?: ScaleMode; manual?: Range;
   setManual?: (r: Range) => void; setScaleMode?: (m: ScaleMode) => void;
+  /** The letterboxed image rectangle inside the view, so the bar matches the image height. */
+  box?: { top: number; height: number } | null;
 }
 
 /** Vertical colour scale beside the thermal image: max at the top, ticks in the chosen unit,
  * with optional editable min/max and a lock toggle (the same controls as the display panel). */
-export function VerticalColorBar({ palette, range, units = "C", conv = null, scaleMode, manual, setManual, setScaleMode }: Props) {
+export function VerticalColorBar({ palette, range, units = "C", conv = null, scaleMode, manual, setManual, setScaleMode, box }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const c = ref.current;
@@ -36,12 +39,13 @@ export function VerticalColorBar({ palette, range, units = "C", conv = null, sca
     setManual?.({ ...base, [which]: v }); setScaleMode?.("manual");
   };
   const num = (which: "min" | "max") => (
-    <input type="number" step={0.5} className="vbar-input" aria-label={`range ${which === "max" ? "maximum" : "minimum"} °C`}
-      value={Math.round(disp[which] * 10) / 10} onChange={(e) => clamp(which, Number(e.target.value))} />
+    <NumberField step={0.5} className="vbar-input" aria-label={`range ${which === "max" ? "maximum" : "minimum"} °C`}
+      value={Math.round(disp[which] * 10) / 10} onChange={(n) => clamp(which, n)} />
   );
 
   return (
-    <div className="vbar" aria-hidden={interactive ? undefined : "true"}>
+    <div className="vbar" aria-hidden={interactive ? undefined : "true"}
+      style={box ? { top: box.top, height: box.height, bottom: "auto" } : undefined}>
       {interactive && (
         <button className="vbar-lock secondary" title={scaleMode === "manual" ? "Range locked — click for auto" : "Auto range — click to lock"}
           aria-pressed={scaleMode === "manual"}

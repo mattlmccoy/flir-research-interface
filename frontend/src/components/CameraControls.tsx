@@ -1,3 +1,4 @@
+import { NumberField } from "./NumberField.tsx";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api.ts";
 import { formFromInfo, valuesFromForm, type CameraForm } from "../lib/camera.ts";
@@ -19,8 +20,8 @@ function Num({ label, unit, value, step, min, max, disabled, onChange }: { label
     <label style={{ display: "contents" }}>
       <span>{label}</span>
       <span className="v plain" style={{ display: "flex", justifyContent: "flex-end", gap: 4, alignItems: "baseline" }}>
-        <input type="number" value={value ?? ""} step={step} min={min} max={max} disabled={disabled || value === null} style={{ width: 84 }}
-          onChange={(e) => onChange(Number(e.target.value))} />
+        <NumberField value={value ?? null} step={step} min={min} max={max} disabled={disabled || value === null} style={{ width: 84 }}
+          onChange={(n) => onChange(n)} />
         {unit && <span className="muted">{unit}</span>}
       </span>
     </label>

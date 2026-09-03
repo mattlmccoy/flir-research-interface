@@ -228,7 +228,7 @@ ul.help li { line-height: 1.35; }
 .view .vbar-lock { pointer-events: auto; padding: 0 6px; height: 18px; line-height: 16px; font-size: 10px; }
 .view .vbar-end { display: flex; align-items: center; gap: 3px; justify-content: flex-end; width: 100%; font-family: var(--font-mono); font-size: 10px; color: var(--fg); text-shadow: 0 0 3px var(--scrim), 0 0 3px var(--scrim); }
 .view .vbar-input { pointer-events: auto; width: 46px; padding: 1px 3px; height: 18px; font-size: 10px; }
-.view .vbar-body { position: relative; flex: 1 1 auto; display: flex; align-items: stretch; gap: 4px; width: 100%; justify-content: flex-end; }
+.view .vbar-body { position: relative; flex: 1 1 auto; min-height: 0; display: flex; align-items: stretch; gap: 4px; width: 100%; justify-content: flex-end; }
 .view .vbar-gradient { width: 14px; height: 100%; border: 1px solid var(--line-control); image-rendering: auto; order: 2; }
 .view .vbar-ticks { position: relative; flex: 1 1 auto; font-family: var(--font-mono); font-size: 10px; color: var(--fg); order: 1; }
 .view .vbar-ticks span { position: absolute; right: 2px; transform: translateY(-50%); text-shadow: 0 0 3px var(--scrim), 0 0 3px var(--scrim); white-space: nowrap; }

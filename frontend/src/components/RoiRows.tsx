@@ -1,3 +1,4 @@
+import { NumberField } from "./NumberField.tsx";
 import { convertTemp, fmtTemp, type Conversion, type Units } from "../lib/units.ts";
 import { useState } from "react";
 import { roiId, roiLabel, type Roi, type RoiAction, type RoiStats, loadRois } from "../lib/roi.ts";
@@ -69,9 +70,9 @@ function OpticsEditor({ r, dispatch }: { r: Roi; dispatch: (a: RoiAction) => voi
     <div className="optics" title="Emissivity and reflected temperature re-correct this region's reading live using the camera's R,B,F constants (emissivity has the largest effect). Distance is recorded with the ROI for your own atmospheric correction; at bench range (under ~2 m) its effect on the reading is under a few tenths of a degree. Blank = use the camera's global setting.">
       <div className="hint" style={{ marginBottom: 4 }}>Optics for {roiLabel(r)} — ε and reflected re-correct the reading live; distance is recorded for your processing. Blank = camera setting.</div>
       <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-        <label className="hint">ε <input type="number" min={0.01} max={1} step={0.01} value={r.emissivity ?? ""} placeholder="camera" style={{ width: 70 }} aria-label={`emissivity of ${roiLabel(r)}`} onChange={(e) => set({ emissivity: e.target.value === "" ? null : Number(e.target.value) })} /></label>
-        <label className="hint">reflected <input type="number" step={0.5} value={r.reflected_c ?? ""} placeholder="camera" style={{ width: 70 }} aria-label={`reflected temperature of ${roiLabel(r)} in °C`} onChange={(e) => set({ reflected_c: e.target.value === "" ? null : Number(e.target.value) })} /> °C</label>
-        <label className="hint">distance <input type="number" min={0.01} step={0.1} value={r.distance_m ?? ""} placeholder="camera" style={{ width: 70 }} aria-label={`object distance of ${roiLabel(r)} in metres`} onChange={(e) => set({ distance_m: e.target.value === "" ? null : Number(e.target.value) })} /> m</label>
+        <label className="hint">ε <NumberField min={0.01} max={1} step={0.01} value={r.emissivity ?? null} placeholder="camera" style={{ width: 70 }} aria-label={`emissivity of ${roiLabel(r)}`} onChange={(n) => set({ emissivity: n })} /></label>
+        <label className="hint">reflected <NumberField step={0.5} value={r.reflected_c ?? null} placeholder="camera" style={{ width: 70 }} aria-label={`reflected temperature of ${roiLabel(r)} in °C`} onChange={(n) => set({ reflected_c: n })} /> °C</label>
+        <label className="hint">distance <NumberField min={0.01} step={0.1} value={r.distance_m ?? null} placeholder="camera" style={{ width: 70 }} aria-label={`object distance of ${roiLabel(r)} in metres`} onChange={(n) => set({ distance_m: n })} /> m</label>
       </div>
     </div>
   );
