@@ -20,6 +20,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from flir_research_interface.analysis.preview import IRON_LUT, _colorize
 from flir_research_interface.playback.reader import ExperimentReader
+from flir_research_interface.radiometry.colormaps import INFERNO_LUT
 from flir_research_interface.radiometry.temperature_linear import IRFormat, counts_to_celsius
 from flir_research_interface.visible.recorder import FFMPEG_CANDIDATES
 from flir_research_interface.visible.rtsp import find_ffprobe
@@ -27,6 +28,7 @@ from flir_research_interface.visible.rtsp import find_ffprobe
 logger = logging.getLogger(__name__)
 
 OUT_NAME = "thermal_preview.mp4"
+ROIS_OUT_NAME = "thermal_preview_rois.mp4"
 BLOCK = 64  # frames per read from the store
 MAX_FPS = 30.0
 BAR_PX = 24  # width of the colour bar strip appended on the right
@@ -64,15 +66,30 @@ def label_font(size: int = 14) -> ImageFont.FreeTypeFont:
 
 
 def thermal_frame_rgb(
-    values: npt.NDArray[np.float32], vmin: float, vmax: float, t_s: float, bar_px: int = BAR_PX
+    values: npt.NDArray[np.float32],
+    vmin: float,
+    vmax: float,
+    t_s: float,
+    bar_px: int = BAR_PX,
+    *,
+    scale: int = 1,
+    rois: list[dict[str, Any]] | None = None,
+    reader: ExperimentReader | None = None,
 ) -> npt.NDArray[np.uint8]:
     """Colourised frame plus a vertical colour bar (vmax at the top) and labels: (h, w+bar, 3)."""
-    h, w = values.shape
+    from flir_research_interface.analysis.annotate import colorize, draw_rois, roi_values_at
+
+    h0, w0 = values.shape
+    h, w = h0 * scale, w0 * scale
     img = np.zeros((h, w + bar_px, 3), dtype=np.uint8)
-    img[:, :w] = _colorize(values, vmin, vmax)
+    body = colorize(values, vmin, vmax) if scale > 1 or rois else _colorize(values, vmin, vmax)
+    img[:, :w] = np.repeat(np.repeat(body, scale, axis=0), scale, axis=1) if scale > 1 else body
     ramp = np.linspace(255, 0, h).astype(np.uint8)  # top = hot
-    img[:, w:] = IRON_LUT[ramp][:, None, :]
+    lut = INFERNO_LUT if (scale > 1 or rois) else IRON_LUT
+    img[:, w:] = lut[ramp][:, None, :]
     pil = Image.fromarray(img)
+    if rois and reader is not None:
+        draw_rois(pil, rois, scale=scale, values=roi_values_at(reader, values, rois))
     d = ImageDraw.Draw(pil)
     font = label_font(max(10, min(16, h // 30)))
     d.text((4, 2), f"{t_s:.2f} s", fill=(255, 255, 255), font=font)
@@ -84,10 +101,32 @@ def encode_command(ffmpeg: str, width: int, height: int, fps: float, out: Path) 
     """ffmpeg command reading raw RGB frames from stdin and writing a web-friendly H.264 MP4."""
     fps_txt = f"{fps:g}"
     return [
-        ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-        "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{height}", "-r", fps_txt, "-i", "-",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", str(CRF), "-pix_fmt", "yuv420p",
-        "-movflags", "+faststart", str(out),
+        ffmpeg,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "rgb24",
+        "-s",
+        f"{width}x{height}",
+        "-r",
+        fps_txt,
+        "-i",
+        "-",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        str(CRF),
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        str(out),
     ]
 
 
@@ -100,8 +139,18 @@ def _fps(reader: ExperimentReader) -> float:
     return float(min(max(fps, 1.0), MAX_FPS))
 
 
-def render_thermal_video(reader: ExperimentReader, ffmpeg: str | None = None) -> dict[str, Any]:
-    """Render ``exports/thermal_preview.mp4`` for ``reader``; returns a summary dict.
+def render_thermal_video(
+    reader: ExperimentReader,
+    ffmpeg: str | None = None,
+    *,
+    scale: int = 2,
+    with_rois: bool = False,
+    out_name: str | None = None,
+) -> dict[str, Any]:
+    """Render ``exports/thermal_preview.mp4`` (or ``out_name``) for ``reader``.
+
+    ``scale`` upsamples the native frame (2 → 1280x960 for the A70); ``with_rois`` draws the
+    stored ROIs with their live value on every frame (the file ``thermal_preview_rois.mp4``).
 
     Raises ``RuntimeError`` when ffmpeg is missing or fails, ``ValueError`` on an empty run.
     """
@@ -113,13 +162,14 @@ def render_thermal_video(reader: ExperimentReader, ffmpeg: str | None = None) ->
     vmin, vmax, units = run_range(reader)
     fps = _fps(reader)
     _, h, w = reader.counts_block(0, 1).shape
-    width, height = w + BAR_PX, h
+    rois = (reader.metadata.get("rois") or []) if with_rois else []
+    width, height = w * scale + BAR_PX, h * scale
     if width % 2 or height % 2:  # yuv420p requires even dimensions
         width += width % 2
         height += height % 2
     out_dir = reader.path / "exports"
     out_dir.mkdir(exist_ok=True)
-    out = out_dir / OUT_NAME
+    out = out_dir / (out_name or (ROIS_OUT_NAME if with_rois else OUT_NAME))
     tmp = out.with_suffix(".part.mp4")
     cmd = encode_command(ffmpeg, width, height, fps, tmp)
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -128,7 +178,9 @@ def render_thermal_video(reader: ExperimentReader, ffmpeg: str | None = None) ->
         for s in range(0, reader.n_frames, BLOCK):
             block = _celsius_frames(reader, s, min(s + BLOCK, reader.n_frames))
             for j, frame in enumerate(block):
-                rgb = thermal_frame_rgb(frame, vmin, vmax, reader.t_s(s + j))
+                rgb = thermal_frame_rgb(
+                    frame, vmin, vmax, reader.t_s(s + j), scale=scale, rois=rois, reader=reader
+                )
                 if rgb.shape[0] != height or rgb.shape[1] != width:
                     pad = np.zeros((height, width, 3), dtype=np.uint8)
                     pad[: rgb.shape[0], : rgb.shape[1]] = rgb
@@ -143,8 +195,15 @@ def render_thermal_video(reader: ExperimentReader, ffmpeg: str | None = None) ->
         raise RuntimeError(f"ffmpeg failed (rc {proc.returncode}): {tail}")
     tmp.replace(out)
     info = {
-        "path": str(out), "frames": reader.n_frames, "fps": fps, "width": width, "height": height,
-        "vmin": vmin, "vmax": vmax, "units": units, "bytes": out.stat().st_size,
+        "path": str(out),
+        "frames": reader.n_frames,
+        "fps": fps,
+        "width": width,
+        "height": height,
+        "vmin": vmin,
+        "vmax": vmax,
+        "units": units,
+        "bytes": out.stat().st_size,
     }
     logger.info("thermal preview video written: %s", info)
     return info
@@ -152,6 +211,7 @@ def render_thermal_video(reader: ExperimentReader, ffmpeg: str | None = None) ->
 
 __all__ = [
     "OUT_NAME",
+    "ROIS_OUT_NAME",
     "encode_command",
     "label_font",
     "render_thermal_video",

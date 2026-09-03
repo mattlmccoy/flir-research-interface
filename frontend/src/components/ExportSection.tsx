@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api, type Hdf5Export, type ThermalVideoExport } from "../lib/api.ts";
 import type { Roi } from "../lib/roi.ts";
 
-interface Props { name: string; index: number; nFrames: number; rois: Roi[]; celsius: boolean; thermalPreview?: { bytes: number } | null; onThermalPreview?: () => void; }
+interface Props { name: string; index: number; nFrames: number; rois: Roi[]; celsius: boolean; thermalPreview?: { bytes: number } | null; onThermalPreview?: () => void; files?: { name: string; bytes: number }[]; }
 
 const FRAME_FORMATS = [
   { f: "csv", label: "CSV", title: "°C grid (raw counts if not temperature-linear)" },
@@ -16,7 +16,7 @@ function fmtBytes(n: number): string {
 }
 
 /** Playback rail section: downloads derived from the recording (the store itself is never touched). */
-export function ExportSection({ name, index, nFrames, rois, celsius, thermalPreview, onThermalPreview }: Props) {
+export function ExportSection({ name, index, nFrames, rois, celsius, thermalPreview, onThermalPreview, files = [] }: Props) {
   const [busy, setBusy] = useState(false);
   const [h5, setH5] = useState<Hdf5Export | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -86,6 +86,14 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
           <button className="secondary" disabled={tvBusy || nFrames === 0} onClick={renderThermalVideo} title="Render (or re-render) the small H.264 viewing copy of the thermal run">{tvBusy ? "rendering…" : haveVideo ? "re-render" : "render"}</button>
         </span>
       </div>
+      {files.length > 0 && (
+        <div className="hint" style={{ marginTop: 6 }}>
+          <b>Files in this run's exports folder</b> (written at stop, regenerable):
+          <div className="row" style={{ marginTop: 4 }}>
+            {files.map((f) => <a key={f.name} className="dl" href={api.exportFileUrl(name, f.name)} target="_blank" rel="noreferrer" title={fmtBytes(f.bytes)}>{f.name}</a>)}
+          </div>
+        </div>
+      )}
       {!celsius && <div className="warnbox">This recording is not temperature-linear: CSV and TIFF carry raw counts.</div>}
       {rngOut && <div className="hint" style={{ wordBreak: "break-all" }}>{rngOut}</div>}
       {h5 && (

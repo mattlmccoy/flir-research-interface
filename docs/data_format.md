@@ -101,11 +101,16 @@ experiments/<YYYYMMDD_HHMMSS>_<name>/
                          case, object parameters, °C rule, experiment fields, ROIs, marks,
                          which file holds what) for whoever opens the folder later
   exports/roi_plot.png   written at stop when ROIs were stored: every ROI's trace against
-                         time (spot value, or mean with a min–max band) with the marks
+                         time (spot value, or mean with a min–max band) with the marks, 2400x1000
+  exports/peak_frame.png, peak_frame_rois.png  the hottest frame at 2x native resolution
+                         (1280x960 for the A70) with the inferno palette, a labelled colour bar
+                         and a caption; the _rois version draws every stored ROI with its value
   exports/roi_series.csv  written automatically at stop: every stored ROI evaluated on every
                          frame (mean/min/max, or value for spots), in °C
-  exports/thermal_preview.mp4  rendered automatically after stop (in the background, so the stop
-                         itself is instant): the whole run as a small H.264 video, iron palette,
+  exports/thermal_preview.mp4, thermal_preview_rois.mp4  rendered automatically after stop (in the
+                         background, so the stop itself is instant): the whole run as an H.264 video at
+                         2x native resolution, inferno palette, the _rois version with the ROIs and
+                         their values drawn on every frame,
                          one °C scale fixed to the run's min/max, colour bar and elapsed-time
                          label. For viewing and sharing only; re-render any time from playback
                          → export, or `POST /api/experiments/<name>/export/thermal-video`

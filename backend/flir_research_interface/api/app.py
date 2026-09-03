@@ -212,18 +212,25 @@ def create_app(
         logger.info("wrote %s", out_dir / "roi_series.csv")
 
     def _write_run_summary(exp_dir: Path) -> None:
-        """README.txt (plain prose) + exports/roi_plot.png, derived, regenerable."""
+        """README.txt + exports/roi_plot.png + peak_frame(.png|_rois.png), derived, regenerable."""
+        from flir_research_interface.analysis.annotate import write_annotated_frames
         from flir_research_interface.analysis.run_summary import write_run_summary
 
-        logger.info("run summary: %s", write_run_summary(ExperimentReader(exp_dir)))
+        reader = ExperimentReader(exp_dir)
+        logger.info("run summary: %s", write_run_summary(reader))
+        if reader.n_frames:
+            logger.info("peak frames: %s", write_annotated_frames(reader))
 
     app.state.render_tasks = set()
 
     def _render_thermal_video(exp_dir: Path) -> None:
-        """Write exports/thermal_preview.mp4 (a viewing copy; the store is never touched)."""
+        """exports/thermal_preview.mp4 (clean) and thermal_preview_rois.mp4 (ROIs drawn)."""
         from flir_research_interface.analysis.thermal_video import render_thermal_video
 
-        render_thermal_video(ExperimentReader(exp_dir))
+        reader = ExperimentReader(exp_dir)
+        render_thermal_video(reader)
+        if reader.metadata.get("rois"):
+            render_thermal_video(reader, with_rois=True)
 
     def _schedule_thermal_video(exp_dir: Path) -> None:
         """Render after stop without holding the stop: an encode of a long run takes seconds."""
@@ -935,6 +942,21 @@ def create_app(
         r = _open(name)
         info = r.info()
         info["size_bytes"] = _dir_size(r.path)
+        exp_dir = r.path / "exports"
+        info["exports"] = (
+            sorted(
+                (
+                    {"name": p.name, "bytes": p.stat().st_size}
+                    for p in exp_dir.iterdir()
+                    if p.is_file()
+                    and not p.name.startswith(".")
+                    and not p.name.endswith(".part.mp4")
+                ),
+                key=lambda e: str(e["name"]),
+            )
+            if exp_dir.is_dir()
+            else []
+        )
         info["events"] = r.events
         return info
 
@@ -1081,15 +1103,29 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/experiments/{name}/export/thermal-video")
-    async def export_thermal_video_route(name: str) -> dict[str, Any]:
+    async def export_thermal_video_route(name: str, rois: bool = False) -> dict[str, Any]:
+        """Re-render the viewing video; ``?rois=true`` renders the ROI-annotated version."""
         from flir_research_interface.analysis.thermal_video import render_thermal_video
 
         try:
-            return await run_in_threadpool(render_thermal_video, _open(name))
+            reader = _open(name)
+            return await run_in_threadpool(lambda: render_thermal_video(reader, with_rois=rois))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.get("/api/experiments/{name}/exports/{file}")
+    def experiment_export_file(name: str, file: str) -> Response:
+        """Any derived file from the run's exports/ folder (PNG, MP4, CSV, PDF, zip, TIFF…)."""
+        from starlette.responses import FileResponse
+
+        if "/" in file or "\\" in file or file.startswith("."):
+            raise HTTPException(400, "invalid file name")
+        path = _exp_dir(name) / "exports" / file
+        if not path.is_file():
+            raise HTTPException(404, f"exports/{file} not found")
+        return FileResponse(path, headers={"Accept-Ranges": "bytes"})
 
     @app.get("/api/experiments/{name}/thermal_preview.mp4")
     def experiment_thermal_video(name: str) -> Response:

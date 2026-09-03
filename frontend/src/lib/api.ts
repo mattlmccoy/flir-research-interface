@@ -70,7 +70,7 @@ export interface Experiment {
   started_utc?: string | null;
 }
 
-export interface ExperimentInfo { name: string; path: string; n_frames: number; size_bytes?: number; width: number; height: number; duration_s: number; complete: boolean; ir_format: string | null; conversion: Record<string, unknown> | null; experiment: Record<string, unknown> | null; camera: Record<string, unknown> | null; software: Record<string, unknown> | null; started_utc: string | null; events?: Record<string, unknown>[]; manifest: Record<string, unknown> | null; visible?: { file?: string | null; measured_fps?: number | null; error?: string | null } | null; visible_alignment?: Record<string, unknown> | null; rois?: Record<string, unknown>[] | null; thermal_preview?: { path: string; bytes: number } | null; }
+export interface ExperimentInfo { name: string; path: string; n_frames: number; size_bytes?: number; width: number; height: number; duration_s: number; complete: boolean; ir_format: string | null; conversion: Record<string, unknown> | null; experiment: Record<string, unknown> | null; camera: Record<string, unknown> | null; software: Record<string, unknown> | null; started_utc: string | null; events?: Record<string, unknown>[]; manifest: Record<string, unknown> | null; visible?: { file?: string | null; measured_fps?: number | null; error?: string | null } | null; visible_alignment?: Record<string, unknown> | null; rois?: Record<string, unknown>[] | null; thermal_preview?: { path: string; bytes: number } | null; exports?: { name: string; bytes: number }[]; }
 export interface Timeline { t_s: number[]; frame_id: number[]; }
 export interface ExperimentEvent { t_s?: number; type?: string; name?: string; [k: string]: unknown; }
 export interface RoiSeries {
@@ -98,6 +98,7 @@ export const api = {
   reportUrl: (name: string) => u(`/api/experiments/${encodeURIComponent(name)}/report.pdf`),
   exportThermalVideo: (name: string) =>
     j<ThermalVideoExport>(req(`/api/experiments/${encodeURIComponent(name)}/export/thermal-video`, { method: "POST" })),
+  exportFileUrl: (name: string, file: string) => u(`/api/experiments/${encodeURIComponent(name)}/exports/${encodeURIComponent(file)}`),
   thermalVideoUrl: (name: string) => u(`/api/experiments/${encodeURIComponent(name)}/thermal_preview.mp4`),
   frameBuffer: async (name: string, index: number): Promise<ArrayBuffer> => {
     const res = await req(`/api/experiments/${encodeURIComponent(name)}/frames/${index}`);
