@@ -222,9 +222,14 @@ ul.help li { line-height: 1.35; }
 .roi-rows .optics { background: var(--bg-deep); border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 8px; margin: 2px 0 6px; }
 .roi-rows .optics input { background: var(--panel); }
 
+
 /* ---- Vertical colour scale beside the image --------------------------------------- */
-.view .vbar { position: absolute; right: 12px; top: 12px; bottom: 12px; display: flex; align-items: stretch; gap: 4px; z-index: 3; pointer-events: none; }
-.view .vbar-gradient { width: 14px; height: 100%; border: 1px solid var(--line-control); image-rendering: auto; }
-.view .vbar-ticks { position: relative; width: 40px; font-family: var(--font-mono); font-size: 10px; color: var(--fg); }
-.view .vbar-ticks span { position: absolute; left: 0; transform: translateY(-50%); text-shadow: 0 0 3px var(--scrim), 0 0 3px var(--scrim); white-space: nowrap; }
-.view .vbar-unit { position: absolute; right: 0; bottom: -14px; font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
+.view .vbar { position: absolute; right: 12px; top: 12px; bottom: 12px; width: 66px; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; z-index: 3; pointer-events: none; }
+.view .vbar-lock { pointer-events: auto; padding: 0 6px; height: 18px; line-height: 16px; font-size: 10px; }
+.view .vbar-end { display: flex; align-items: center; gap: 3px; justify-content: flex-end; width: 100%; font-family: var(--font-mono); font-size: 10px; color: var(--fg); text-shadow: 0 0 3px var(--scrim), 0 0 3px var(--scrim); }
+.view .vbar-input { pointer-events: auto; width: 46px; padding: 1px 3px; height: 18px; font-size: 10px; }
+.view .vbar-body { position: relative; flex: 1 1 auto; display: flex; align-items: stretch; gap: 4px; width: 100%; justify-content: flex-end; }
+.view .vbar-gradient { width: 14px; height: 100%; border: 1px solid var(--line-control); image-rendering: auto; order: 2; }
+.view .vbar-ticks { position: relative; flex: 1 1 auto; font-family: var(--font-mono); font-size: 10px; color: var(--fg); order: 1; }
+.view .vbar-ticks span { position: absolute; right: 2px; transform: translateY(-50%); text-shadow: 0 0 3px var(--scrim), 0 0 3px var(--scrim); white-space: nowrap; }
+.view .vbar-unit { color: var(--muted); }

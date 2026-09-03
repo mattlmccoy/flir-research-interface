@@ -196,7 +196,7 @@ export function PlaybackPage(p: Props) {
       strip={<ToolStrip tool={p.layout.tool} onTool={(tool) => p.dispatch({ type: "setTool", tool })} onCollapseAll={() => p.dispatch({ type: !p.layout.rail && !p.layout.dock ? "restoreAll" : "collapseAll" })} collapsed={!p.layout.rail && !p.layout.dock} zoom={p.layout.zoom} onZoom={(z) => p.dispatch({ type: "setZoom", zoom: z })} />}
       center={
         <div className={`center-split ${p.layout.visibleMode === "side" && hasVideo ? "on" : ""}`}>
-          <ThermalView frame={frame} palette={p.palette} scaleMode={p.scaleMode} manual={p.manual} onScale={setShown}
+          <ThermalView frame={frame} palette={p.palette} scaleMode={p.scaleMode} manual={p.manual} onScale={setShown} setManual={p.setManual} setScaleMode={p.setScaleMode}
             rois={p.rois.rois} selected={p.rois.selected} selectedIds={p.rois.selectedIds} tool={p.layout.tool} zoom={p.layout.zoom} onRoi={p.roiDispatch} onStats={onStats} rad={rad} extremes={p.layout.extremes} isotherm={p.layout.isotherm} onField={setField} reference={reference} hold={p.layout.hold} flipH={p.layout.flipH} flipV={p.layout.flipV} agc={p.layout.agc} filter={p.layout.filter} units={p.layout.units} valid={p.layout.segment.on ? { min: p.layout.segment.min, max: p.layout.segment.max } : null}
             overlay={p.layout.visibleMode === "overlay" && hasVideo ? <VisibleVideo plain name={p.name} t={t} playing={playing} speed={speed} /> : undefined} overlayStyle={p.layout.overlay} overlayH={overlayH} />
           {p.layout.visibleMode === "side" && hasVideo && <VisibleVideo big flipH={p.layout.flipH} flipV={p.layout.flipV} name={p.name} t={t} playing={playing} speed={speed} measuredFps={info?.visible?.measured_fps} />}

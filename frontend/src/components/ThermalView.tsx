@@ -34,6 +34,7 @@ interface Props {
   scaleMode: ScaleMode;
   manual: Range;
   onScale: (r: Range) => void;
+  setManual?: (r: Range) => void; setScaleMode?: (m: ScaleMode) => void;
   rois?: Roi[];
   selected?: number | null;
   selectedIds?: number[];
@@ -97,7 +98,7 @@ export function dragShape(tool: Tool, a: Pt, b: Pt, w: number, h: number): RoiIn
 /** Renders raw counts -> °C -> palette on a canvas, with an ROI overlay layer. Data arrays are never mutated. */
 const divergingLut = buildLut("diverging");
 
-export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois = NO_ROIS, selected = null, selectedIds = NO_IDS, tool = "select", zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null, hold = "off", flipH = false, flipV = false, agc = LINEAR_AGC, valid = null, filter = "off", units = "C" }: Props) {
+export function ThermalView({ frame, palette, scaleMode, manual, onScale, setManual, setScaleMode, rois = NO_ROIS, selected = null, selectedIds = NO_IDS, tool = "select", zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null, hold = "off", flipH = false, flipV = false, agc = LINEAR_AGC, valid = null, filter = "off", units = "C" }: Props) {
   const viewRef = useRef<HTMLDivElement>(null);
   const holdRef = useRef<HoldBuffer | null>(null);
   const freehand = useRef<[number, number][] | null>(null);
@@ -350,7 +351,8 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, rois =
       )}
       {frame && barRange && (
         <VerticalColorBar palette={reference ? "diverging" : palette} range={barRange} units={units}
-          conv={hdr && hdr.kelvin_per_count != null ? { kelvin_per_count: hdr.kelvin_per_count, kelvin_offset: hdr.kelvin_offset } : null} />
+          conv={hdr && hdr.kelvin_per_count != null ? { kelvin_per_count: hdr.kelvin_per_count, kelvin_offset: hdr.kelvin_offset } : null}
+          scaleMode={scaleMode} manual={manual} setManual={reference ? undefined : setManual} setScaleMode={reference ? undefined : setScaleMode} />
       )}
       {!frame && <div className="readout">no frames</div>}
     </div>
