@@ -1,9 +1,25 @@
+import { CIVIDIS, INFERNO, MAGMA, PLASMA, TURBO, VIRIDIS } from "./colormaps.ts";
 /**
  * Visualization-only color lookup tables. These are "-like" palettes designed here; they are
  * not FLIR's proprietary LUTs (brief §11). Applying a palette never changes the temperature data.
  */
-export type PaletteName = "iron" | "grayscale" | "blackhot" | "rainbow" | "diverging";
-export const PALETTE_NAMES: readonly PaletteName[] = ["iron", "grayscale", "blackhot", "rainbow", "diverging"];
+export type PaletteName = "iron" | "grayscale" | "blackhot" | "rainbow" | "rainbow-hc" | "viridis" | "inferno" | "magma" | "plasma" | "cividis" | "turbo" | "diverging";
+export const PALETTE_NAMES: readonly PaletteName[] = ["iron", "inferno", "magma", "plasma", "viridis", "cividis", "turbo", "rainbow-hc", "rainbow", "grayscale", "blackhot", "diverging"];
+/** Human notes shown next to the palette picker. */
+export const PALETTE_NOTES: Record<PaletteName, string> = {
+  iron: "FLIR's classic; not perceptually uniform (lightness plateaus in the reds)",
+  inferno: "perceptually uniform, black→yellow; best general thermal choice",
+  magma: "perceptually uniform, black→pale; softer than inferno",
+  plasma: "perceptually uniform, blue→yellow",
+  viridis: "perceptually uniform, blue→green→yellow; colour-blind safe",
+  cividis: "perceptually uniform, optimised for deuteranopia",
+  turbo: "high-contrast rainbow with near-uniform lightness ramp (Google)",
+  "rainbow-hc": "FLIR-style high-contrast rainbow: hue cycles fast, small differences pop; NOT uniform",
+  rainbow: "classic rainbow; not uniform, misleading for magnitudes",
+  grayscale: "white-hot",
+  blackhot: "black-hot",
+  diverging: "blue−neutral−red for frame − reference",
+};
 
 type Stop = [t: number, r: number, g: number, b: number];
 
@@ -45,6 +61,26 @@ function interpolate(stops: Stop[]): Uint8ClampedArray {
   return lut;
 }
 
+function fromTable(t: readonly number[]): Uint8ClampedArray {
+  const lut = new Uint8ClampedArray(256 * 4);
+  for (let i = 0; i < 256; i++) { lut[i * 4] = t[i * 3]; lut[i * 4 + 1] = t[i * 3 + 1]; lut[i * 4 + 2] = t[i * 3 + 2]; lut[i * 4 + 3] = 255; }
+  return lut;
+}
+
+/** High-contrast rainbow: 2.5 hue cycles over the range on a rising lightness ramp so both small
+ * local differences (hue) and overall magnitude (lightness) read. Not perceptually uniform. */
+function rainbowHc(): Uint8ClampedArray {
+  const lut = new Uint8ClampedArray(256 * 4);
+  for (let i = 0; i < 256; i++) {
+    const f = i / 255;
+    const h = (f * 2.5 * 360) % 360, l = 0.18 + 0.62 * f, sat = 1;
+    const c = (1 - Math.abs(2 * l - 1)) * sat, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = l - c / 2;
+    const [r, g, b] = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x] : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+    lut[i * 4] = (r + m) * 255; lut[i * 4 + 1] = (g + m) * 255; lut[i * 4 + 2] = (b + m) * 255; lut[i * 4 + 3] = 255;
+  }
+  return lut;
+}
+
 export function buildLut(name: PaletteName): Uint8ClampedArray {
   switch (name) {
     case "iron":
@@ -55,6 +91,13 @@ export function buildLut(name: PaletteName): Uint8ClampedArray {
       return interpolate([[0, 0, 0, 0], [1, 255, 255, 255]]);
     case "blackhot":
       return interpolate([[0, 255, 255, 255], [1, 0, 0, 0]]);
+    case "viridis": return fromTable(VIRIDIS);
+    case "inferno": return fromTable(INFERNO);
+    case "magma": return fromTable(MAGMA);
+    case "plasma": return fromTable(PLASMA);
+    case "cividis": return fromTable(CIVIDIS);
+    case "turbo": return fromTable(TURBO);
+    case "rainbow-hc": return rainbowHc();
     case "diverging": // blue − neutral − red, for reference-frame subtraction
       return interpolate([[0, 40, 90, 220], [0.5, 235, 235, 235], [1, 220, 50, 40]]);
   }

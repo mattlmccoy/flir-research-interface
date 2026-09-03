@@ -1,5 +1,5 @@
 import { DEFAULT_ISOTHERM, type Isotherm } from "../lib/isotherm.ts";
-import { PALETTE_NAMES, type PaletteName } from "../lib/palette.ts";
+import { PALETTE_NAMES, type PaletteName, PALETTE_NOTES } from "../lib/palette.ts";
 import type { Range, ScaleMode } from "../lib/scale.ts";
 import { ColorBar } from "./ColorBar.tsx";
 
@@ -49,7 +49,7 @@ export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, 
       {refRow}
       {isoRow}
       <div className="row">
-        <select value={palette} onChange={(e) => setPalette(e.target.value as PaletteName)}>
+        <select value={palette} onChange={(e) => setPalette(e.target.value as PaletteName)} title={PALETTE_NOTES[palette]}>
           {PALETTE_NAMES.map((p) => <option key={p} value={p}>{p}</option>)}
         </select>
         <span className={`badge ${scaleMode}`}>{scaleMode === "auto" ? "AUTO" : "LOCKED"}</span>
@@ -58,6 +58,7 @@ export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, 
           else setScaleMode("auto");
         }}>{scaleMode === "auto" ? "Lock range" : "Auto range"}</button>
       </div>
+      <div className="hint">{PALETTE_NOTES[palette]}</div>
       <div className="row">
         <label>min <input type="number" step={0.5} aria-label="range minimum °C" value={scaleMode === "manual" ? manual.min : Math.round(shown.min * 10) / 10}
           onChange={(e) => { const base = scaleMode === "manual" ? manual : { min: shown.min, max: Math.round(shown.max * 10) / 10 }; setManual({ ...base, min: Number(e.target.value) }); setScaleMode("manual"); }} /> °C</label>
