@@ -68,6 +68,13 @@ export function OperatorGate({ children }: { children: ReactNode }) {
           This website is the whole user interface. It talks to a small <b>operator</b> service on the computer the camera is plugged into.
           {!health && <> None is answering at <code>{base}</code>{tries > 0 ? ` (checked ${tries}×)` : ""}; this page keeps checking every 2 s and continues by itself.</>}
         </div>
+        {!health && tries >= 2 && (
+          <div className="warnbox" role="status" style={{ marginTop: 10 }}>
+            <b>Already installed on this computer?</b> The operator should be running as a login item. Paste this into {inst.shell.split(" (")[0]} to start it, then leave this page open:
+            <div style={{ marginTop: 6 }}><CommandBox command={hints.restart} /></div>
+            <div className="hint" style={{ marginTop: 4 }}>Still nothing? Run it by hand to see the error: <code>{hints.manual}</code> · log: <code>{hints.log}</code></div>
+          </div>
+        )}
         <div className="hint" style={{ marginTop: 10 }}><b>One command installs everything on this {platform === "windows" ? "PC" : platform === "linux" ? "machine" : "Mac"}</b> — paste it into {inst.shell}:</div>
         {inst.command && <CommandBox command={inst.command} />}
         <ol className="help" style={{ marginTop: 8 }}>
