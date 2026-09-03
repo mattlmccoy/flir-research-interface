@@ -91,6 +91,8 @@ export const api = {
     j<Hdf5Export>(req(`/api/experiments/${encodeURIComponent(name)}/export/hdf5`, { method: "POST" })),
   exportFrames: (name: string, start: number, stop: number, step: number, format: string) =>
     j<{ path: string; frames: number[]; n: number; format: string; size_bytes: number }>(req(`/api/experiments/${encodeURIComponent(name)}/export/frames`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ start, stop, step, format }) })),
+  exportReport: (name: string) => j<{ path: string; pages: number; size_bytes: number }>(req(`/api/experiments/${encodeURIComponent(name)}/export/report`, { method: "POST" })),
+  reportUrl: (name: string) => u(`/api/experiments/${encodeURIComponent(name)}/report.pdf`),
   exportThermalVideo: (name: string) =>
     j<ThermalVideoExport>(req(`/api/experiments/${encodeURIComponent(name)}/export/thermal-video`, { method: "POST" })),
   thermalVideoUrl: (name: string) => u(`/api/experiments/${encodeURIComponent(name)}/thermal_preview.mp4`),

@@ -24,6 +24,11 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
   const [tvBusy, setTvBusy] = useState(false);
   const [rng, setRng] = useState({ start: 0, stop: nFrames, step: 1, format: "csv" });
   const [rngOut, setRngOut] = useState<string | null>(null);
+  const [report, setReport] = useState<{ path: string; pages: number; size_bytes: number } | null>(null);
+  async function makeReport() {
+    setBusy(true); setErr(null);
+    try { setReport(await api.exportReport(name)); } catch (e) { setErr(String(e)); } finally { setBusy(false); }
+  }
   async function exportRange() {
     setBusy(true); setErr(null); setRngOut(null);
     try { const r = await api.exportFrames(name, rng.start, Math.min(rng.stop, nFrames), Math.max(1, rng.step), rng.format); setRngOut(`${r.n} frames → ${r.path} (${fmtBytes(r.size_bytes)})`); } catch (e) { setErr(String(e)); } finally { setBusy(false); }
@@ -69,6 +74,11 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
             <option value="csv">CSV zip</option><option value="tiff">TIFF zip</option><option value="tiff-stack">TIFF stack</option><option value="png">PNG zip</option><option value="npy">NPY zip</option>
           </select>
           <button className="secondary" disabled={busy || nFrames === 0} onClick={exportRange}>export</button>
+        </span>
+        <span>PDF report</span>
+        <span className="v plain" style={{ textAlign: "right", display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
+          {report && <a className="dl" href={api.reportUrl(name)} target="_blank" rel="noreferrer">open · {report.pages} pages · {fmtBytes(report.size_bytes)}</a>}
+          <button className="secondary" disabled={busy || nFrames === 0} onClick={makeReport} title="README text, ROI plot and preview image as one PDF in the run's exports folder">{report ? "re-generate" : "generate"}</button>
         </span>
         <span>thermal video</span>
         <span className="v plain" style={{ textAlign: "right", display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>

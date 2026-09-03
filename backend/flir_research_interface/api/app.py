@@ -1033,6 +1033,21 @@ def create_app(
         logger.warning("deleted experiment %s", d)
         return {"deleted": name}
 
+    @app.post("/api/experiments/{name}/export/report")
+    async def export_report_route(name: str) -> dict[str, Any]:
+        from flir_research_interface.analysis.report import write_report
+
+        return await run_in_threadpool(write_report, _open(name))
+
+    @app.get("/api/experiments/{name}/report.pdf")
+    def experiment_report(name: str) -> Response:
+        from starlette.responses import FileResponse
+
+        path = _exp_dir(name) / "exports" / "report.pdf"
+        if not path.is_file():
+            raise HTTPException(404, "report not generated yet")
+        return FileResponse(path, media_type="application/pdf")
+
     @app.post("/api/experiments/{name}/export/frames")
     async def export_frames_route(name: str, req: FrameRangeRequest) -> dict[str, Any]:
         from flir_research_interface.analysis.export import export_frame_range
