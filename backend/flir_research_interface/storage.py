@@ -8,7 +8,10 @@ always stays on local disk; this module only offloads finished runs. See the des
 
 from __future__ import annotations
 
+import json
+import os
 import shutil
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +21,8 @@ import psutil
 
 #: Folder created on a registered drive to hold offloaded runs.
 DRIVE_SUBDIR = "FLIR-recordings"
+#: Sidecar in the local root that remembers the registered drive (git-ignored).
+CONFIG_NAME = ".storage.json"
 
 
 @dataclass(frozen=True)
@@ -91,4 +96,69 @@ def _is_external(platform: str, p: _Part) -> bool:
     return False
 
 
-__all__ = ["DRIVE_SUBDIR", "selectable_drives"]
+# -- registered-drive config -------------------------------------------------------------------
+
+
+def load_storage_config(local_root: Path | str) -> dict[str, Any]:
+    """Read the config sidecar; a missing or malformed file means no drive is registered."""
+    path = Path(local_root) / CONFIG_NAME
+    try:
+        cfg = json.loads(path.read_text())
+        if isinstance(cfg, dict) and isinstance(cfg.get("drive"), dict | type(None)):
+            return {"drive": cfg["drive"]}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+    return {"drive": None}
+
+
+def save_storage_config(local_root: Path | str, cfg: dict[str, Any]) -> None:
+    """Atomically write the storage config (temp file + rename)."""
+    path = Path(local_root) / CONFIG_NAME
+    fd, tmp = tempfile.mkstemp(prefix=".storage.", suffix=".json", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(cfg, indent=2))
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def register_drive(local_root: Path | str, mount: str) -> dict[str, Any]:
+    """Register ``mount`` as the offload drive: create ``<mount>/FLIR-recordings/``, write-probe it,
+    and persist. Raises ``ValueError`` if the drive is missing or not writable."""
+    mount_path = Path(mount)
+    if not mount_path.is_dir():
+        raise ValueError(f"{mount} is not a mounted folder")
+    root = mount_path / DRIVE_SUBDIR
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        probe = root / ".fri-write-probe"
+        probe.write_text("ok")
+        probe.unlink()
+    except OSError as exc:
+        raise ValueError(f"{mount} is not writable: {exc}") from exc
+    cfg = {"drive": {"mount": str(mount_path), "root": str(root)}}
+    save_storage_config(local_root, cfg)
+    return cfg
+
+
+def forget_drive(local_root: Path | str) -> dict[str, Any]:
+    """Forget the registered drive (leaves its files in place)."""
+    cfg = {"drive": None}
+    save_storage_config(local_root, cfg)
+    return cfg
+
+
+__all__ = [
+    "CONFIG_NAME",
+    "DRIVE_SUBDIR",
+    "forget_drive",
+    "load_storage_config",
+    "register_drive",
+    "save_storage_config",
+    "selectable_drives",
+]

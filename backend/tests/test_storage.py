@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
 from flir_research_interface.storage import _Part, selectable_drives
 
 # Captured from psutil.disk_partitions(all=False) on macOS (see the design spec): the enumeration
@@ -39,3 +43,46 @@ def test_darwin_excludes_boot_volume_and_read_only() -> None:
         _Part("/dev/d2", "/Volumes/Backup", "hfs", "ro,local"),  # read-only
     ]
     assert selectable_drives("darwin", parts, lambda m: (10**12, 10**11)) == []
+
+
+def test_storage_config_round_trip_and_absent_default(tmp_path: Path) -> None:
+    from flir_research_interface.storage import load_storage_config, save_storage_config
+
+    assert load_storage_config(tmp_path) == {"drive": None}
+    save_storage_config(
+        tmp_path, {"drive": {"mount": "/Volumes/F", "root": "/Volumes/F/FLIR-recordings"}}
+    )
+    assert load_storage_config(tmp_path)["drive"]["mount"] == "/Volumes/F"
+
+
+def test_register_drive_creates_folder_and_persists(tmp_path: Path) -> None:
+    from flir_research_interface.storage import DRIVE_SUBDIR, load_storage_config, register_drive
+
+    local = tmp_path / "local"
+    local.mkdir()
+    drive = tmp_path / "FieldData"
+    drive.mkdir()
+    cfg = register_drive(local, str(drive))
+    assert cfg["drive"]["root"] == str(drive / DRIVE_SUBDIR)
+    assert (drive / DRIVE_SUBDIR).is_dir()
+    assert load_storage_config(local)["drive"]["mount"] == str(drive)  # persisted
+    with pytest.raises(ValueError):  # a path we cannot create/write raises
+        register_drive(local, "/nonexistent/xyz-should-not-exist")
+
+
+def test_forget_drive_clears_config_without_touching_files(tmp_path: Path) -> None:
+    from flir_research_interface.storage import (
+        DRIVE_SUBDIR,
+        forget_drive,
+        load_storage_config,
+        register_drive,
+    )
+
+    local = tmp_path / "local"
+    local.mkdir()
+    drive = tmp_path / "FieldData"
+    drive.mkdir()
+    register_drive(local, str(drive))
+    forget_drive(local)
+    assert load_storage_config(local) == {"drive": None}
+    assert (drive / DRIVE_SUBDIR).is_dir()  # files left in place
