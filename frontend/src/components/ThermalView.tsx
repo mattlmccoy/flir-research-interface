@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as RKeyboardEvent, PointerEvent as RPointerEvent, ReactNode } from "react";
 import type { FrameMessage } from "../lib/protocol.ts";
 import { countsToCelsius } from "../lib/radiometry.ts";
+import { overRangeMask } from "../lib/overrange.ts";
 import { buildLut, mapToRgba, type PaletteName } from "../lib/palette.ts";
 import { autoScale, resolveScale, type Range, type ScaleMode } from "../lib/scale.ts";
 import { normalizeRect, roiStats, type Roi, type RoiAction, type RoiInput, type RoiStats, visibleRois } from "../lib/roi.ts";
@@ -142,6 +143,10 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
     if (!frame) return;
     const { header, counts } = frame;
     const c = countsToCelsius(counts, header.kelvin_per_count, header.kelvin_offset);
+    // Over-range pixels (scene exceeded the camera's range → saturated or 16-bit-wrapped) carry no
+    // valid temperature: exclude them from stats/range (NaN) and paint them distinctly below.
+    const over = header.kelvin_per_count != null ? overRangeMask(counts, header.width, header.height) : null;
+    if (over) for (let i = 0; i < c.length; i++) if (over.mask[i]) c[i] = NaN;
     celsiusRef.current = c;
     onField?.({ c, w: header.width, h: header.height, conv: header.kelvin_per_count != null ? { kelvin_per_count: header.kelvin_per_count, kelvin_offset: header.kelvin_offset } : undefined });
     const filtered = filter === "off" ? c : applyFilter(filter, c, header.width, header.height);
@@ -166,6 +171,9 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
     if (agc.mode === "plateau" && !sub?.delta) applyMap(shownField, plateauMap(shownField, range, 256, agc.plateau), lutNow, img.data);
     else mapToRgba(shownField, range.min, range.max, lutNow, img.data);
     if (isotherm) applyIsotherm(c, img.data, isotherm);
+    if (over) for (let i = 0; i < over.mask.length; i++) if (over.mask[i]) {
+      const d = i * 4; img.data[d] = 255; img.data[d + 1] = 0; img.data[d + 2] = 255; img.data[d + 3] = 255; // over-range → magenta
+    }
     ctx.putImageData(img, 0, 0);
     drawMinimap();
   }, [frame, palette, scaleMode, manual.min, manual.max, isotherm, reference, hold, agc.mode, agc.plateau, filter]);
