@@ -95,6 +95,7 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 .badge { padding: 1px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; font-family: var(--font-mono); }
 .badge.auto, .badge.ok { background: var(--live-bg); color: var(--live); }
 .badge.manual, .badge.warn { background: var(--warn-bg); color: var(--warn); }
+.badge.lib { background: var(--line-control); color: var(--muted); }
 .badge.rec { background: var(--err-bg); color: var(--rec); animation: fri-blink 1s steps(1) infinite; }
 .warnbox { border-left: 3px solid var(--warn); padding: 6px 10px; background: var(--warn-bg); font-size: 12px; }
 .errbox { border-left: 3px solid var(--err); padding: 6px 10px; background: var(--err-bg); font-size: 12px; }

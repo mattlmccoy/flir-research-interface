@@ -3,11 +3,11 @@ import { api, type Experiment, type Previews } from "../lib/api.ts";
 import { formatSeconds, keyframeBackgroundPosition, keyframeIndex } from "../lib/keyframes.ts";
 import { hasRois, loadRois, roisDifferFromStored } from "../lib/roi.ts";
 
-interface Props { exp: Experiment; onOpen: () => void; onChanged: () => void; }
+interface Props { exp: Experiment; onOpen: () => void; onChanged: () => void; driveConnected?: boolean; }
 
 const roiStorage: Storage | null = (() => { try { return typeof localStorage !== "undefined" ? localStorage : null; } catch { return null; } })();
 
-export function ExperimentCard({ exp, onOpen, onChanged }: Props) {
+export function ExperimentCard({ exp, onOpen, onChanged, driveConnected = false }: Props) {
   // Flag runs whose ROIs have been edited since their exports were built: the run has a saved
   // working set that differs from the ROIs stored (and exported) with the recording.
   const scope = `exp.${exp.name}`;
@@ -15,6 +15,24 @@ export function ExperimentCard({ exp, onOpen, onChanged }: Props) {
   const [k, setK] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [move, setMove] = useState<{ done: number; total: number } | null>(null);
+  const onDrive = exp.library === "drive";
+
+  // Offload to the drive (or bring back), copy → verify → delete, with a progress bar.
+  async function moveTo(to: "drive" | "local") {
+    setBusy(true); setNote(null); setMove({ done: 0, total: 0 });
+    try {
+      await api.moveExperiment(exp.name, to);
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 600));
+        const jb = await api.moveStatus(exp.name);
+        setMove({ done: jb.done ?? 0, total: jb.total ?? 0 });
+        if (jb.state === "done") { onChanged(); break; }
+        if (jb.state === "error") { setNote(jb.error ?? "move failed"); break; }
+        if (jb.state === "idle") break;
+      }
+    } catch (e) { setNote(String(e)); } finally { setBusy(false); setMove(null); }
+  }
   // The regenerate response is authoritative the instant it comes back — don't wait on the
   // parent's refetch (onChanged) to see the new preview, in case it's slow or the parent's
   // list is stale for another reason.
@@ -125,6 +143,7 @@ export function ExperimentCard({ exp, onOpen, onChanged }: Props) {
         </span>
         <span>
           {exp.complete ? <span className="badge ok">complete</span> : <span className="badge bad">INCOMPLETE{dropped ? ` · ${dropped} dropped` : ""}</span>}
+          <span className="badge lib" style={{ marginLeft: 6 }} title={onDrive ? "Stored on the external drive" : "Stored on local disk"}>{onDrive ? "Drive" : "Local"}</span>
           {roisDiffer && <span className="badge warn" style={{ marginLeft: 6 }} title="You've changed this run's ROIs since its exports were built. Open it and regenerate to update the ROI plot, video and roi_series.csv.">ROIs edited</span>}
         </span>
         <div className="actions">
@@ -137,10 +156,26 @@ export function ExperimentCard({ exp, onOpen, onChanged }: Props) {
           <button className="secondary" disabled={busy || !n || !!exp.error} onClick={exportH5} title="Export the whole recording to HDF5 (in the experiment's exports folder)">
             export
           </button>
+          {onDrive ? (
+            <button className="secondary" disabled={busy} onClick={() => moveTo("local")} title="Copy this run back to local disk (verified, then removed from the drive)">
+              ← local
+            </button>
+          ) : (
+            <button className="secondary" disabled={busy || !driveConnected} onClick={() => moveTo("drive")}
+              title={driveConnected ? "Move this run to the external drive to free local space (copy → verify → delete)" : "Register an external drive in Setup → Storage first"}>
+              move to drive ▸
+            </button>
+          )}
           <button className="danger" disabled={busy} onClick={remove} title="Delete this run and everything in its folder (no undo)" style={{ marginLeft: "auto" }}>
             delete
           </button>
         </div>
+        {move && (
+          <div style={{ marginTop: 4 }}>
+            <div className="hint">{onDrive ? "bringing back to local" : "moving to drive"}… {move.total > 0 ? `${Math.round((move.done / move.total) * 100)}%` : ""}</div>
+            <div className="progressbar" style={{ marginTop: 3 }}><div className={`progressbar-fill${move.total > 0 ? "" : " indeterminate"}`} style={move.total > 0 ? { width: `${Math.min(100, Math.round((move.done / move.total) * 100))}%` } : undefined} /></div>
+          </div>
+        )}
         {exp.error && <div className="errbox">{exp.error}</div>}
         {note && <div className={note.startsWith("HDF5 written") ? "hint" : "errbox"} style={{ wordBreak: "break-all" }}>{note}</div>}
       </div>

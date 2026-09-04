@@ -1,9 +1,11 @@
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import type { RecordingStatus, Status } from "../../lib/api.ts";
+import { api, type RecordingStatus, type Status, type StorageInfo } from "../../lib/api.ts";
 
 interface Props { status: Status; recording: RecordingStatus | null; displayFps?: number; stale?: boolean; left?: ReactNode; }
 
 function num(v: number | null | undefined, d = 1): string { return v == null || !Number.isFinite(v) ? "—" : v.toFixed(d); }
+function gb(bytes: number | undefined): string { return bytes == null ? "—" : (bytes / 1e9).toFixed(0); }
 
 /**
  * Bottom status bar (spec §3). Never shows green; drops are red, gaps amber. The recorder's
@@ -12,9 +14,8 @@ function num(v: number | null | undefined, d = 1): string { return v == null || 
  * not have them vanish. Disk-low uses the recorder's own min_free_gb, never an invented
  * constant, so the warning threshold always matches what the backend will actually refuse.
  *
- * The live camera group (cam/disp/rx/viz-drop, NO FRAMES) belongs to the live stream only —
- * it renders when `left` is absent (the live page). A caller supplying `left` (e.g. the
- * playback transport) owns that slot instead and the camera group is hidden.
+ * The disk readout shows local free space, and — when an external drive is registered — the
+ * drive's free space too (or a warning when it is disconnected). Manage the drive in Setup → Storage.
  */
 export function StatusBar({ status, recording, displayFps = 0, stale = false, left }: Props) {
   const state = recording?.state;
@@ -22,6 +23,17 @@ export function StatusBar({ status, recording, displayFps = 0, stale = false, le
   const limit = recording?.min_free_gb ?? 2;
   const low = (recording?.free_space_gb ?? Infinity) < limit;
   const showCameraGroup = left === undefined;
+
+  const [storage, setStorage] = useState<StorageInfo | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const tick = () => { api.storage().then((s) => { if (alive) setStorage(s); }).catch(() => undefined); };
+    tick();
+    const id = setInterval(tick, 5000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
+  const drive = storage?.drive ?? null;
+
   return (
     <footer className="statusbar">
       {left}
@@ -44,7 +56,14 @@ export function StatusBar({ status, recording, displayFps = 0, stale = false, le
       <span className="right">
         {state === "recording" && <span className="badge rec">● REC {num(recording?.duration_s, 0)} s</span>}
         {state === "finalizing" && <span className="muted">finalizing…</span>}
-        <span className={low ? "bad" : ""}>disk <b>{num(recording?.free_space_gb)}</b> GB</span>
+        <span className={low ? "bad" : ""} title="Free space where recordings are written (manage the offload drive in Setup → Storage)">
+          {drive ? "local " : "disk "}<b>{num(recording?.free_space_gb)}</b> GB
+        </span>
+        {drive && (
+          drive.connected
+            ? <span title={`Offload drive at ${drive.mount}`}>drive <b>{gb(drive.free_bytes)}</b> GB</span>
+            : <span className="warnv" title={`Registered drive ${drive.mount} is not connected`}>drive ⚠ reconnect</span>
+        )}
       </span>
     </footer>
   );

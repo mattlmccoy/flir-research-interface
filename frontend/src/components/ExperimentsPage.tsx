@@ -6,6 +6,14 @@ type Sort = "newest" | "name" | "duration";
 
 export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) {
   const [items, setItems] = useState<Experiment[] | null>(null);
+  const [driveConnected, setDriveConnected] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const tick = () => { api.storage().then((s) => { if (alive) setDriveConnected(!!s.drive?.connected); }).catch(() => undefined); };
+    tick();
+    const id = setInterval(tick, 5000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
   const totalBytes = items ? items.reduce((a, e) => a + (e.size_bytes ?? 0), 0) : 0;
   const [err, setErr] = useState<string | null>(null);
   const [sort, setSort] = useState<Sort>("newest");
@@ -66,7 +74,7 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) 
       {items && items.length > 0 && shown.length === 0 && <div className="muted">No experiments match the filter.</div>}
       <div className="exp-grid">
         {shown.map((e) => (
-          <ExperimentCard key={e.name} exp={e} onOpen={() => onOpen(e.name)} onChanged={load}/>
+          <ExperimentCard key={e.name} exp={e} onOpen={() => onOpen(e.name)} onChanged={load} driveConnected={driveConnected} />
         ))}
       </div>
     </div>
