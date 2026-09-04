@@ -11,9 +11,14 @@ import json
 import time
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from flir_research_interface.api.app import create_app
+from flir_research_interface.visible.recorder import FFMPEG_CANDIDATES
+from flir_research_interface.visible.rtsp import find_ffprobe
+
+_HAVE_FFMPEG = find_ffprobe(FFMPEG_CANDIDATES) is not None
 
 RECORD_ROIS = [{"id": 1, "kind": "spot", "x": 10, "y": 10, "name": "centre"}]
 NEW_ROIS = [
@@ -29,6 +34,16 @@ def _client(tmp_path: Path) -> TestClient:
             default_backend="simulated", sim_fps=60.0, experiments_root=tmp_path, min_free_gb=0.0
         )
     )
+
+
+def _wait_derived(c: TestClient, name: str, timeout: float = 30.0) -> dict:
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < timeout:
+        job = c.get(f"/api/experiments/{name}/export/derived/status").json()
+        if job["state"] in ("done", "error"):
+            return job
+        time.sleep(0.1)
+    raise AssertionError("derived job did not finish in time")
 
 
 def _record(c: TestClient) -> str:
@@ -55,6 +70,7 @@ def test_put_rois_updates_metadata_and_keeps_optics(tmp_path: Path) -> None:
         c.post("/api/camera/disconnect")
 
 
+@pytest.mark.skipif(not _HAVE_FFMPEG, reason="ffmpeg not installed")
 def test_derived_regenerate_reflects_the_new_rois(tmp_path: Path) -> None:
     with _client(tmp_path) as c:
         name = _record(c)
@@ -66,7 +82,12 @@ def test_derived_regenerate_reflects_the_new_rois(tmp_path: Path) -> None:
         c.put(f"/api/experiments/{name}/rois", json={"rois": NEW_ROIS})
         r = c.post(f"/api/experiments/{name}/export/derived")
         assert r.status_code == 200, r.text
-        names = {e["name"] for e in r.json()["exports"]}
+        assert r.json()["state"] == "running"  # returns immediately, work runs in the background
+
+        # poll the progress endpoint until the job finishes
+        job = _wait_derived(c, name)
+        assert job["state"] == "done", job
+        names = {e["name"] for e in job["exports"]}
         assert "roi_series.csv" in names and "roi_plot.png" in names
 
         csv1 = (tmp_path / name / "exports" / "roi_series.csv").read_text()

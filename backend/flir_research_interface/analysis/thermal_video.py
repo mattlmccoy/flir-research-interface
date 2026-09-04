@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -160,11 +161,14 @@ def render_thermal_video(
     scale: int = 2,
     with_rois: bool = False,
     out_name: str | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
     """Render ``exports/thermal_preview.mp4`` (or ``out_name``) for ``reader``.
 
     ``scale`` upsamples the native frame (2 → 1280x960 for the A70); ``with_rois`` draws the
     stored ROIs with their live value on every frame (the file ``thermal_preview_rois.mp4``).
+    ``on_progress(frames_done, frame_count)`` is called as encoding proceeds (this is the slow
+    step) so a caller can show a determinate progress bar.
 
     Raises ``RuntimeError`` when ffmpeg is missing or fails, ``ValueError`` on an empty run.
     """
@@ -200,6 +204,8 @@ def render_thermal_video(
                     pad[: rgb.shape[0], : rgb.shape[1]] = rgb
                     rgb = pad
                 proc.stdin.write(np.ascontiguousarray(rgb).tobytes())
+            if on_progress is not None:
+                on_progress(min(s + BLOCK, reader.n_frames), reader.n_frames)
     except BrokenPipeError:
         pass  # ffmpeg died early; its stderr explains why (reported below)
     _, err = proc.communicate(timeout=300)  # closes stdin, drains stderr, waits

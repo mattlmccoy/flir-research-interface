@@ -227,6 +227,7 @@ def create_app(
             logger.info("peak frames: %s", write_annotated_frames(reader))
 
     app.state.render_tasks = set()
+    app.state.derived_jobs = {}  # experiment name -> progress record for on-demand regenerate
 
     def _render_thermal_video(exp_dir: Path) -> None:
         """exports/thermal_preview.mp4 (clean) and thermal_preview_rois.mp4 (ROIs drawn)."""
@@ -1014,20 +1015,57 @@ def create_app(
 
     @app.post("/api/experiments/{name}/export/derived")
     async def export_derived_route(name: str) -> dict[str, Any]:
-        """Re-generate every ROI-dependent derived file from the recording's stored ROIs.
+        """Start (or return) a background regenerate of the ROI-dependent derived files.
 
-        roi_series.csv, README/roi_plot/peak-frame images and the thermal videos. Pair with
-        ``PUT /rois`` to refresh them after editing ROIs in playback.
+        roi_series.csv, README/roi_plot/peak-frame images and the ROI-annotated thermal video —
+        from the recording's stored ROIs. The clean thermal video does not depend on the ROIs and
+        is never re-rendered here (it is the slow part). Returns a job record immediately; poll
+        ``/export/derived/status`` for progress. Pair with ``PUT /rois`` to refresh after editing.
         """
+        from flir_research_interface.analysis.thermal_video import render_thermal_video
 
-        def _work() -> dict[str, Any]:
+        _exp_dir(name)  # 404 early if the run is gone
+        existing = app.state.derived_jobs.get(name)
+        if existing is not None and existing["state"] == "running":
+            return existing
+        job: dict[str, Any] = {"state": "running", "step": "starting", "done": 0, "total": 0,
+                               "exports": None, "error": None}
+        app.state.derived_jobs[name] = job
+
+        def _work() -> None:
             exp_dir = _exp_dir(name)
+            job["step"] = "roi series"
             _export_roi_series(exp_dir)
+            job["step"] = "images"
             _write_run_summary(exp_dir)
-            _render_thermal_video(exp_dir)
-            return experiment_info(name)
+            reader = ExperimentReader(exp_dir)
+            if reader.metadata.get("rois"):
+                job["step"] = "roi video"
 
-        return await run_in_threadpool(_work)
+                def _cb(done: int, total: int) -> None:
+                    job["done"], job["total"] = done, total
+
+                render_thermal_video(reader, with_rois=True, on_progress=_cb)
+
+        async def _job() -> None:
+            try:
+                await run_in_threadpool(_work)
+                job["step"] = "done"
+                job["exports"] = experiment_info(name)["exports"]
+                job["state"] = "done"
+            except Exception as exc:  # noqa: BLE001 - surface the failure to the poller
+                job["state"], job["error"] = "error", str(exc)
+                logger.exception("derived regenerate failed for %s", name)
+
+        task = asyncio.create_task(_job())
+        app.state.render_tasks.add(task)
+        task.add_done_callback(app.state.render_tasks.discard)
+        return job
+
+    @app.get("/api/experiments/{name}/export/derived/status")
+    def export_derived_status(name: str) -> dict[str, Any]:
+        """Progress of the current/last derived regenerate for this run (see the POST)."""
+        return app.state.derived_jobs.get(name) or {"state": "idle"}
 
     @app.get("/api/experiments/{name}/series")
     async def experiment_series(

@@ -112,3 +112,16 @@ def test_label_font_has_the_degree_and_dash_glyphs() -> None:
     f = label_font()
     assert isinstance(f, ImageFont.FreeTypeFont)  # the bitmap default lacks ° (draws a box)
     assert f.getlength("15.0 to 25.3 °C") > f.getlength("15.0")
+
+
+@pytest.mark.skipif(find_ffprobe(FFMPEG_CANDIDATES) is None, reason="ffmpeg not installed")
+def test_render_reports_monotonic_progress_up_to_the_frame_count(tmp_path: Path) -> None:
+    """The slow ROI-video render must report progress so the UI can show a determinate bar."""
+    d = _make_experiment(tmp_path, n=12)
+    reader = ExperimentReader(d)
+    seen: list[tuple[int, int]] = []
+    render_thermal_video(reader, on_progress=lambda done, total: seen.append((done, total)))
+    assert seen, "on_progress was never called"
+    assert all(total == 12 for _, total in seen), "total is the frame count"
+    assert seen == sorted(seen), "progress is monotonic"
+    assert seen[-1][0] == 12, "progress reaches every frame"

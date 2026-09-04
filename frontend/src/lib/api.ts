@@ -52,6 +52,8 @@ export interface Profile { name: string; fields: ProfileField[]; marks: { label:
 export const DEFAULT_PROFILE: Profile = { name: "default", fields: [{ key: "operator", label: "Operator", type: "text" }, { key: "sample_id", label: "Sample ID", type: "text" }, { key: "notes", label: "Notes", type: "text" }], marks: [{ label: "event A", key: "a" }, { label: "event B", key: "b" }] };
 export interface Hdf5Export { path: string; size_bytes: number; sha256: string; n_frames: number; }
 export interface ThermalVideoExport { path: string; frames: number; fps: number; width: number; height: number; vmin: number; vmax: number; units: string; bytes: number; }
+/** Progress of an on-demand derived regenerate (background job). */
+export interface DerivedJob { state: "running" | "done" | "error" | "idle"; step?: string; done?: number; total?: number; exports?: { name: string; bytes: number }[] | null; error?: string | null; }
 
 export interface Experiment {
   name: string;
@@ -69,6 +71,8 @@ export interface Experiment {
   experiment?: Record<string, unknown> | null;
   error?: string;
   started_utc?: string | null;
+  /** ROIs stored with the recording (what its derived files were built from). */
+  rois?: Record<string, unknown>[] | null;
 }
 
 export interface ExperimentInfo { name: string; path: string; n_frames: number; size_bytes?: number; width: number; height: number; duration_s: number; complete: boolean; ir_format: string | null; conversion: Record<string, unknown> | null; experiment: Record<string, unknown> | null; camera: Record<string, unknown> | null; software: Record<string, unknown> | null; started_utc: string | null; events?: Record<string, unknown>[]; manifest: Record<string, unknown> | null; visible?: { file?: string | null; measured_fps?: number | null; error?: string | null } | null; visible_alignment?: Record<string, unknown> | null; rois?: Record<string, unknown>[] | null; thermal_preview?: { path: string; bytes: number } | null; exports?: { name: string; bytes: number }[]; }
@@ -102,9 +106,11 @@ export const api = {
   /** Persist the ROIs currently on screen into the recording so derived files can match them. */
   putRois: (name: string, rois: unknown[]) =>
     j<{ rois: number }>(req(`/api/experiments/${encodeURIComponent(name)}/rois`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ rois }) })),
-  /** Re-generate every ROI-dependent derived file from the recording's stored ROIs. */
+  /** Start a background regenerate of the ROI-dependent derived files; poll exportDerivedStatus. */
   exportDerived: (name: string) =>
-    j<ExperimentInfo>(req(`/api/experiments/${encodeURIComponent(name)}/export/derived`, { method: "POST" })),
+    j<DerivedJob>(req(`/api/experiments/${encodeURIComponent(name)}/export/derived`, { method: "POST" })),
+  exportDerivedStatus: (name: string) =>
+    j<DerivedJob>(req(`/api/experiments/${encodeURIComponent(name)}/export/derived/status`)),
   exportFileUrl: (name: string, file: string) => u(`/api/experiments/${encodeURIComponent(name)}/exports/${encodeURIComponent(file)}`),
   thermalVideoUrl: (name: string) => u(`/api/experiments/${encodeURIComponent(name)}/thermal_preview.mp4`),
   frameBuffer: async (name: string, index: number): Promise<ArrayBuffer> => {

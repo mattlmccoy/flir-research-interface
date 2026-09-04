@@ -195,7 +195,7 @@ export function App() {
   }
   if (page === "experiments") {
     return <StudioFrame layout={layout} page topbar={topbar} statusbar={statusbar}
-      center={<ExperimentsPage onOpen={(name) => { setOpenExp(name); setPage("playback"); }} />} />;
+      center={<ExperimentsPage onOpen={(name) => { setOpenExp(name); setPage("playback"); }} currentRois={rois.rois} />} />;
   }
   if (page === "playback" && openExp) {
     return <PlaybackPage name={openExp} layout={layout} dispatch={dispatch} topbar={topbar}

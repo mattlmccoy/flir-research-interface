@@ -20,6 +20,26 @@ function fmtBytes(n: number): string {
 /** Small rotating ring shown inside a button while its export runs. */
 const Spinner = () => <span className="spinner" aria-hidden="true" />;
 
+const STEP_LABEL: Record<string, string> = {
+  starting: "starting…", "roi series": "writing ROI series…", images: "rendering images…",
+  "roi video": "encoding ROI video", done: "done", running: "working…",
+};
+function progLabel(prog: { step: string; done: number; total: number } | null): string {
+  if (!prog) return "regenerating…";
+  const base = STEP_LABEL[prog.step] ?? prog.step;
+  if (prog.step === "roi video" && prog.total > 0) return `${base} · frame ${prog.done}/${prog.total} (${Math.round((prog.done / prog.total) * 100)}%)`;
+  return base;
+}
+/** Determinate bar when total is known, otherwise an indeterminate sweep. */
+function ProgressBar({ done, total }: { done: number; total: number }) {
+  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : null;
+  return (
+    <div className="progressbar" style={{ marginTop: 6 }} role="progressbar" aria-valuenow={pct ?? undefined} aria-valuemin={0} aria-valuemax={100}>
+      <div className={`progressbar-fill${pct === null ? " indeterminate" : ""}`} style={pct === null ? undefined : { width: `${pct}%` }} />
+    </div>
+  );
+}
+
 export function ExportSection({ name, index, nFrames, rois, celsius, thermalPreview, onThermalPreview, files = [], onRefresh, storedRois }: Props) {
   const [busy, setBusy] = useState(false);
   // Which single-flight export (hdf5 / range / report) is running, so only its button spins.
@@ -33,16 +53,29 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
   const [report, setReport] = useState<{ path: string; pages: number; size_bytes: number } | null>(null);
   const [derivedBusy, setDerivedBusy] = useState(false);
   const [derivedOut, setDerivedOut] = useState<string | null>(null);
-  // The derived files (ROI plot, peak frames, videos, roi_series.csv) are generated at record
-  // time from the ROIs that existed then. Persist the on-screen ROIs, then regenerate.
-  async function regenerateDerived() {
-    setDerivedBusy(true); setErr(null); setDerivedOut(null);
+  const [prog, setProg] = useState<{ step: string; done: number; total: number } | null>(null);
+  const storedCount = Array.isArray(storedRois) ? storedRois.length : 0;
+  // The derived files (ROI plot, peak frames, ROI video, roi_series.csv) are built from the ROIs
+  // stored with the recording. `useOnScreen` persists the current ROIs first; otherwise the
+  // recording's own stored ROIs are used. The regenerate runs in the background — poll for progress.
+  async function regenerateDerived(useOnScreen: boolean) {
+    setDerivedBusy(true); setErr(null); setDerivedOut(null); setProg({ step: "starting", done: 0, total: 0 });
     try {
-      await api.putRois(name, rois);
+      if (useOnScreen) await api.putRois(name, rois);
       await api.exportDerived(name);
-      onThermalPreview?.(); onRefresh?.();
-      setDerivedOut(`updated to match ${rois.length} ROI${rois.length === 1 ? "" : "s"} on screen`);
-    } catch (e) { setErr(String(e)); } finally { setDerivedBusy(false); }
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 700));
+        const jb = await api.exportDerivedStatus(name);
+        setProg({ step: jb.step ?? jb.state, done: jb.done ?? 0, total: jb.total ?? 0 });
+        if (jb.state === "done") {
+          onThermalPreview?.(); onRefresh?.();
+          setDerivedOut(useOnScreen ? `updated to match the ${rois.length} ROI${rois.length === 1 ? "" : "s"} on screen` : `regenerated from the recording's ${storedCount} stored ROI${storedCount === 1 ? "" : "s"}`);
+          break;
+        }
+        if (jb.state === "error") { setErr(jb.error ?? "regenerate failed"); break; }
+        if (jb.state === "idle") break;
+      }
+    } catch (e) { setErr(String(e)); } finally { setDerivedBusy(false); setProg(null); }
   }
   async function makeReport() {
     setBusy(true); setBusyKind("report"); setErr(null);
@@ -70,24 +103,38 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
     try { const r = await api.reveal(name); if (!r.ok) setErr(r.error ?? "reveal failed"); } catch (e) { setErr(String(e)); }
   }
 
+  const busyElsewhere = busy || tvBusy || nFrames === 0;
   return (
     <>
-      {stale ? (
+      {derivedBusy ? (
+        <div className="warnbox derived-progress">
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}><Spinner /><b>{progLabel(prog)}</b></div>
+          <ProgressBar done={prog?.done ?? 0} total={prog?.total ?? 0} />
+          <div className="hint" style={{ marginTop: 3 }}>Rendering the ROI-annotated video is the slow step; you can keep working while it finishes.</div>
+        </div>
+      ) : stale ? (
         <div className="warnbox derived-stale">
           <b>Derived files are out of date.</b> The ROI plot, peak-frame images, thermal-ROI video and roi_series.csv were built from a different set of ROIs than the {rois.length} on screen.
-          <button className="primary" style={{ marginTop: 8, width: "100%" }} disabled={derivedBusy || busy || tvBusy || nFrames === 0} onClick={regenerateDerived}>
-            {derivedBusy ? <><Spinner />regenerating derived files…</> : `Update derived files to match the ${rois.length} ROI${rois.length === 1 ? "" : "s"} on screen`}
-          </button>
-          {derivedOut && <div className="hint" style={{ color: "var(--accent)", marginTop: 4 }}>{derivedOut}</div>}
+          <div className="row" style={{ marginTop: 8, gap: 6 }}>
+            <button className="primary" style={{ flex: "1 1 auto" }} disabled={busyElsewhere} onClick={() => regenerateDerived(true)}
+              title="Save the ROIs currently on screen into this run and rebuild every derived file to match.">
+              Update with the {rois.length} ROI{rois.length === 1 ? "" : "s"} on screen
+            </button>
+            <button className="secondary" disabled={busyElsewhere} onClick={() => regenerateDerived(false)}
+              title="Leave this run's stored ROIs as they are and rebuild the derived files from them.">
+              Keep the {storedCount} stored
+            </button>
+          </div>
         </div>
       ) : (files.length > 0 || rois.length > 0) ? (
         <div className="hint derived-ok" style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span aria-hidden="true">✓</span> Derived files match the {rois.length} ROI{rois.length === 1 ? "" : "s"} on screen.
-          <button className="secondary" style={{ marginLeft: "auto" }} disabled={derivedBusy || busy || tvBusy || nFrames === 0} onClick={regenerateDerived} title="Force a re-render of the ROI plot, peak frames, thermal-ROI video and roi_series.csv from the current ROIs">
-            {derivedBusy ? <><Spinner />regenerating…</> : "re-generate"}
+          <button className="secondary" style={{ marginLeft: "auto" }} disabled={busyElsewhere} onClick={() => regenerateDerived(true)} title="Force a re-render of the ROI plot, peak frames, thermal-ROI video and roi_series.csv from the current ROIs">
+            re-generate
           </button>
         </div>
       ) : null}
+      {!derivedBusy && derivedOut && <div className="hint" style={{ color: "var(--accent)" }}>{derivedOut}</div>}
       <div className="kv">
         <span>ROI series</span>
         <span className="v plain" style={{ textAlign: "right" }}>
