@@ -140,6 +140,22 @@ class RoisRequest(BaseModel):
     rois: list[dict[str, Any]]
 
 
+class MediaRequest(BaseModel):
+    start: int = 0
+    stop: int = 0
+    step: int = Field(default=1, ge=1, le=1000)
+    scale: int = Field(default=2, ge=1, le=4)
+    speed: float = Field(default=1.0, gt=0, le=60)
+    fps: float | None = None
+    fmt: str = "mp4"
+    with_rois: bool = True
+    frame_stats: bool = False
+    timestamp: bool = True
+    colorbar: bool = True
+    title: str | None = None
+    rois: list[dict[str, Any]] | None = None  # when given, persist first (on-screen ROIs)
+
+
 class RegisterDriveRequest(BaseModel):
     mount: str
 
@@ -239,6 +255,7 @@ def create_app(
     app.state.render_tasks = set()
     app.state.derived_jobs = {}  # experiment name -> progress record for on-demand regenerate
     app.state.move_jobs = {}  # experiment name -> progress record for an offload/restore move
+    app.state.media_jobs = {}  # experiment name -> progress record for a media-export render
     # one lock per experiment so the post-stop auto-render and an on-demand regenerate never write
     # that run's thermal-video files at the same time
     app.state.render_locks = KeyedLocks()
@@ -1203,6 +1220,59 @@ def create_app(
         """Progress of the current/last derived regenerate for this run (see the POST)."""
         return app.state.derived_jobs.get(name) or {"state": "idle"}
 
+    @app.post("/api/experiments/{name}/export/media")
+    async def export_media_route(name: str, req: MediaRequest) -> dict[str, Any]:
+        """Start a background media-export render (MP4/GIF of a window with overlays).
+
+        Returns a job record immediately; poll ``/export/media/status``. When ``rois`` is given the
+        on-screen ROIs are persisted first (like the derived flow); else the stored ROIs are used.
+        """
+        from flir_research_interface.analysis.media import MediaOptions, render_clip
+        from flir_research_interface.recording.metadata import set_experiment_rois
+
+        _exp_dir(name)
+        if req.rois is not None:
+            set_experiment_rois(_exp_dir(name), _rois_with_labels(req.rois))
+        existing = app.state.media_jobs.get(name)
+        if existing is not None and existing["state"] == "running":
+            return existing
+        job: dict[str, Any] = {"state": "running", "step": "starting", "done": 0, "total": 0,
+                               "file": None, "error": None}
+        app.state.media_jobs[name] = job
+        opts = MediaOptions(
+            start=req.start, stop=req.stop, step=req.step, scale=req.scale, speed=req.speed,
+            fps=req.fps, fmt=req.fmt, with_rois=req.with_rois, frame_stats=req.frame_stats,
+            timestamp=req.timestamp, colorbar=req.colorbar, title=req.title,
+        )
+
+        def _work() -> dict[str, Any]:
+            def _cb(done: int, total: int) -> None:
+                job["step"], job["done"], job["total"] = "encoding", done, total
+            return render_clip(_open(name), opts, on_progress=_cb)
+
+        async def _job() -> None:
+            try:
+                async with app.state.render_locks.get(name):
+                    info = await run_in_threadpool(_work)
+                job["file"] = {
+                    "name": info["name"], "bytes": info["bytes"], "note": info.get("note"),
+                }
+                job["step"], job["state"] = "done", "done"
+            except (ValueError, RuntimeError) as exc:
+                job["state"], job["error"] = "error", str(exc)
+            except Exception as exc:  # noqa: BLE001
+                job["state"], job["error"] = "error", str(exc)
+                logger.exception("media export failed for %s", name)
+
+        task = asyncio.create_task(_job())
+        app.state.render_tasks.add(task)
+        task.add_done_callback(app.state.render_tasks.discard)
+        return job
+
+    @app.get("/api/experiments/{name}/export/media/status")
+    def export_media_status(name: str) -> dict[str, Any]:
+        return app.state.media_jobs.get(name) or {"state": "idle"}
+
     @app.get("/api/experiments/{name}/series")
     async def experiment_series(
         name: str, rois: str, valid: str | None = None, max_points: int = 0
@@ -1388,6 +1458,18 @@ def create_app(
         path = _exp_dir(name) / "exports" / file
         if not path.is_file():
             raise HTTPException(404, f"exports/{file} not found")
+        return FileResponse(path, headers={"Accept-Ranges": "bytes"})
+
+    @app.get("/api/experiments/{name}/exports/clips/{file}")
+    def experiment_clip_file(name: str, file: str) -> Response:
+        """A media-export clip from the run's exports/clips/ folder (MP4 / GIF)."""
+        from starlette.responses import FileResponse
+
+        if "/" in file or "\\" in file or file.startswith("."):
+            raise HTTPException(400, "invalid file name")
+        path = _exp_dir(name) / "exports" / "clips" / file
+        if not path.is_file():
+            raise HTTPException(404, f"clips/{file} not found")
         return FileResponse(path, headers={"Accept-Ranges": "bytes"})
 
     @app.get("/api/experiments/{name}/thermal_preview.mp4")

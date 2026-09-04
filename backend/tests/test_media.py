@@ -60,3 +60,36 @@ def test_clip_renders_gif_with_size_guard(tmp_path: Path) -> None:
     info = render_clip(r, MediaOptions(start=0, stop=20, fmt="gif", scale=2))
     out = Path(info["path"])
     assert out.is_file() and out.suffix == ".gif" and out.stat().st_size > 0
+
+
+@pytest.mark.skipif(not _HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_media_export_api_job(tmp_path: Path) -> None:
+    import time
+
+    from fastapi.testclient import TestClient
+
+    from flir_research_interface.api.app import create_app
+
+    with TestClient(create_app(default_backend="simulated", sim_fps=60.0,
+                               experiments_root=tmp_path, min_free_gb=0.0)) as c:
+        devs = c.get("/api/camera/devices").json()
+        c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        rec = c.post("/api/recording/start", json={"name": "clip"}).json()
+        name = Path(rec["experiment_dir"]).name
+        time.sleep(0.3)
+        c.post("/api/recording/stop")
+        c.post("/api/camera/disconnect")
+        r = c.post(f"/api/experiments/{name}/export/media",
+                   json={"start": 0, "stop": 8, "fmt": "gif", "title": "My clip",
+                         "frame_stats": True})
+        assert r.status_code == 200 and r.json()["state"] == "running"
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < 30:
+            job = c.get(f"/api/experiments/{name}/export/media/status").json()
+            if job["state"] in ("done", "error"):
+                break
+            time.sleep(0.1)
+        assert job["state"] == "done", job
+        fname = job["file"]["name"]
+        assert fname.endswith(".gif")
+        assert c.get(f"/api/experiments/{name}/exports/clips/{fname}").status_code == 200
