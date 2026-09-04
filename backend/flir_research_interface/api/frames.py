@@ -24,6 +24,10 @@ from flir_research_interface.radiometry.temperature_linear import (
 )
 
 
+def _finite(v: Any) -> float | None:
+    return float(v) if np.isfinite(v) else None
+
+
 def frame_header(frame: Frame, stats: dict[str, Any] | None = None) -> dict[str, Any]:
     h, w = frame.counts.shape
     header: dict[str, Any] = {
@@ -51,12 +55,21 @@ def frame_header(frame: Frame, stats: dict[str, Any] | None = None) -> dict[str,
     except ValueError:
         k = None
     if k is not None:
+        from flir_research_interface.radiometry.overrange import over_range_mask
+
         header["kelvin_per_count"] = k
         c = counts_to_celsius(frame.counts, IRFormat(frame.ir_format))
-        header["min_c"] = float(c.min())
-        header["max_c"] = float(c.max())
-        header["mean_c"] = float(c.mean())
-        header["center_c"] = float(c[h // 2, w // 2])
+        # over-range (saturated / wrapped) pixels carry no valid temperature — exclude them from
+        # the whole-frame stats so a wrapped hot-spot can't drag min_c to an impossible value
+        over = over_range_mask(frame.counts)
+        valid = c if over is None else np.where(over, np.nan, c)
+        header["min_c"] = _finite(np.nanmin(valid))
+        header["max_c"] = _finite(np.nanmax(valid))
+        header["mean_c"] = _finite(np.nanmean(valid))
+        center = c[h // 2, w // 2]
+        header["center_c"] = None if (over is not None and over[h // 2, w // 2]) else float(center)
+        if over is not None:
+            header["over_range"] = int(over.sum())
     if stats:
         for key in ("camera_fps", "viz_dropped", "frames_received", "state"):
             if key in stats:
