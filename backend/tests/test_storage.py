@@ -86,3 +86,26 @@ def test_forget_drive_clears_config_without_touching_files(tmp_path: Path) -> No
     forget_drive(local)
     assert load_storage_config(local) == {"drive": None}
     assert (drive / DRIVE_SUBDIR).is_dir()  # files left in place
+
+
+def test_verify_copy_ok_and_detects_size_and_content_mismatch(tmp_path: Path) -> None:
+    from flir_research_interface.storage import verify_copy
+
+    src = tmp_path / "a"
+    dst = tmp_path / "b"
+    for d in (src, dst):
+        (d / "sub").mkdir(parents=True)
+        (d / "metadata.json").write_text('{"x":1}')
+        (d / "sub" / "chunk").write_bytes(b"0123456789")
+    assert verify_copy(src, dst) is None  # identical → OK
+
+    (dst / "sub" / "chunk").write_bytes(b"012345678")  # size differs
+    assert "chunk" in (verify_copy(src, dst) or "")
+
+    (dst / "sub" / "chunk").write_bytes(b"0123456789")  # restore size
+    (dst / "metadata.json").write_text('{"x":2}')  # same size, different bytes
+    assert "metadata.json" in (verify_copy(src, dst) or "")
+
+    (dst / "metadata.json").write_text('{"x":1}')
+    (dst / "sub" / "chunk").unlink()  # missing file
+    assert "chunk" in (verify_copy(src, dst) or "")

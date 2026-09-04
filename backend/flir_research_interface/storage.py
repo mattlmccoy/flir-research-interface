@@ -8,6 +8,7 @@ always stays on local disk; this module only offloads finished runs. See the des
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -23,6 +24,8 @@ import psutil
 DRIVE_SUBDIR = "FLIR-recordings"
 #: Sidecar in the local root that remembers the registered drive (git-ignored).
 CONFIG_NAME = ".storage.json"
+#: Small integrity-critical files that are hash-verified after a copy (the rest are size-verified).
+CRITICAL_FILES = frozenset({"metadata.json", "manifest.json"})
 
 
 @dataclass(frozen=True)
@@ -153,12 +156,46 @@ def forget_drive(local_root: Path | str) -> dict[str, Any]:
     return cfg
 
 
+# -- move: copy → verify → delete source -------------------------------------------------------
+
+
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def verify_copy(src: Path | str, dst: Path | str) -> str | None:
+    """Confirm ``dst`` is a faithful copy of ``src``. Returns ``None`` when good, else a reason.
+
+    Every file under ``src`` must exist in ``dst`` with the same size; the integrity-critical small
+    files (metadata/manifest) are additionally SHA-256 compared to catch same-size corruption.
+    """
+    src, dst = Path(src), Path(dst)
+    for sp in src.rglob("*"):
+        if not sp.is_file():
+            continue
+        rel = sp.relative_to(src)
+        dp = dst / rel
+        if not dp.is_file():
+            return f"missing in copy: {rel}"
+        if sp.stat().st_size != dp.stat().st_size:
+            return f"size mismatch: {rel}"
+        if sp.name in CRITICAL_FILES and _sha256(sp) != _sha256(dp):
+            return f"checksum mismatch: {rel}"
+    return None
+
+
 __all__ = [
     "CONFIG_NAME",
+    "CRITICAL_FILES",
     "DRIVE_SUBDIR",
     "forget_drive",
     "load_storage_config",
     "register_drive",
     "save_storage_config",
     "selectable_drives",
+    "verify_copy",
 ]
