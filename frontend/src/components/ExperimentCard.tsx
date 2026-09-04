@@ -147,28 +147,32 @@ export function ExperimentCard({ exp, onOpen, onChanged, driveConnected = false 
           {roisDiffer && <span className="badge warn" style={{ marginLeft: 6 }} title="You've changed this run's ROIs since its exports were built. Open it and regenerate to update the ROI plot, video and roi_series.csv.">ROIs edited</span>}
         </span>
         <div className="actions">
-          <button className="primary" disabled={!n || !!exp.error} onClick={onOpen}>
-            open
-          </button>
-          <button className="secondary" disabled={busy} onClick={reveal} title="Show in Finder / Explorer">
-            reveal
-          </button>
-          <button className="secondary" disabled={busy || !n || !!exp.error} onClick={exportH5} title="Export the whole recording to HDF5 (in the experiment's exports folder)">
-            export
-          </button>
-          {onDrive ? (
-            <button className="secondary" disabled={busy} onClick={() => moveTo("local")} title="Copy this run back to local disk (verified, then removed from the drive)">
-              ← local
+          <div className="actions-row">
+            <button className="primary" disabled={!n || !!exp.error} onClick={onOpen}>
+              open
             </button>
-          ) : (
-            <button className="secondary" disabled={busy || !driveConnected} onClick={() => moveTo("drive")}
-              title={driveConnected ? "Move this run to the external drive to free local space (copy → verify → delete)" : "Register an external drive in Setup → Storage first"}>
-              → drive
+            <button className="secondary" disabled={busy} onClick={reveal} title="Show in Finder / Explorer">
+              reveal
             </button>
-          )}
-          <button className="danger" disabled={busy} onClick={remove} title="Delete this run and everything in its folder (no undo)" style={{ marginLeft: "auto" }}>
-            delete
-          </button>
+            <button className="secondary" disabled={busy || !n || !!exp.error} onClick={exportH5} title="Export the whole recording to HDF5 (in the experiment's exports folder)">
+              export
+            </button>
+          </div>
+          <div className="actions-row">
+            {onDrive ? (
+              <button className="secondary" disabled={busy} onClick={() => moveTo("local")} title="Copy this run back to local disk (verified, then removed from the drive)">
+                ← local disk
+              </button>
+            ) : (
+              <button className="secondary" disabled={busy || !driveConnected} onClick={() => moveTo("drive")}
+                title={driveConnected ? "Move this run to the external drive to free local space (copy → verify → delete)" : "Register an external drive in Setup → Storage first"}>
+                move to drive →
+              </button>
+            )}
+            <button className="danger" disabled={busy} onClick={remove} title="Delete this run and everything in its folder (no undo)">
+              delete
+            </button>
+          </div>
         </div>
         {move && (
           <div style={{ marginTop: 4 }}>
