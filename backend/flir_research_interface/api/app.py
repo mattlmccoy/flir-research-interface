@@ -14,6 +14,7 @@ import os
 import platform
 import shutil
 import struct
+import sys
 import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
@@ -25,7 +26,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from flir_research_interface import __version__
+from flir_research_interface import __version__, storage
 from flir_research_interface.acquisition.service import AcquisitionService, ServiceState
 from flir_research_interface.api.frames import encode_frame_message
 from flir_research_interface.api.reveal import Runner, contained, reveal
@@ -139,6 +140,14 @@ class RoisRequest(BaseModel):
     rois: list[dict[str, Any]]
 
 
+class RegisterDriveRequest(BaseModel):
+    mount: str
+
+
+class MoveRequest(BaseModel):
+    to: str  # "drive" | "local"
+
+
 class ForceIpRequest(BaseModel):
     mac: str
     ip: str
@@ -229,6 +238,7 @@ def create_app(
 
     app.state.render_tasks = set()
     app.state.derived_jobs = {}  # experiment name -> progress record for on-demand regenerate
+    app.state.move_jobs = {}  # experiment name -> progress record for an offload/restore move
     # one lock per experiment so the post-stop auto-render and an on-demand regenerate never write
     # that run's thermal-video files at the same time
     app.state.render_locks = KeyedLocks()
@@ -897,12 +907,23 @@ def create_app(
                     pass
         return total
 
+    def _roots() -> list[tuple[str, Path]]:
+        """(library, root) pairs to resolve runs in: always local, plus the drive when mounted."""
+        roots: list[tuple[str, Path]] = [("local", Path(app.state.experiments_root))]
+        drive = storage.load_storage_config(app.state.experiments_root)["drive"]
+        if drive and Path(drive["root"]).is_dir():  # only when the registered drive is connected
+            roots.append(("drive", Path(drive["root"])))
+        return roots
+
     @app.get("/api/experiments")
     def experiments() -> list[dict[str, Any]]:
-        root: Path = app.state.experiments_root
-        items = list_experiments(root)
-        for it in items:
-            it["size_bytes"] = _dir_size(root / str(it.get("name", "")))
+        items: list[dict[str, Any]] = []
+        for lib, root in _roots():
+            for it in list_experiments(root, library=lib):
+                it["size_bytes"] = _dir_size(root / str(it.get("name", "")))
+                items.append(it)
+        # newest first across both libraries (names are timestamped)
+        items.sort(key=lambda e: str(e.get("name", "")), reverse=True)
         return items
 
     @app.get("/api/experiments/summary")
@@ -920,15 +941,121 @@ def create_app(
         }
 
     def _exp_dir(name: str) -> Path:
-        root: Path = app.state.experiments_root
         if "/" in name or "\\" in name or name in ("", ".", ".."):
             raise HTTPException(400, "invalid experiment name")
-        d = root / name
-        if not d.is_dir():
-            raise HTTPException(404, f"experiment {name!r} not found")
-        if not contained(root, d):
-            raise HTTPException(400, "experiment path is outside the experiments root")
-        return d
+        for _lib, root in _roots():
+            d = root / name
+            if not d.is_dir():
+                continue
+            if not contained(root, d):  # a symlink escaping the root
+                raise HTTPException(400, "experiment path is outside the experiments root")
+            return d
+        raise HTTPException(404, f"experiment {name!r} not found")
+
+    # -- external-drive storage (offload) ------------------------------------------------------
+
+    @app.get("/api/storage/volumes")
+    def storage_volumes() -> list[dict[str, Any]]:
+        """External drives that can be registered as the offload target (filtered, writable)."""
+        drives = storage.selectable_drives(sys.platform)
+        cfg = storage.load_storage_config(app.state.experiments_root)["drive"]
+        registered = cfg["mount"] if cfg else None
+        for d in drives:
+            d["is_registered"] = d["mount"] == registered
+        return drives
+
+    def _storage_state() -> dict[str, Any]:
+        root: Path = app.state.experiments_root
+        probe = root if root.exists() else root.parent
+        local = {
+            "root": str(root),
+            "free_bytes": int(shutil.disk_usage(probe).free) if probe.exists() else 0,
+            "total_bytes": int(shutil.disk_usage(probe).total) if probe.exists() else 0,
+        }
+        drive = storage.load_storage_config(root)["drive"]
+        connected = bool(drive and Path(drive["root"]).is_dir())
+        drive_info = None
+        if drive:
+            drive_info = {**drive, "connected": connected}
+            if connected:
+                du = shutil.disk_usage(drive["mount"])
+                drive_info["free_bytes"], drive_info["total_bytes"] = int(du.free), int(du.total)
+        return {"local": local, "drive": drive_info}
+
+    @app.get("/api/storage")
+    def storage_state() -> dict[str, Any]:
+        return _storage_state()
+
+    @app.put("/api/storage/drive")
+    def storage_register(req: RegisterDriveRequest) -> dict[str, Any]:
+        try:
+            storage.register_drive(app.state.experiments_root, req.mount)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return _storage_state()
+
+    @app.delete("/api/storage/drive")
+    def storage_forget() -> dict[str, Any]:
+        storage.forget_drive(app.state.experiments_root)
+        return _storage_state()
+
+    @app.post("/api/experiments/{name}/move")
+    async def move_experiment_route(name: str, req: MoveRequest) -> dict[str, Any]:
+        """Offload a run to the drive (``to:"drive"``) or bring it back (``to:"local"``).
+
+        Copy → verify → delete-source, in the background; poll ``…/move/status``. Guarded by the
+        per-run render lock so a move never races a render/regenerate of the same run.
+        """
+        if req.to not in ("drive", "local"):
+            raise HTTPException(400, "to must be 'drive' or 'local'")
+        rec = recorder()
+        src = _exp_dir(name)  # 404 if unknown
+        if (
+            rec is not None
+            and rec.experiment_dir is not None
+            and rec.experiment_dir.resolve() == src.resolve()
+        ):
+            raise HTTPException(409, "this run is being recorded right now")
+        existing = app.state.move_jobs.get(name)
+        if existing is not None and existing["state"] == "running":
+            return existing
+        cfg = storage.load_storage_config(app.state.experiments_root)["drive"]
+        if not cfg or not Path(cfg["root"]).is_dir():
+            raise HTTPException(409, "no external drive is connected; register one first")
+        dst_root = Path(cfg["root"]) if req.to == "drive" else Path(app.state.experiments_root)
+        if contained(dst_root, src):
+            raise HTTPException(409, f"{name} is already on the {req.to} storage")
+
+        job: dict[str, Any] = {
+            "state": "running", "to": req.to, "done": 0, "total": 0, "error": None,
+        }
+        app.state.move_jobs[name] = job
+
+        def _work() -> None:
+            def _cb(done: int, total: int) -> None:
+                job["done"], job["total"] = done, total
+
+            storage.move_experiment(src, dst_root, on_progress=_cb)
+
+        async def _job() -> None:
+            try:
+                async with app.state.render_locks.get(name):
+                    await run_in_threadpool(_work)
+                job["state"] = "done"
+            except ValueError as exc:  # not enough space
+                job["state"], job["error"] = "error", str(exc)
+            except Exception as exc:  # noqa: BLE001 - surface to the poller; source is left intact
+                job["state"], job["error"] = "error", str(exc)
+                logger.exception("move failed for %s", name)
+
+        task = asyncio.create_task(_job())
+        app.state.render_tasks.add(task)
+        task.add_done_callback(app.state.render_tasks.discard)
+        return job
+
+    @app.get("/api/experiments/{name}/move/status")
+    def move_status(name: str) -> dict[str, Any]:
+        return app.state.move_jobs.get(name) or {"state": "idle"}
 
     def _open(name: str) -> ExperimentReader:
         d = _exp_dir(name)
@@ -938,9 +1065,8 @@ def create_app(
             raise HTTPException(404, f"experiment {name!r} is not readable: {exc}") from exc
 
     def _reveal(path: Path) -> dict[str, Any]:
-        root: Path = app.state.experiments_root
-        if not contained(root, path):
-            raise HTTPException(400, "path is outside the experiments root")
+        if not any(contained(root, path) for _lib, root in _roots()):
+            raise HTTPException(400, "path is outside the experiments roots")
         res = reveal(path.resolve(), runner=app.state.reveal_runner)
         if not res["ok"] and "no file manager" in res.get("error", ""):
             raise HTTPException(501, res["error"])

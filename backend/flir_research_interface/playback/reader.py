@@ -166,8 +166,12 @@ class ExperimentReader:
         return block
 
 
-def list_experiments(root: Path) -> list[dict[str, Any]]:
-    """Summaries of all experiment directories under ``root``, newest first."""
+def list_experiments(root: Path, library: str = "local") -> list[dict[str, Any]]:
+    """Summaries of all experiment directories under ``root``, newest first.
+
+    Each summary is tagged with ``library`` (e.g. "local" / "drive") and its ``root`` so the caller
+    can union runs that live in different storage locations.
+    """
     root = Path(root)
     if not root.is_dir():
         return []
@@ -180,6 +184,7 @@ def list_experiments(root: Path) -> list[dict[str, Any]]:
             insp["name"] = d.name
             insp["n_frames"] = insp.get("frames_on_disk", 0)
             insp["error"] = "unreadable experiment"
+            insp["library"], insp["root"] = library, str(root)
             out.append(insp)
             continue
         info = r.info()
@@ -191,6 +196,7 @@ def list_experiments(root: Path) -> list[dict[str, Any]]:
         }
         info.pop("camera", None)
         info.pop("software", None)
+        info["library"], info["root"] = library, str(root)
         out.append(info)
     return out
 
