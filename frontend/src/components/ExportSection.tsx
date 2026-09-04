@@ -23,6 +23,7 @@ const Spinner = () => <span className="spinner" aria-hidden="true" />;
 const STEP_LABEL: Record<string, string> = {
   starting: "starting…", "roi series": "writing ROI series…", images: "rendering images…",
   "roi video": "encoding ROI video", done: "done", running: "working…",
+  "waiting for the current render": "waiting for the current render to finish…",
 };
 function progLabel(prog: { step: string; done: number; total: number } | null): string {
   if (!prog) return "regenerating…";

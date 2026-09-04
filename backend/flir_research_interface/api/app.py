@@ -32,6 +32,7 @@ from flir_research_interface.api.reveal import Runner, contained, reveal
 from flir_research_interface.camera import CAMERA_BACKENDS, create_backend
 from flir_research_interface.camera.base import CameraBackend, CameraError, DeviceDescriptor, Frame
 from flir_research_interface.camera.simulated import HotspotRampScene
+from flir_research_interface.concurrency import KeyedLocks
 from flir_research_interface.playback.reader import ExperimentReader, list_experiments
 from flir_research_interface.recording.recorder import Recorder, RecorderState
 from flir_research_interface.sdk_install import detect_and_select, pyspin_importable
@@ -228,6 +229,9 @@ def create_app(
 
     app.state.render_tasks = set()
     app.state.derived_jobs = {}  # experiment name -> progress record for on-demand regenerate
+    # one lock per experiment so the post-stop auto-render and an on-demand regenerate never write
+    # that run's thermal-video files at the same time
+    app.state.render_locks = KeyedLocks()
 
     def _render_thermal_video(exp_dir: Path) -> None:
         """exports/thermal_preview.mp4 (clean) and thermal_preview_rois.mp4 (ROIs drawn)."""
@@ -243,7 +247,8 @@ def create_app(
 
         async def _job() -> None:
             try:
-                await run_in_threadpool(_render_thermal_video, exp_dir)
+                async with app.state.render_locks.get(exp_dir.name):
+                    await run_in_threadpool(_render_thermal_video, exp_dir)
             except Exception:  # noqa: BLE001 - a convenience file must never surface as an error
                 logger.exception("thermal preview video render failed for %s", exp_dir)
 
@@ -1050,7 +1055,11 @@ def create_app(
 
         async def _job() -> None:
             try:
-                await run_in_threadpool(_work)
+                lock = app.state.render_locks.get(name)
+                if lock.locked():  # a post-stop render (or another regenerate) is finishing first
+                    job["step"] = "waiting for the current render"
+                async with lock:
+                    await run_in_threadpool(_work)
                 job["step"] = "done"
                 job["exports"] = experiment_info(name)["exports"]
                 job["state"] = "done"
