@@ -88,6 +88,8 @@ button.linkish { background: none; border: none; padding: 0; color: var(--accent
 button.linkish:disabled { color: var(--muted); cursor: default; text-decoration: none; }
 .derived-stale button.primary:disabled { opacity: 0.7; }
 .rail-section > .body { padding: 4px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+/* No control ever exceeds the rail, however narrow it is dragged. */
+.rail-section > .body select, .rail-section > .body input { max-width: 100%; min-width: 0; }
 .kv { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr); gap: 3px 12px; align-items: baseline; }
 .kv .v { text-align: right; color: var(--accent); overflow-wrap: anywhere; }
 .kv .v.plain { color: var(--fg); }
