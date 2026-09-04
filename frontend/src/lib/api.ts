@@ -54,6 +54,15 @@ export interface Hdf5Export { path: string; size_bytes: number; sha256: string; 
 export interface ThermalVideoExport { path: string; frames: number; fps: number; width: number; height: number; vmin: number; vmax: number; units: string; bytes: number; }
 /** Progress of an on-demand derived regenerate (background job). */
 export interface DerivedJob { state: "running" | "done" | "error" | "idle"; step?: string; done?: number; total?: number; exports?: { name: string; bytes: number }[] | null; error?: string | null; }
+/** A user-selectable external drive for offload. */
+export interface Volume { label: string; mount: string; fstype: string; total_bytes: number; free_bytes: number; is_registered?: boolean; }
+/** Storage state: the local root and the registered drive (if any). */
+export interface StorageInfo {
+  local: { root: string; free_bytes: number; total_bytes: number };
+  drive: { mount: string; root: string; connected: boolean; free_bytes?: number; total_bytes?: number } | null;
+}
+/** Progress of an offload/restore move (background job). */
+export interface MoveJob { state: "running" | "done" | "error" | "idle"; to?: "drive" | "local"; done?: number; total?: number; error?: string | null; }
 
 export interface Experiment {
   name: string;
@@ -73,6 +82,9 @@ export interface Experiment {
   started_utc?: string | null;
   /** ROIs stored with the recording (what its derived files were built from). */
   rois?: Record<string, unknown>[] | null;
+  /** Which storage the run lives in, and its root (from the union list). */
+  library?: "local" | "drive";
+  root?: string;
 }
 
 export interface ExperimentInfo { name: string; path: string; n_frames: number; size_bytes?: number; width: number; height: number; duration_s: number; complete: boolean; ir_format: string | null; conversion: Record<string, unknown> | null; experiment: Record<string, unknown> | null; camera: Record<string, unknown> | null; software: Record<string, unknown> | null; started_utc: string | null; events?: Record<string, unknown>[]; manifest: Record<string, unknown> | null; visible?: { file?: string | null; measured_fps?: number | null; error?: string | null } | null; visible_alignment?: Record<string, unknown> | null; rois?: Record<string, unknown>[] | null; thermal_preview?: { path: string; bytes: number } | null; exports?: { name: string; bytes: number }[]; }
@@ -152,6 +164,16 @@ export const api = {
   saveProfile: (p: Profile) => j<Profile>(req("/api/profile", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(p) })),
   deleteExperiment: (name: string) =>
     j<{ deleted: string }>(req(`/api/experiments/${encodeURIComponent(name)}`, { method: "DELETE" })),
+  // -- external-drive storage (offload) --
+  storage: () => j<StorageInfo>(req("/api/storage")),
+  storageVolumes: () => j<Volume[]>(req("/api/storage/volumes")),
+  registerDrive: (mount: string) =>
+    j<StorageInfo>(req("/api/storage/drive", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ mount }) })),
+  forgetDrive: () => j<StorageInfo>(req("/api/storage/drive", { method: "DELETE" })),
+  moveExperiment: (name: string, to: "drive" | "local") =>
+    j<MoveJob>(req(`/api/experiments/${encodeURIComponent(name)}/move`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ to }) })),
+  moveStatus: (name: string) =>
+    j<MoveJob>(req(`/api/experiments/${encodeURIComponent(name)}/move/status`)),
   revealRoot: () => j<RevealResult>(req("/api/experiments/reveal-root", { method: "POST" })),
   health: () => j<Health>(req("/api/health")),
   sdk: () => j<Record<string, unknown>>(req("/api/setup/sdk")),
