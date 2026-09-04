@@ -398,10 +398,19 @@ function asRoi(v: unknown): Roi | null {
   return shape ? { ...shape, ...meta } : null;
 }
 
-/** Reads persisted ROIs; anything malformed falls back to EMPTY_ROIS. Selection is never persisted. */
-export function loadRois(storage: Storage | null): RoiState {
+/**
+ * ROIs are scoped so each experiment keeps its own set and editing one never touches another.
+ * The `"live"` scope reuses the legacy key (so existing state migrates unchanged); every other
+ * scope (e.g. `"exp.<name>"`) gets its own key.
+ */
+function roiKeyFor(scope: string): string {
+  return scope === "live" ? KEY : `fri.rois.${scope}`;
+}
+
+/** Reads persisted ROIs for a scope; anything malformed falls back to EMPTY_ROIS. Selection is never persisted. */
+export function loadRois(storage: Storage | null, scope = "live"): RoiState {
   try {
-    const raw = storage?.getItem(KEY);
+    const raw = storage?.getItem(roiKeyFor(scope));
     if (!raw) return EMPTY_ROIS;
     const parsed = JSON.parse(raw) as { rois?: unknown; nextId?: unknown };
     const rois = Array.isArray(parsed.rois) ? parsed.rois.map(asRoi).filter((r): r is Roi => r !== null) : [];
@@ -413,6 +422,11 @@ export function loadRois(storage: Storage | null): RoiState {
   }
 }
 
-export function saveRois(storage: Storage | null, s: RoiState): void {
-  try { storage?.setItem(KEY, JSON.stringify({ rois: s.rois, nextId: s.nextId })); } catch { /* ignore */ }
+export function saveRois(storage: Storage | null, s: RoiState, scope = "live"): void {
+  try { storage?.setItem(roiKeyFor(scope), JSON.stringify({ rois: s.rois, nextId: s.nextId })); } catch { /* ignore */ }
+}
+
+/** True when this scope has been persisted before (used to seed a run from its stored ROIs only once). */
+export function hasRois(storage: Storage | null, scope: string): boolean {
+  try { return storage?.getItem(roiKeyFor(scope)) != null; } catch { return false; }
 }

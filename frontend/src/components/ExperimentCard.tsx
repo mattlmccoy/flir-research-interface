@@ -1,15 +1,17 @@
 import { useState } from "react";
 import { api, type Experiment, type Previews } from "../lib/api.ts";
 import { formatSeconds, keyframeBackgroundPosition, keyframeIndex } from "../lib/keyframes.ts";
-import { roisDifferFromStored, type Roi } from "../lib/roi.ts";
+import { hasRois, loadRois, roisDifferFromStored } from "../lib/roi.ts";
 
-interface Props { exp: Experiment; onOpen: () => void; onChanged: () => void; currentRois?: Roi[]; }
+interface Props { exp: Experiment; onOpen: () => void; onChanged: () => void; }
 
-export function ExperimentCard({ exp, onOpen, onChanged, currentRois = [] }: Props) {
-  // Flag runs whose stored ROIs differ from the ones currently loaded in the tool, so the user
-  // knows the run's derived files would change if regenerated. Only meaningful when the tool
-  // actually has a ROI layout loaded.
-  const roisDiffer = currentRois.length > 0 && roisDifferFromStored(currentRois, exp.rois ?? null);
+const roiStorage: Storage | null = (() => { try { return typeof localStorage !== "undefined" ? localStorage : null; } catch { return null; } })();
+
+export function ExperimentCard({ exp, onOpen, onChanged }: Props) {
+  // Flag runs whose ROIs have been edited since their exports were built: the run has a saved
+  // working set that differs from the ROIs stored (and exported) with the recording.
+  const scope = `exp.${exp.name}`;
+  const roisDiffer = hasRois(roiStorage, scope) && roisDifferFromStored(loadRois(roiStorage, scope).rois, exp.rois ?? null);
   const [k, setK] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -123,7 +125,7 @@ export function ExperimentCard({ exp, onOpen, onChanged, currentRois = [] }: Pro
         </span>
         <span>
           {exp.complete ? <span className="badge ok">complete</span> : <span className="badge bad">INCOMPLETE{dropped ? ` · ${dropped} dropped` : ""}</span>}
-          {roisDiffer && <span className="badge warn" style={{ marginLeft: 6 }} title="The ROIs loaded in the tool differ from the ones stored with this run. Open it to review the ROIs; its derived files (ROI plot, video, roi_series.csv) would change if you regenerate.">ROIs differ</span>}
+          {roisDiffer && <span className="badge warn" style={{ marginLeft: 6 }} title="You've changed this run's ROIs since its exports were built. Open it and regenerate to update the ROI plot, video and roi_series.csv.">ROIs edited</span>}
         </span>
         <div className="actions">
           <button className="primary" disabled={!n || !!exp.error} onClick={onOpen}>

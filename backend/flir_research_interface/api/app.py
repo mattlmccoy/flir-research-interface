@@ -1014,13 +1014,14 @@ def create_app(
         return {"rois": len(rois)}
 
     @app.post("/api/experiments/{name}/export/derived")
-    async def export_derived_route(name: str) -> dict[str, Any]:
+    async def export_derived_route(name: str, video: bool = True) -> dict[str, Any]:
         """Start (or return) a background regenerate of the ROI-dependent derived files.
 
-        roi_series.csv, README/roi_plot/peak-frame images and the ROI-annotated thermal video —
-        from the recording's stored ROIs. The clean thermal video does not depend on the ROIs and
-        is never re-rendered here (it is the slow part). Returns a job record immediately; poll
-        ``/export/derived/status`` for progress. Pair with ``PUT /rois`` to refresh after editing.
+        roi_series.csv, README/roi_plot/peak-frame images and (unless ``video=false``) the
+        ROI-annotated thermal video — from the recording's stored ROIs. ``video=false`` is the
+        quick option: plot + CSV + images only, skipping the slow video encode. The clean thermal
+        video never depends on the ROIs and is not re-rendered here. Returns a job record
+        immediately; poll ``/export/derived/status``. Pair with ``PUT /rois`` after editing.
         """
         from flir_research_interface.analysis.thermal_video import render_thermal_video
 
@@ -1039,7 +1040,7 @@ def create_app(
             job["step"] = "images"
             _write_run_summary(exp_dir)
             reader = ExperimentReader(exp_dir)
-            if reader.metadata.get("rois"):
+            if video and reader.metadata.get("rois"):
                 job["step"] = "roi video"
 
                 def _cb(done: int, total: int) -> None:

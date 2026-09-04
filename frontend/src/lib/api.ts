@@ -106,9 +106,10 @@ export const api = {
   /** Persist the ROIs currently on screen into the recording so derived files can match them. */
   putRois: (name: string, rois: unknown[]) =>
     j<{ rois: number }>(req(`/api/experiments/${encodeURIComponent(name)}/rois`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ rois }) })),
-  /** Start a background regenerate of the ROI-dependent derived files; poll exportDerivedStatus. */
-  exportDerived: (name: string) =>
-    j<DerivedJob>(req(`/api/experiments/${encodeURIComponent(name)}/export/derived`, { method: "POST" })),
+  /** Start a background regenerate of the ROI-dependent derived files; poll exportDerivedStatus.
+   * `video=false` is the quick option (plot + CSV + images only, skips the slow video encode). */
+  exportDerived: (name: string, video = true) =>
+    j<DerivedJob>(req(`/api/experiments/${encodeURIComponent(name)}/export/derived${video ? "" : "?video=false"}`, { method: "POST" })),
   exportDerivedStatus: (name: string) =>
     j<DerivedJob>(req(`/api/experiments/${encodeURIComponent(name)}/export/derived/status`)),
   exportFileUrl: (name: string, file: string) => u(`/api/experiments/${encodeURIComponent(name)}/exports/${encodeURIComponent(file)}`),

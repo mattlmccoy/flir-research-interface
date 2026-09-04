@@ -58,11 +58,11 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
   // The derived files (ROI plot, peak frames, ROI video, roi_series.csv) are built from the ROIs
   // stored with the recording. `useOnScreen` persists the current ROIs first; otherwise the
   // recording's own stored ROIs are used. The regenerate runs in the background — poll for progress.
-  async function regenerateDerived(useOnScreen: boolean) {
+  async function regenerateDerived(useOnScreen: boolean, video = true) {
     setDerivedBusy(true); setErr(null); setDerivedOut(null); setProg({ step: "starting", done: 0, total: 0 });
     try {
       if (useOnScreen) await api.putRois(name, rois);
-      await api.exportDerived(name);
+      await api.exportDerived(name, video);
       for (;;) {
         await new Promise((r) => setTimeout(r, 700));
         const jb = await api.exportDerivedStatus(name);
@@ -125,12 +125,21 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
               Keep the {storedCount} stored
             </button>
           </div>
+          <button className="linkish" disabled={busyElsewhere} onClick={() => regenerateDerived(true, false)} style={{ marginTop: 6 }}
+            title="Update the ROI plot and roi_series.csv (and the peak-frame image) from the ROIs on screen but skip re-rendering the slow ROI video.">
+            or just the plot + CSV — skip the video (fast)
+          </button>
         </div>
       ) : (files.length > 0 || rois.length > 0) ? (
-        <div className="hint derived-ok" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span aria-hidden="true">✓</span> Derived files match the {rois.length} ROI{rois.length === 1 ? "" : "s"} on screen.
-          <button className="secondary" style={{ marginLeft: "auto" }} disabled={busyElsewhere} onClick={() => regenerateDerived(true)} title="Force a re-render of the ROI plot, peak frames, thermal-ROI video and roi_series.csv from the current ROIs">
-            re-generate
+        <div className="derived-ok">
+          <div className="hint" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span aria-hidden="true">✓</span> Derived files match the {rois.length} ROI{rois.length === 1 ? "" : "s"} on screen.
+            <button className="secondary" style={{ marginLeft: "auto" }} disabled={busyElsewhere} onClick={() => regenerateDerived(true)} title="Force a re-render of the ROI plot, peak frames, thermal-ROI video and roi_series.csv from the current ROIs">
+              re-generate
+            </button>
+          </div>
+          <button className="linkish" disabled={busyElsewhere} onClick={() => regenerateDerived(true, false)} title="Rebuild the ROI plot and roi_series.csv (and the peak-frame image) but skip the slow ROI video.">
+            plot + CSV only (skip video)
           </button>
         </div>
       ) : null}

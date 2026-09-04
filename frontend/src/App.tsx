@@ -11,7 +11,7 @@ import { decodeFrameMessage, type FrameMessage } from "./lib/protocol.ts";
 import type { PaletteName } from "./lib/palette.ts";
 import type { Range, ScaleMode } from "./lib/scale.ts";
 import { DEFAULT_LAYOUT, layoutReducer, loadLayout, saveLayout } from "./lib/layout.ts";
-import { EMPTY_ROIS, loadRois, roiLabel, roiReducer, saveRois } from "./lib/roi.ts";
+import { EMPTY_ROIS, hasRois, loadRois, roiLabel, roiReducer, saveRois } from "./lib/roi.ts";
 import { TraceBuffer, WINDOWS, visibleWindow, windowLabel } from "./lib/plot.ts";
 import { roiColor } from "./lib/overlay.ts";
 import { fmtCelsius } from "./lib/format.ts";
@@ -48,7 +48,21 @@ export function App() {
   const [layout, dispatch] = useReducer(layoutReducer, DEFAULT_LAYOUT, () => loadLayout(storage));
   useEffect(() => { saveLayout(storage, layout); }, [layout]);
   const [rois, roiDispatch] = useReducer(roiReducer, EMPTY_ROIS, () => loadRois(storage));
-  useEffect(() => { saveRois(storage, rois); }, [rois]);
+  // ROIs are scoped so each experiment keeps its own set; live shares one "live" scope.
+  const roiScope = page === "playback" && openExp ? `exp.${openExp}` : "live";
+  const roiScopeRef = useRef(roiScope);
+  useEffect(() => {
+    if (roiScopeRef.current === roiScope) return;
+    roiScopeRef.current = roiScope;
+    roiDispatch({ type: "replace", rois: loadRois(storage, roiScope).rois });
+  }, [roiScope]);
+  // Persist to the active scope. Never create an empty experiment scope from the transient load —
+  // PlaybackPage seeds a run from its own stored ROIs the first time it is opened.
+  useEffect(() => {
+    const scope = roiScopeRef.current;
+    if (scope !== "live" && rois.rois.length === 0 && !hasRois(storage, scope)) return;
+    saveRois(storage, rois, scope);
+  }, [rois]);
   const [align, alignDispatch] = useReducer(alignmentReducer, EMPTY_ALIGNMENT, () => loadAlignment(storage));
   useEffect(() => { saveAlignment(storage, align); }, [align]);
   const [calibrating, setCalibrating] = useState(false);
@@ -195,7 +209,7 @@ export function App() {
   }
   if (page === "experiments") {
     return <StudioFrame layout={layout} page topbar={topbar} statusbar={statusbar}
-      center={<ExperimentsPage onOpen={(name) => { setOpenExp(name); setPage("playback"); }} currentRois={rois.rois} />} />;
+      center={<ExperimentsPage onOpen={(name) => { setOpenExp(name); setPage("playback"); }}/>} />;
   }
   if (page === "playback" && openExp) {
     return <PlaybackPage name={openExp} layout={layout} dispatch={dispatch} topbar={topbar}

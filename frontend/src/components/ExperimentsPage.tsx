@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type Experiment } from "../lib/api.ts";
 import { ExperimentCard } from "./ExperimentCard.tsx";
-import type { Roi } from "../lib/roi.ts";
 
 type Sort = "newest" | "name" | "duration";
 
-export function ExperimentsPage({ onOpen, currentRois = [] }: { onOpen: (name: string) => void; currentRois?: Roi[] }) {
+export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) {
   const [items, setItems] = useState<Experiment[] | null>(null);
   const totalBytes = items ? items.reduce((a, e) => a + (e.size_bytes ?? 0), 0) : 0;
   const [err, setErr] = useState<string | null>(null);
@@ -67,7 +66,7 @@ export function ExperimentsPage({ onOpen, currentRois = [] }: { onOpen: (name: s
       {items && items.length > 0 && shown.length === 0 && <div className="muted">No experiments match the filter.</div>}
       <div className="exp-grid">
         {shown.map((e) => (
-          <ExperimentCard key={e.name} exp={e} onOpen={() => onOpen(e.name)} onChanged={load} currentRois={currentRois} />
+          <ExperimentCard key={e.name} exp={e} onOpen={() => onOpen(e.name)} onChanged={load}/>
         ))}
       </div>
     </div>

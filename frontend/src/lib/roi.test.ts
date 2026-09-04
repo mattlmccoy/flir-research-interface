@@ -396,3 +396,30 @@ test("roisDifferFromStored: empty on both sides is not stale; something vs nothi
   assert.equal(roisDifferFromStored([], undefined), false);
   assert.equal(roisDifferFromStored([{ id: 1, kind: "spot", x: 1, y: 1 }] as never, null), true);
 });
+
+test("ROI scopes: live keeps the legacy key; experiments are isolated", async () => {
+  const { loadRois, saveRois } = await import("./roi.ts");
+  const store = new Map<string, string>();
+  const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, String(v)), removeItem: (k: string) => void store.delete(k), clear: () => store.clear(), key: () => null, get length() { return store.size; } } as Storage;
+  const A = { rois: [{ id: 1, kind: "spot", x: 1, y: 1 }] as never, selected: null, selectedIds: [], nextId: 2 };
+  const B = { rois: [{ id: 5, kind: "rect", x0: 0, y0: 0, x1: 4, y1: 4 }] as never, selected: null, selectedIds: [], nextId: 6 };
+  saveRois(storage, A, "exp.runA");
+  saveRois(storage, B, "exp.runB");
+  // editing runA must NOT change runB
+  assert.deepEqual(loadRois(storage, "exp.runA").rois, A.rois);
+  assert.deepEqual(loadRois(storage, "exp.runB").rois, B.rois);
+  // default scope is "live" and uses the legacy key so existing state migrates unchanged
+  saveRois(storage, A);
+  assert.equal(store.has("fri.rois.v1"), true);
+  assert.deepEqual(loadRois(storage).rois, A.rois);
+});
+
+test("hasRois reports whether a scope has been persisted", async () => {
+  const { saveRois, hasRois } = await import("./roi.ts");
+  const store = new Map<string, string>();
+  const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, String(v)), removeItem: (k: string) => void store.delete(k), clear: () => store.clear(), key: () => null, get length() { return store.size; } } as Storage;
+  assert.equal(hasRois(storage, "exp.new"), false);
+  saveRois(storage, { rois: [], selected: null, selectedIds: [], nextId: 1 }, "exp.new");
+  assert.equal(hasRois(storage, "exp.new"), true);
+  assert.equal(hasRois(null, "exp.new"), false);
+});

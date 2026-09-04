@@ -12,7 +12,13 @@ import type { PaletteName } from "../lib/palette.ts";
 import type { Range, ScaleMode } from "../lib/scale.ts";
 import type { LayoutAction, LayoutState } from "../lib/layout.ts";
 import { SPEEDS, clampIndex, nextFrameDelayMs, speedLabel } from "../lib/playback.ts";
-import { loadRois, roiLabel, roisDifferFromStored, type Roi, type RoiAction, type RoiState } from "../lib/roi.ts";
+import { hasRois, loadRois, roiLabel, roisDifferFromStored, type Roi, type RoiAction, type RoiState } from "../lib/roi.ts";
+
+const roiStorage: Storage | null = (() => { try { return typeof localStorage !== "undefined" ? localStorage : null; } catch { return null; } })();
+/** Parse the plain ROI dicts stored with a recording into validated Roi objects. */
+function storedToRois(rois: unknown): Roi[] {
+  return loadRois({ getItem: () => JSON.stringify({ rois, nextId: 1 }), setItem: () => undefined } as unknown as Storage).rois;
+}
 import { roiColor } from "../lib/overlay.ts";
 import { eventsToMarkers, nearestIndex, nextMarkerTime } from "../lib/events.ts";
 import { fmtAny, fmtCelsius } from "../lib/format.ts";
@@ -76,6 +82,18 @@ export function PlaybackPage(p: Props) {
     Promise.all([api.experiment(p.name), api.timeline(p.name)])
       .then(([i, t]) => { setInfo(i); setTl(t); setIndex(0); }).catch((e) => setErr(String(e)));
   }, [p.name]);
+
+  // Seed a run's ROIs from the ones stored with the recording the first time it is opened, so
+  // each experiment starts from its own ROIs (not whatever was on screen for another run). Once
+  // this run's scope has been persisted, the user's own edits are kept instead.
+  const seededRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!info || info.name !== p.name || seededRef.current === p.name) return;
+    seededRef.current = p.name;
+    if (!hasRois(roiStorage, `exp.${p.name}`) && info.rois && info.rois.length) {
+      p.roiDispatch({ type: "replace", rois: storedToRois(info.rois) });
+    }
+  }, [info, p.name]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Whole-recording ROI series from the backend; debounced so a drag does not fire per pixel.
   useEffect(() => {
@@ -242,10 +260,10 @@ export function PlaybackPage(p: Props) {
             ) : <div className="muted">loading…</div>}
             {info?.rois && info.rois.length > 0 && (
               <div className="row">
-                <button className="secondary" onClick={() => { const parsed = loadRois({ getItem: () => JSON.stringify({ rois: info.rois, nextId: 1 }), setItem: () => undefined } as unknown as Storage); p.roiDispatch({ type: "replace", rois: parsed.rois as Roi[] }); }}>
-                  load this recording's {info.rois.length} ROI{info.rois.length > 1 ? "s" : ""}
+                <button className="secondary" onClick={() => { p.roiDispatch({ type: "replace", rois: storedToRois(info.rois) }); }}>
+                  Revert to this recording's {info.rois.length} ROI{info.rois.length > 1 ? "s" : ""}
                 </button>
-                <span className="hint">as they were when it was recorded (exports/roi_series.csv matches them)</span>
+                <span className="hint">discards edits and restores the ROIs as they were recorded (exports/roi_series.csv matches them)</span>
               </div>
             )}
             <RoiRows rois={p.rois.rois} units={p.layout.units} conv={field?.conv ?? null} stats={stats} selected={p.rois.selected} selectedIds={p.rois.selectedIds} extremes={p.layout.extremes} onExtremes={(on) => p.dispatch({ type: "setExtremes", on })}
