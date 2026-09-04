@@ -26,6 +26,7 @@ import { ThermalView, type StatsMap } from "./ThermalView.tsx";
 import { DisplayControls } from "./DisplayControls.tsx";
 import { RoiRows } from "./RoiRows.tsx";
 import { ExportSection } from "./ExportSection.tsx";
+import { MediaExportEditor } from "./MediaExportEditor.tsx";
 import { MetadataEditor } from "./MetadataEditor.tsx";
 import { VisiblePanel, VisibleVideo } from "./VisiblePanel.tsx";
 import { loadAlignment, parseAlignment } from "../lib/alignment.ts";
@@ -70,6 +71,7 @@ export function PlaybackPage(p: Props) {
   const [err, setErr] = useState<string | null>(null);
   const [stats, setStats] = useState<StatsMap>(new Map());
   const [series, setSeries] = useState<RoiSeries | null>(null);
+  const [showMedia, setShowMedia] = useState(false);
   const cache = useRef(new Map<number, FrameMessage>());
   const inflight = useRef(new Map<number, Promise<void>>());
   const BLOCK = 60;
@@ -214,6 +216,8 @@ export function PlaybackPage(p: Props) {
   );
 
   return (
+    <>
+    {showMedia && tl && <MediaExportEditor name={p.name} nFrames={n} index={index} tS={tl.t_s} onClose={() => setShowMedia(false)} />}
     <StudioFrame layout={p.layout} topbar={p.topbar} dispatch={p.dispatch} dockFoot={transport}
       strip={<ToolStrip tool={p.layout.tool} onTool={(tool) => p.dispatch({ type: "setTool", tool })} onCollapseAll={() => p.dispatch({ type: !p.layout.rail && !p.layout.dock ? "restoreAll" : "collapseAll" })} collapsed={!p.layout.rail && !p.layout.dock} zoom={p.layout.zoom} onZoom={(z) => p.dispatch({ type: "setZoom", zoom: z })} />}
       center={
@@ -279,11 +283,13 @@ export function PlaybackPage(p: Props) {
             <VisiblePanel mode="playback" name={p.name} hasVideo={hasVideo} t={t} playing={playing} speed={speed} measuredFps={info?.visible?.measured_fps} visibleMode={p.layout.visibleMode} overlay={p.layout.overlay} dispatch={p.dispatch} aligned={!!overlayH} />
           </RailSection>
           <RailSection id="export" title="export" open={p.layout.sections.export} onToggle={() => p.dispatch({ type: "toggleSection", section: "export" })} tag={derivedStale ? "update needed" : "derived files"} tagWarn={derivedStale}>
+            <button className="primary" style={{ width: "100%", marginBottom: 8 }} disabled={n === 0} onClick={() => setShowMedia(true)} title="Open the media export editor: MP4/GIF of a chosen window with overlays">🎬 Media export (clip / GIF)…</button>
             <ExportSection name={p.name} index={index} nFrames={n} rois={p.rois.rois} celsius={hdr?.kelvin_per_count != null} thermalPreview={info?.thermal_preview} files={info?.exports ?? []} storedRois={info?.rois ?? null} onRefresh={() => { api.experiment(p.name).then(setInfo).catch((e) => setErr(String(e))); }} />
           </RailSection>
         </Rail>
       }
       statusbar={<StatusBar status={p.status} recording={p.recording} left={<span className="muted">playback</span>} />}
     />
+    </>
   );
 }
