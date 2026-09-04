@@ -188,12 +188,67 @@ def verify_copy(src: Path | str, dst: Path | str) -> str | None:
     return None
 
 
+def _tree_bytes(root: Path) -> int:
+    return sum(p.stat().st_size for p in root.rglob("*") if p.is_file())
+
+
+def move_experiment(
+    src_run: Path | str,
+    dst_root: Path | str,
+    *,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> Path:
+    """Move one run folder to ``dst_root`` safely: copy → verify → atomic rename → delete source.
+
+    The source is deleted **only** after the copy is verified and atomically renamed into place, so
+    a failure (or a drive disconnecting mid-copy) never leaves the run missing from both places.
+    Raises ``ValueError`` when the target lacks space and ``RuntimeError`` when verification fails.
+    Returns the final destination path. ``on_progress(bytes_done, bytes_total)`` reports progress.
+    """
+    src_run = Path(src_run)
+    dst_root = Path(dst_root)
+    dst_root.mkdir(parents=True, exist_ok=True)
+    name = src_run.name
+    total = _tree_bytes(src_run)
+    if shutil.disk_usage(dst_root).free < int(total * 1.05):
+        raise ValueError(f"not enough space on the target for {name} ({total / 1e9:.1f} GB)")
+
+    partial = dst_root / f"{name}.partial"
+    final = dst_root / name
+    shutil.rmtree(partial, ignore_errors=True)
+    try:
+        done = 0
+        for sp in sorted(src_run.rglob("*")):
+            rel = sp.relative_to(src_run)
+            dp = partial / rel
+            if sp.is_dir():
+                dp.mkdir(parents=True, exist_ok=True)
+                continue
+            dp.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(sp, dp)
+            done += sp.stat().st_size
+            if on_progress is not None:
+                on_progress(done, total)
+        reason = verify_copy(src_run, partial)
+        if reason is not None:
+            raise RuntimeError(f"copy verification failed: {reason}")
+        os.replace(partial, final)  # atomic on the target filesystem
+    except BaseException:
+        shutil.rmtree(partial, ignore_errors=True)  # never leave a half-copy behind
+        raise
+    shutil.rmtree(src_run)  # the only deletion, after verify + rename
+    if on_progress is not None:
+        on_progress(total, total)
+    return final
+
+
 __all__ = [
     "CONFIG_NAME",
     "CRITICAL_FILES",
     "DRIVE_SUBDIR",
     "forget_drive",
     "load_storage_config",
+    "move_experiment",
     "register_drive",
     "save_storage_config",
     "selectable_drives",

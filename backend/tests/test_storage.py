@@ -109,3 +109,65 @@ def test_verify_copy_ok_and_detects_size_and_content_mismatch(tmp_path: Path) ->
     (dst / "metadata.json").write_text('{"x":1}')
     (dst / "sub" / "chunk").unlink()  # missing file
     assert "chunk" in (verify_copy(src, dst) or "")
+
+
+def _make_run(root: Path, name: str = "run1") -> Path:
+    run = root / name
+    (run / "thermal.zarr").mkdir(parents=True)
+    (run / "metadata.json").write_text('{"a":1}')
+    (run / "thermal.zarr" / "0.0.0").write_bytes(b"x" * 1000)
+    (run / "exports").mkdir()
+    (run / "exports" / "roi_series.csv").write_text("t,v\n0,1\n")
+    return run
+
+
+def test_move_experiment_copies_verifies_and_deletes_source(tmp_path: Path) -> None:
+    from flir_research_interface.storage import move_experiment
+
+    src_root = tmp_path / "local"
+    dst_root = tmp_path / "drive"
+    dst_root.mkdir(parents=True)
+    run = _make_run(src_root)
+    seen: list[tuple[int, int]] = []
+    dest = move_experiment(run, dst_root, on_progress=lambda d, t: seen.append((d, t)))
+    assert dest == dst_root / "run1"
+    assert not run.exists()  # source removed only after verify + rename
+    assert (dst_root / "run1" / "metadata.json").read_text() == '{"a":1}'
+    assert (dst_root / "run1" / "thermal.zarr" / "0.0.0").stat().st_size == 1000
+    assert not (dst_root / "run1.partial").exists()  # temp cleaned up
+    assert seen and seen[-1][0] == seen[-1][1] and seen[-1][1] > 0  # progress reached 100%
+
+
+def test_move_keeps_source_when_target_has_no_space(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from flir_research_interface import storage
+
+    src_root = tmp_path / "local"
+    dst_root = tmp_path / "drive"
+    dst_root.mkdir(parents=True)
+    run = _make_run(src_root)
+
+    class _DU:
+        total = 10**12
+        free = 10  # far too small
+
+    monkeypatch.setattr(storage.shutil, "disk_usage", lambda p: _DU())
+    with pytest.raises(ValueError):
+        storage.move_experiment(run, dst_root)
+    assert run.exists()  # untouched
+    assert not (dst_root / "run1").exists() and not (dst_root / "run1.partial").exists()
+
+
+def test_move_leaves_source_intact_and_cleans_partial_on_verify_failure(
+    tmp_path: Path, monkeypatch  # type: ignore[no-untyped-def]
+) -> None:
+    from flir_research_interface import storage
+
+    src_root = tmp_path / "local"
+    dst_root = tmp_path / "drive"
+    dst_root.mkdir(parents=True)
+    run = _make_run(src_root)
+    monkeypatch.setattr(storage, "verify_copy", lambda a, b: "boom: pretend corruption")
+    with pytest.raises(RuntimeError):
+        storage.move_experiment(run, dst_root)
+    assert run.exists()  # source never deleted
+    assert not (dst_root / "run1").exists() and not (dst_root / "run1.partial").exists()
