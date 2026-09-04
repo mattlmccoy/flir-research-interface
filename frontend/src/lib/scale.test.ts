@@ -21,3 +21,18 @@ test("resolveScale prefers manual when locked, else auto, else fallback", () => 
 test("resolveScale repairs an inverted manual range", () => {
   assert.deepEqual(resolveScale("manual", { min: 220, max: 150 }, null), { min: 150, max: 220 });
 });
+
+test("autoScale ignores a few over-range outliers on a real-size frame (robust percentiles)", () => {
+  // 2000 px at 25 °C, plus wrapped (-500) and saturated (400) outliers that must not blow the range
+  const a = new Float32Array(2010);
+  a.fill(25);
+  for (let i = 2000; i < 2005; i++) a[i] = -500; // wrapped hot pixels reading cold
+  for (let i = 2005; i < 2010; i++) a[i] = 400;  // saturated
+  const r = autoScale(a)!;
+  assert.ok(r.min > -50 && r.max < 100, `robust range excludes outliers: got ${r.min}..${r.max}`);
+});
+
+test("autoScale keeps exact min/max for small frames (no robustening)", () => {
+  const r = autoScale(new Float32Array([20, 25, 30]))!;
+  assert.deepEqual(r, { min: 20, max: 30 });
+});
