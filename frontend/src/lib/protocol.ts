@@ -16,6 +16,8 @@ export interface FrameHeader {
   max_c: number | null;
   mean_c: number | null;
   center_c: number | null;
+  /** Number of over-range (saturated / wrapped) pixels excluded from the stats, if any. */
+  over_range?: number;
   incomplete: boolean;
   camera_fps?: number | null;
   viz_dropped?: number;

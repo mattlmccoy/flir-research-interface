@@ -252,6 +252,7 @@ export function App() {
                 <span>min</span><span className="v">{fmtCelsius(hdr.min_c)}</span>
                 <span>max</span><span className="v">{fmtCelsius(hdr.max_c)}</span>
                 <span>mean</span><span className="v">{fmtCelsius(hdr.mean_c)}</span>
+                {!!hdr.over_range && <><span>over-range</span><span className="v" style={{ textAlign: "right" }}><span className="badge warn" title="Pixels the camera could not represent (scene hotter than its range) — saturated or 16-bit wrapped. Shown magenta and excluded from the stats. Switch the camera to a higher measurement range.">{hdr.over_range} px</span></span></>}
                 <span>ir format</span><span className="v plain">{hdr.ir_format}</span>
                 <span>frame</span><span className="v plain">{hdr.frame_id}</span>
               </div>
