@@ -17,8 +17,13 @@ function fmtBytes(n: number): string {
 }
 
 /** Playback rail section: downloads derived from the recording (the store itself is never touched). */
+/** Small rotating ring shown inside a button while its export runs. */
+const Spinner = () => <span className="spinner" aria-hidden="true" />;
+
 export function ExportSection({ name, index, nFrames, rois, celsius, thermalPreview, onThermalPreview, files = [], onRefresh }: Props) {
   const [busy, setBusy] = useState(false);
+  // Which single-flight export (hdf5 / range / report) is running, so only its button spins.
+  const [busyKind, setBusyKind] = useState<"hdf5" | "range" | "report" | null>(null);
   const [h5, setH5] = useState<Hdf5Export | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [tv, setTv] = useState<ThermalVideoExport | null>(null);
@@ -40,12 +45,12 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
     } catch (e) { setErr(String(e)); } finally { setDerivedBusy(false); }
   }
   async function makeReport() {
-    setBusy(true); setErr(null);
-    try { setReport(await api.exportReport(name)); } catch (e) { setErr(String(e)); } finally { setBusy(false); }
+    setBusy(true); setBusyKind("report"); setErr(null);
+    try { setReport(await api.exportReport(name)); } catch (e) { setErr(String(e)); } finally { setBusy(false); setBusyKind(null); }
   }
   async function exportRange() {
-    setBusy(true); setErr(null); setRngOut(null);
-    try { const r = await api.exportFrames(name, rng.start, Math.min(rng.stop, nFrames), Math.max(1, rng.step), rng.format); setRngOut(`${r.n} frames → ${r.path} (${fmtBytes(r.size_bytes)})`); } catch (e) { setErr(String(e)); } finally { setBusy(false); }
+    setBusy(true); setBusyKind("range"); setErr(null); setRngOut(null);
+    try { const r = await api.exportFrames(name, rng.start, Math.min(rng.stop, nFrames), Math.max(1, rng.step), rng.format); setRngOut(`${r.n} frames → ${r.path} (${fmtBytes(r.size_bytes)})`); } catch (e) { setErr(String(e)); } finally { setBusy(false); setBusyKind(null); }
   }
   const haveVideo = !!thermalPreview || !!tv;
 
@@ -54,8 +59,8 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
     try { setTv(await api.exportThermalVideo(name)); onThermalPreview?.(); } catch (e) { setErr(String(e)); } finally { setTvBusy(false); }
   }
   async function exportHdf5() {
-    setBusy(true); setErr(null);
-    try { setH5(await api.exportHdf5(name)); } catch (e) { setErr(String(e)); } finally { setBusy(false); }
+    setBusy(true); setBusyKind("hdf5"); setErr(null);
+    try { setH5(await api.exportHdf5(name)); } catch (e) { setErr(String(e)); } finally { setBusy(false); setBusyKind(null); }
   }
   async function reveal() {
     setErr(null);
@@ -75,7 +80,7 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
         </span>
         <span>whole run</span>
         <span className="v plain" style={{ textAlign: "right" }}>
-          <button className="secondary" disabled={busy || nFrames === 0} onClick={exportHdf5} title="HDF5: uint16 counts + time axes + metadata, for MATLAB / Python">{busy ? "writing…" : "HDF5"}</button>
+          <button className="secondary" disabled={busy || nFrames === 0} onClick={exportHdf5} title="HDF5: uint16 counts + time axes + metadata, for MATLAB / Python">{busyKind === "hdf5" ? <><Spinner />writing…</> : "HDF5"}</button>
         </span>
         <span>frame range</span>
         <span className="v plain" style={{ textAlign: "right", display: "flex", gap: 4, justifyContent: "flex-end", alignItems: "center", flexWrap: "wrap" }} title="Export frames start..stop (half-open, 0-based) every step-th frame as a zip of per-frame files, or as one multi-page float TIFF stack">
@@ -87,23 +92,23 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
           <select value={rng.format} aria-label="range format" onChange={(e) => setRng({ ...rng, format: e.target.value })}>
             <option value="csv">CSV zip</option><option value="tiff">TIFF zip</option><option value="tiff-stack">TIFF stack</option><option value="png">PNG zip</option><option value="npy">NPY zip</option>
           </select>
-          <button className="secondary" disabled={busy || nFrames === 0} onClick={exportRange}>export</button>
+          <button className="secondary" disabled={busy || nFrames === 0} onClick={exportRange}>{busyKind === "range" ? <><Spinner />exporting…</> : "export"}</button>
         </span>
         <span>PDF report</span>
         <span className="v plain" style={{ textAlign: "right", display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
           {report && <a className="dl" href={api.reportUrl(name)} target="_blank" rel="noreferrer">open · {report.pages} pages · {fmtBytes(report.size_bytes)}</a>}
-          <button className="secondary" disabled={busy || nFrames === 0} onClick={makeReport} title="README text, ROI plot and preview image as one PDF in the run's exports folder">{report ? "re-generate" : "generate"}</button>
+          <button className="secondary" disabled={busy || nFrames === 0} onClick={makeReport} title="README text, ROI plot and preview image as one PDF in the run's exports folder">{busyKind === "report" ? <><Spinner />generating…</> : report ? "re-generate" : "generate"}</button>
         </span>
         <span>thermal video</span>
         <span className="v plain" style={{ textAlign: "right", display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
           {haveVideo && <a className="dl" href={api.thermalVideoUrl(name)} download={`${name}_thermal_preview.mp4`} title="exports/thermal_preview.mp4: iron palette, fixed °C scale for the run, colour bar + time label. A viewing copy only; the raw counts stay in thermal.zarr">MP4{fmtBytes(tv?.bytes ?? thermalPreview?.bytes ?? 0) !== "0 kB" ? ` · ${fmtBytes(tv?.bytes ?? thermalPreview?.bytes ?? 0)}` : ""}</a>}
-          <button className="secondary" disabled={tvBusy || nFrames === 0} onClick={renderThermalVideo} title="Render (or re-render) the small H.264 viewing copy of the thermal run">{tvBusy ? "rendering…" : haveVideo ? "re-render" : "render"}</button>
+          <button className="secondary" disabled={tvBusy || nFrames === 0} onClick={renderThermalVideo} title="Render (or re-render) the small H.264 viewing copy of the thermal run">{tvBusy ? <><Spinner />rendering…</> : haveVideo ? "re-render" : "render"}</button>
         </span>
       </div>
       <div className="derived-refresh" style={{ marginTop: 8 }}>
-        <button className="secondary" disabled={derivedBusy || nFrames === 0} onClick={regenerateDerived}
+        <button className="secondary" disabled={derivedBusy || busy || tvBusy || nFrames === 0} onClick={regenerateDerived}
           title="The ROI plot, peak-frame images, thermal videos and roi_series.csv were generated from the ROIs present at record time. This saves the ROIs currently on screen into the run and regenerates all of them to match.">
-          {derivedBusy ? "regenerating…" : "update derived files to match ROIs on screen"}
+          {derivedBusy ? <><Spinner />regenerating derived files…</> : "update derived files to match ROIs on screen"}
         </button>
         <div className="hint" style={{ marginTop: 3 }}>
           {rois.length ? `${rois.length} ROI${rois.length === 1 ? "" : "s"} on screen` : "no ROIs on screen — regenerates the clean video and images"} · ROI plot, peak frames, videos and roi_series.csv
