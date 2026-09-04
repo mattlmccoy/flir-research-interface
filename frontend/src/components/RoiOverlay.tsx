@@ -35,30 +35,27 @@ const FILL_ALPHA = 0.14;
 const BASE = new WeakMap<CanvasRenderingContext2D, DOMMatrix>();
 
 // --- ROI label chips: solid, legible, collision-resolved -------------------------------------
-const CHIP_H = 18, PAD = 5, DOTR = 3, SEGGAP = 7;
+const PAD = 5, DOTR = 3, SEGGAP = 7, LINE1_H = 18, LINE2_H = 13;
 const NAME_COLOR = "#e8eaed", VALUE_COLOR = "#ffffff", DIM_COLOR = "#9aa0a6";
 const CHIP_BG = "rgba(12,14,18,0.9)", CHIP_BORDER = "rgba(255,255,255,0.14)";
 
-interface Seg { text: string; color: string; }
+/** A chip's content: name + live mean on line 1, and (for area ROIs) min…max always on line 2. */
+interface ChipContent { name: string; value: string; range: string | null; }
 
-/** The text segments of a label: name (near-white), mean value (bright), and — only for the
- * selected ROI — the min–max range (dim). Keeping unselected chips to name+mean keeps them narrow
- * so they crowd and stack far less; the full range for the one you're inspecting stays visible. */
-function labelSegments(r: Roi, s: RoiStats | undefined, full: boolean): Seg[] {
-  const segs: Seg[] = [{ text: roiLabel(r), color: NAME_COLOR }];
-  if (!s) return segs;
-  if (s.n === 0 || s.mean === null) { segs.push({ text: "n/a", color: DIM_COLOR }); return segs; }
-  segs.push({ text: `${s.mean.toFixed(1)}°`, color: VALUE_COLOR });
-  if (full && r.kind !== "spot" && s.min != null && s.max != null) {
-    segs.push({ text: `${Math.round(s.min)}–${Math.round(s.max)}`, color: DIM_COLOR });
-  }
-  return segs;
+function labelContent(r: Roi, s: RoiStats | undefined): ChipContent {
+  const name = roiLabel(r);
+  if (!s || s.n === 0 || s.mean === null) return { name, value: s ? "n/a" : "", range: null };
+  const range = r.kind !== "spot" && s.min != null && s.max != null
+    ? `${s.min.toFixed(1)}…${s.max.toFixed(1)}` : null;
+  return { name, value: `${s.mean.toFixed(1)}°`, range };
 }
 
-function chipWidth(ctx: CanvasRenderingContext2D, segs: Seg[]): number {
-  let w = PAD + DOTR * 2 + 5; // left pad + dot + gap
-  segs.forEach((sg, i) => { w += (i > 0 ? SEGGAP : 0) + ctx.measureText(sg.text).width; });
-  return w + PAD;
+const nameX = PAD + DOTR * 2 + 5; // where text starts, right of the colour dot
+
+function chipSize(ctx: CanvasRenderingContext2D, c: ChipContent): { w: number; h: number } {
+  const line1 = nameX + ctx.measureText(c.name).width + (c.value ? SEGGAP + ctx.measureText(c.value).width : 0);
+  const line2 = c.range ? nameX + ctx.measureText(c.range).width : 0;
+  return { w: Math.max(line1, line2) + PAD, h: LINE1_H + (c.range ? LINE2_H : 0) };
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
@@ -68,16 +65,17 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
 }
 
-/** Draws one label chip (dark rounded pill, colour dot, then the segments) at screen (x, y). */
-function drawChip(ctx: CanvasRenderingContext2D, x: number, y: number, segs: Seg[], dotColor: string): void {
-  const w = chipWidth(ctx, segs);
-  roundRect(ctx, x, y, w, CHIP_H, 4);
+/** Dark rounded chip: colour dot + name + mean on line 1, min…max on line 2. */
+function drawChip(ctx: CanvasRenderingContext2D, x: number, y: number, c: ChipContent, dotColor: string): void {
+  const { w, h } = chipSize(ctx, c);
+  roundRect(ctx, x, y, w, h, 4);
   ctx.fillStyle = CHIP_BG; ctx.fill();
   ctx.strokeStyle = CHIP_BORDER; ctx.lineWidth = 1; ctx.setLineDash([]); ctx.stroke();
-  ctx.beginPath(); ctx.arc(x + PAD + DOTR, y + CHIP_H / 2, DOTR, 0, Math.PI * 2); ctx.fillStyle = dotColor; ctx.fill();
-  let cx = x + PAD + DOTR * 2 + 5;
-  const ty = y + CHIP_H / 2 + 4;
-  segs.forEach((sg, i) => { if (i > 0) cx += SEGGAP; ctx.fillStyle = sg.color; ctx.fillText(sg.text, cx, ty); cx += ctx.measureText(sg.text).width; });
+  ctx.beginPath(); ctx.arc(x + PAD + DOTR, y + LINE1_H / 2, DOTR, 0, Math.PI * 2); ctx.fillStyle = dotColor; ctx.fill();
+  const ty = y + LINE1_H / 2 + 4;
+  ctx.fillStyle = NAME_COLOR; ctx.fillText(c.name, x + nameX, ty);
+  if (c.value) { ctx.fillStyle = VALUE_COLOR; ctx.fillText(c.value, x + nameX + ctx.measureText(c.name).width + SEGGAP, ty); }
+  if (c.range) { ctx.fillStyle = DIM_COLOR; ctx.fillText(c.range, x + nameX, y + LINE1_H + LINE2_H / 2 + 2); }
 }
 
 /** Strokes one shape in canvas pixels (filled shapes get a translucent tint); returns where its label goes. */
@@ -170,7 +168,7 @@ export function RoiOverlay(p: Props) {
     ctx.font = `11px ${cssVar("--font-mono")}`;
     const base = BASE.get(ctx) ?? new DOMMatrix();
     // pass 1: shapes, selection, vertices, hot/cold markers; collect label chips for a later pass
-    const labels: { id: number; segs: Seg[]; color: string; ax: number; ay: number; selected: boolean }[] = [];
+    const labels: { id: number; content: ChipContent; color: string; ax: number; ay: number; selected: boolean }[] = [];
     p.rois.forEach((r, i) => {
       if (r.hidden) return; // keep i so default colours match the rows
       const color = resolve(roiColor(r, i));
@@ -182,7 +180,7 @@ export function RoiOverlay(p: Props) {
       if (sel) { ctx.strokeStyle = accent; ctx.lineWidth = 1; ctx.setLineDash([3, 3]); drawShape(ctx, r, sx, sy, false); ctx.setLineDash([]); }
       // the label anchor in unflipped screen space, so a mirrored image never mirrors the text
       const scr = base.inverse().transformPoint(ctx.getTransform().transformPoint(new DOMPoint(lx, ly)));
-      labels.push({ id: r.id, segs: labelSegments(r, p.stats.get(r.id), r.id === p.selected), color, ax: scr.x, ay: scr.y, selected: r.id === p.selected });
+      labels.push({ id: r.id, content: labelContent(r, p.stats.get(r.id)), color, ax: scr.x, ay: scr.y, selected: r.id === p.selected });
       if (r.id === p.selected) for (const [vx, vy] of vertexHandles(r)) {
         const hx = (vx + 0.5) * sx, hy = (vy + 0.5) * sy;
         ctx.setLineDash([]); ctx.fillStyle = accent; ctx.strokeStyle = scrim; ctx.lineWidth = 1.5;
@@ -205,19 +203,19 @@ export function RoiOverlay(p: Props) {
     const meta = new Map(labels.map((l) => [l.id, l]));
     // selected ROI's label keeps its anchor (listed first); the rest flow around it, top-down
     const order = [...labels].sort((a, b) => (b.selected ? 1 : 0) - (a.selected ? 1 : 0) || a.ay - b.ay);
-    const items: LabelBox[] = order.map((l) => ({ id: l.id, ax: l.ax, ay: l.ay - CHIP_H + 3, w: chipWidth(ctx, l.segs), h: CHIP_H }));
+    const items: LabelBox[] = order.map((l) => { const s = chipSize(ctx, l.content); return { id: l.id, ax: l.ax, ay: l.ay - s.h + 3, w: s.w, h: s.h }; });
     const placed = layoutLabels(items, { width: p.box.width, height: p.box.height });
     for (const pl of placed) { // leader lines first, under the chips
       if (!pl.displaced) continue;
       const l = meta.get(pl.id)!;
       ctx.globalAlpha = 0.55; ctx.strokeStyle = l.color; ctx.lineWidth = 1; ctx.setLineDash([]);
-      ctx.beginPath(); ctx.moveTo(l.ax, l.ay); ctx.lineTo(pl.x + PAD + DOTR, pl.y + CHIP_H / 2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(l.ax, l.ay); ctx.lineTo(pl.x + PAD + DOTR, pl.y + LINE1_H / 2); ctx.stroke();
       ctx.globalAlpha = 1;
     }
     // draw non-selected first, the selected label last so it is always on top
     for (const pl of [...placed].sort((a, b) => (meta.get(a.id)!.selected ? 1 : 0) - (meta.get(b.id)!.selected ? 1 : 0))) {
       const l = meta.get(pl.id)!;
-      drawChip(ctx, pl.x, pl.y, l.segs, l.color);
+      drawChip(ctx, pl.x, pl.y, l.content, l.color);
     }
     ctx.restore();
   });
