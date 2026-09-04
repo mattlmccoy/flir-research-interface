@@ -1,9 +1,9 @@
 import { NumberField } from "./NumberField.tsx";
 import { useState } from "react";
 import { api, type Hdf5Export, type ThermalVideoExport } from "../lib/api.ts";
-import type { Roi } from "../lib/roi.ts";
+import { roisDifferFromStored, type Roi } from "../lib/roi.ts";
 
-interface Props { name: string; index: number; nFrames: number; rois: Roi[]; celsius: boolean; thermalPreview?: { bytes: number } | null; onThermalPreview?: () => void; files?: { name: string; bytes: number }[]; onRefresh?: () => void; }
+interface Props { name: string; index: number; nFrames: number; rois: Roi[]; celsius: boolean; thermalPreview?: { bytes: number } | null; onThermalPreview?: () => void; files?: { name: string; bytes: number }[]; onRefresh?: () => void; storedRois?: unknown[] | null; }
 
 const FRAME_FORMATS = [
   { f: "csv", label: "CSV", title: "°C grid (raw counts if not temperature-linear)" },
@@ -20,7 +20,7 @@ function fmtBytes(n: number): string {
 /** Small rotating ring shown inside a button while its export runs. */
 const Spinner = () => <span className="spinner" aria-hidden="true" />;
 
-export function ExportSection({ name, index, nFrames, rois, celsius, thermalPreview, onThermalPreview, files = [], onRefresh }: Props) {
+export function ExportSection({ name, index, nFrames, rois, celsius, thermalPreview, onThermalPreview, files = [], onRefresh, storedRois }: Props) {
   const [busy, setBusy] = useState(false);
   // Which single-flight export (hdf5 / range / report) is running, so only its button spins.
   const [busyKind, setBusyKind] = useState<"hdf5" | "range" | "report" | null>(null);
@@ -53,6 +53,9 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
     try { const r = await api.exportFrames(name, rng.start, Math.min(rng.stop, nFrames), Math.max(1, rng.step), rng.format); setRngOut(`${r.n} frames → ${r.path} (${fmtBytes(r.size_bytes)})`); } catch (e) { setErr(String(e)); } finally { setBusy(false); setBusyKind(null); }
   }
   const haveVideo = !!thermalPreview || !!tv;
+  // Do the ROIs on screen still match the ones the derived files (ROI plot, peak frames, ROI
+  // video, roi_series.csv) were built from? If not, the derived files are out of date.
+  const stale = roisDifferFromStored(rois, storedRois);
 
   async function renderThermalVideo() {
     setTvBusy(true); setErr(null);
@@ -69,6 +72,22 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
 
   return (
     <>
+      {stale ? (
+        <div className="warnbox derived-stale">
+          <b>Derived files are out of date.</b> The ROI plot, peak-frame images, thermal-ROI video and roi_series.csv were built from a different set of ROIs than the {rois.length} on screen.
+          <button className="primary" style={{ marginTop: 8, width: "100%" }} disabled={derivedBusy || busy || tvBusy || nFrames === 0} onClick={regenerateDerived}>
+            {derivedBusy ? <><Spinner />regenerating derived files…</> : `Update derived files to match the ${rois.length} ROI${rois.length === 1 ? "" : "s"} on screen`}
+          </button>
+          {derivedOut && <div className="hint" style={{ color: "var(--accent)", marginTop: 4 }}>{derivedOut}</div>}
+        </div>
+      ) : (files.length > 0 || rois.length > 0) ? (
+        <div className="hint derived-ok" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span aria-hidden="true">✓</span> Derived files match the {rois.length} ROI{rois.length === 1 ? "" : "s"} on screen.
+          <button className="secondary" style={{ marginLeft: "auto" }} disabled={derivedBusy || busy || tvBusy || nFrames === 0} onClick={regenerateDerived} title="Force a re-render of the ROI plot, peak frames, thermal-ROI video and roi_series.csv from the current ROIs">
+            {derivedBusy ? <><Spinner />regenerating…</> : "re-generate"}
+          </button>
+        </div>
+      ) : null}
       <div className="kv">
         <span>ROI series</span>
         <span className="v plain" style={{ textAlign: "right" }}>
@@ -104,16 +123,6 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
           {haveVideo && <a className="dl" href={api.thermalVideoUrl(name)} download={`${name}_thermal_preview.mp4`} title="exports/thermal_preview.mp4: iron palette, fixed °C scale for the run, colour bar + time label. A viewing copy only; the raw counts stay in thermal.zarr">MP4{fmtBytes(tv?.bytes ?? thermalPreview?.bytes ?? 0) !== "0 kB" ? ` · ${fmtBytes(tv?.bytes ?? thermalPreview?.bytes ?? 0)}` : ""}</a>}
           <button className="secondary" disabled={tvBusy || nFrames === 0} onClick={renderThermalVideo} title="Render (or re-render) the small H.264 viewing copy of the thermal run">{tvBusy ? <><Spinner />rendering…</> : haveVideo ? "re-render" : "render"}</button>
         </span>
-      </div>
-      <div className="derived-refresh" style={{ marginTop: 8 }}>
-        <button className="secondary" disabled={derivedBusy || busy || tvBusy || nFrames === 0} onClick={regenerateDerived}
-          title="The ROI plot, peak-frame images, thermal videos and roi_series.csv were generated from the ROIs present at record time. This saves the ROIs currently on screen into the run and regenerates all of them to match.">
-          {derivedBusy ? <><Spinner />regenerating derived files…</> : "update derived files to match ROIs on screen"}
-        </button>
-        <div className="hint" style={{ marginTop: 3 }}>
-          {rois.length ? `${rois.length} ROI${rois.length === 1 ? "" : "s"} on screen` : "no ROIs on screen — regenerates the clean video and images"} · ROI plot, peak frames, videos and roi_series.csv
-        </div>
-        {derivedOut && <div className="hint" style={{ color: "var(--accent)" }}>{derivedOut}</div>}
       </div>
       {files.length > 0 && (
         <div className="hint" style={{ marginTop: 6 }}>

@@ -356,3 +356,43 @@ test("removing / clearing keeps selectedIds consistent", () => {
   s = roiReducer(s, { type: "clear" });
   assert.deepEqual(s.selectedIds, []);
 });
+
+test("roisDifferFromStored: identical geometry/name/optics is not stale", async () => {
+  const { roisDifferFromStored } = await import("./roi.ts");
+  const onScreen = [
+    { id: 7, kind: "circle", cx: 293, cy: 238, r: 72, name: "big" },
+    { id: 9, kind: "rect", x0: 0, y0: 0, x1: 10, y1: 10, name: "patch", emissivity: 0.85 },
+  ];
+  // stored comes back from the API: circle r is a float, order may differ, extra display fields absent
+  const stored = [
+    { id: 9, kind: "rect", x0: 0, y0: 0, x1: 10, y1: 10, name: "patch", emissivity: 0.85 },
+    { id: 7, kind: "circle", cx: 293, cy: 238, r: 72.0, name: "big" },
+  ];
+  assert.equal(roisDifferFromStored(onScreen as never, stored), false);
+});
+
+test("roisDifferFromStored: added, moved, renamed, or re-emissivitied ROIs are stale", async () => {
+  const { roisDifferFromStored } = await import("./roi.ts");
+  const base = [{ id: 7, kind: "circle", cx: 293, cy: 238, r: 72, name: "big" }];
+  assert.equal(roisDifferFromStored(base as never, base), false, "same → not stale");
+  assert.equal(roisDifferFromStored([...base, { id: 8, kind: "spot", x: 5, y: 5 }] as never, base), true, "added");
+  assert.equal(roisDifferFromStored([{ id: 7, kind: "circle", cx: 294, cy: 238, r: 72, name: "big" }] as never, base), true, "moved");
+  assert.equal(roisDifferFromStored([{ id: 7, kind: "circle", cx: 293, cy: 238, r: 72, name: "BIG" }] as never, base), true, "renamed");
+  assert.equal(roisDifferFromStored([{ id: 7, kind: "circle", cx: 293, cy: 238, r: 72, name: "big", emissivity: 0.9 }] as never, base), true, "optics changed");
+});
+
+test("roisDifferFromStored: display-only fields (hidden, box=1) do not count as changes", async () => {
+  const { roisDifferFromStored } = await import("./roi.ts");
+  const stored = [{ id: 1, kind: "spot", x: 5, y: 5 }];
+  const onScreen = [{ id: 1, kind: "spot", x: 5, y: 5, box: 1, hidden: true }];
+  assert.equal(roisDifferFromStored(onScreen as never, stored), false);
+  // but a 3x3 measurement cursor IS a real difference
+  assert.equal(roisDifferFromStored([{ id: 1, kind: "spot", x: 5, y: 5, box: 3 }] as never, stored), true);
+});
+
+test("roisDifferFromStored: empty on both sides is not stale; something vs nothing is", async () => {
+  const { roisDifferFromStored } = await import("./roi.ts");
+  assert.equal(roisDifferFromStored([], null), false);
+  assert.equal(roisDifferFromStored([], undefined), false);
+  assert.equal(roisDifferFromStored([{ id: 1, kind: "spot", x: 1, y: 1 }] as never, null), true);
+});

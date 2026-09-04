@@ -12,7 +12,7 @@ import type { PaletteName } from "../lib/palette.ts";
 import type { Range, ScaleMode } from "../lib/scale.ts";
 import type { LayoutAction, LayoutState } from "../lib/layout.ts";
 import { SPEEDS, clampIndex, nextFrameDelayMs, speedLabel } from "../lib/playback.ts";
-import { loadRois, roiLabel, type Roi, type RoiAction, type RoiState } from "../lib/roi.ts";
+import { loadRois, roiLabel, roisDifferFromStored, type Roi, type RoiAction, type RoiState } from "../lib/roi.ts";
 import { roiColor } from "../lib/overlay.ts";
 import { eventsToMarkers, nearestIndex, nextMarkerTime } from "../lib/events.ts";
 import { fmtAny, fmtCelsius } from "../lib/format.ts";
@@ -165,6 +165,10 @@ export function PlaybackPage(p: Props) {
   const recordedH = info?.visible_alignment ? parseAlignment(info.visible_alignment).H : null;
   const overlayH = recordedH ?? loadAlignment(typeof localStorage !== "undefined" ? localStorage : null).H;
   const traces = seriesTraces(series, p.rois);
+  // Derived files (ROI plot, peak frames, ROI video, roi_series.csv) are stale when the ROIs on
+  // screen no longer match the ones stored with the recording; badge the export section so it's
+  // visible even when collapsed.
+  const derivedStale = roisDifferFromStored(p.rois.rois, info?.rois ?? null);
   const withDelta = (() => {
     const d = p.layout.delta;
     if (!d) return traces;
@@ -255,8 +259,8 @@ export function PlaybackPage(p: Props) {
           <RailSection id="visible" title="visible camera" open={p.layout.sections.visible} onToggle={() => p.dispatch({ type: "toggleSection", section: "visible" })} tag="recorded video">
             <VisiblePanel mode="playback" name={p.name} hasVideo={hasVideo} t={t} playing={playing} speed={speed} measuredFps={info?.visible?.measured_fps} visibleMode={p.layout.visibleMode} overlay={p.layout.overlay} dispatch={p.dispatch} aligned={!!overlayH} />
           </RailSection>
-          <RailSection id="export" title="export" open={p.layout.sections.export} onToggle={() => p.dispatch({ type: "toggleSection", section: "export" })} tag="derived files">
-            <ExportSection name={p.name} index={index} nFrames={n} rois={p.rois.rois} celsius={hdr?.kelvin_per_count != null} thermalPreview={info?.thermal_preview} files={info?.exports ?? []} onRefresh={() => { api.experiment(p.name).then(setInfo).catch((e) => setErr(String(e))); }} />
+          <RailSection id="export" title="export" open={p.layout.sections.export} onToggle={() => p.dispatch({ type: "toggleSection", section: "export" })} tag={derivedStale ? "update needed" : "derived files"} tagWarn={derivedStale}>
+            <ExportSection name={p.name} index={index} nFrames={n} rois={p.rois.rois} celsius={hdr?.kelvin_per_count != null} thermalPreview={info?.thermal_preview} files={info?.exports ?? []} storedRois={info?.rois ?? null} onRefresh={() => { api.experiment(p.name).then(setInfo).catch((e) => setErr(String(e))); }} />
           </RailSection>
         </Rail>
       }

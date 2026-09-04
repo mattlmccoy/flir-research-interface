@@ -61,6 +61,44 @@ export type RoiAction =
 /** The ROIs that should be drawn and hit-tested. */
 export function visibleRois(rois: Roi[]): Roi[] { return rois.filter((r) => !r.hidden); }
 
+/**
+ * Canonical signature of one ROI for the "do the derived files still match?" check: only the
+ * fields that change the exported ROI series / plot / videos — geometry, per-ROI optics, name and
+ * colour. Display-only state (selection, `hidden`, a default `box: 1`) is excluded, and floats are
+ * compared as JS numbers so a stored `72.0` equals an on-screen `72`. Works on both the on-screen
+ * `Roi` and the plain dicts returned by the API.
+ */
+function roiSignature(r: Record<string, unknown>): string {
+  const g: Record<string, unknown> = { id: r.id, kind: r.kind };
+  switch (r.kind) {
+    case "spot": g.x = r.x; g.y = r.y; if (r.box === 3) g.box = 3; break;
+    case "rect": case "line": g.x0 = r.x0; g.y0 = r.y0; g.x1 = r.x1; g.y1 = r.y1; break;
+    case "circle": g.cx = r.cx; g.cy = r.cy; g.r = r.r; break;
+    case "ellipse": g.cx = r.cx; g.cy = r.cy; g.rx = r.rx; g.ry = r.ry; break;
+    case "polygon": case "polyline": g.points = r.points; break;
+  }
+  if (typeof r.name === "string" && r.name.trim()) g.name = r.name.trim().slice(0, 40);
+  if (typeof r.color === "string") g.color = r.color;
+  for (const k of ["emissivity", "reflected_c", "distance_m"] as const) {
+    const v = r[k];
+    if (typeof v === "number" && Number.isFinite(v)) g[k] = v;
+  }
+  return JSON.stringify(g);
+}
+
+/**
+ * True when the ROIs on screen would produce different derived files than the ones already stored
+ * with the recording (order-independent). Used to warn that the ROI plot, peak-frame images,
+ * thermal-ROI video and roi_series.csv are out of date until regenerated.
+ */
+export function roisDifferFromStored(onScreen: Roi[], stored: unknown[] | null | undefined): boolean {
+  const a = onScreen.map((r) => roiSignature(r as unknown as Record<string, unknown>)).sort();
+  const b = (Array.isArray(stored) ? stored : [])
+    .filter((r): r is Record<string, unknown> => !!r && typeof r === "object")
+    .map(roiSignature).sort();
+  return a.length !== b.length || a.some((s, i) => s !== b[i]);
+}
+
 export function roiXs(r: Roi): number[] { return r.kind === "spot" ? [r.x] : r.kind === "circle" || r.kind === "ellipse" ? [r.cx] : r.kind === "polygon" || r.kind === "polyline" ? r.points.map((p) => p[0]) : [r.x0, r.x1]; }
 export function roiYs(r: Roi): number[] { return r.kind === "spot" ? [r.y] : r.kind === "circle" || r.kind === "ellipse" ? [r.cy] : r.kind === "polygon" || r.kind === "polyline" ? r.points.map((p) => p[1]) : [r.y0, r.y1]; }
 
