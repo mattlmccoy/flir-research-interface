@@ -138,7 +138,8 @@ pre { background: var(--bg-deep); border: 1px solid var(--line); padding: 8px; b
 .exp-card .body { padding: 10px; display: flex; flex-direction: column; gap: 6px; }
 .exp-card .name { color: var(--fg-strong); font-family: var(--font-mono); font-size: 12px; word-break: break-all; }
 .exp-card .meta { display: flex; gap: 10px; flex-wrap: wrap; color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
-.exp-card .actions { display: flex; gap: 6px; margin-top: auto; }
+.exp-card .actions { display: flex; gap: 6px; margin-top: auto; flex-wrap: wrap; align-items: center; }
+.exp-card .actions button { white-space: nowrap; }
 .badge.bad { background: var(--err-bg); color: var(--err); }
 
 /* ---- ROI overlay + measurements (Milestone 6) --------------------------------------- */

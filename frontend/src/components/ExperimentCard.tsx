@@ -163,7 +163,7 @@ export function ExperimentCard({ exp, onOpen, onChanged, driveConnected = false 
           ) : (
             <button className="secondary" disabled={busy || !driveConnected} onClick={() => moveTo("drive")}
               title={driveConnected ? "Move this run to the external drive to free local space (copy → verify → delete)" : "Register an external drive in Setup → Storage first"}>
-              move to drive ▸
+              → drive
             </button>
           )}
           <button className="danger" disabled={busy} onClick={remove} title="Delete this run and everything in its folder (no undo)" style={{ marginLeft: "auto" }}>
