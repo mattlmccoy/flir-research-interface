@@ -88,9 +88,12 @@ export function MediaExportEditor({ name, nFrames, index, tS, rois, onClose }: P
   const [err, setErr] = useState<string | null>(null);
   const busy = job?.state === "running";
 
-  // Debounced preview URL: recompose only after scrubbing/typing settles.
+  // Debounced preview URL: recompose only after scrubbing/typing settles. The first compose on a
+  // long run is slow (range scan), so we show a "rendering" state until the image actually loads.
   const [previewUrl, setPreviewUrl] = useState("");
+  const [previewLoading, setPreviewLoading] = useState(true);
   useEffect(() => {
+    setPreviewLoading(true);
     const id = window.setTimeout(() => {
       setPreviewUrl(api.mediaPreviewUrl(name, scrub, { with_rois: showRois, frame_stats: frameStats, timestamp, colorbar, title: title.trim() || null, plot_series: plotSeries, overlay_rois: selIds, start, stop }));
     }, 120);
@@ -121,7 +124,10 @@ export function MediaExportEditor({ name, nFrames, index, tS, rois, onClose }: P
       </div>
       <div className="media-editor-body">
         <div className="media-preview">
-          {previewUrl ? <img src={previewUrl} alt="preview" /> : <div className="muted">loading preview…</div>}
+          <div className="media-preview-frame">
+            {previewUrl && <img src={previewUrl} alt="preview" style={{ opacity: previewLoading ? 0.25 : 1 }} onLoad={() => setPreviewLoading(false)} onError={() => setPreviewLoading(false)} />}
+            {previewLoading && <div className="media-preview-overlay"><span className="spinner" /> rendering preview…</div>}
+          </div>
           <div className="hint" style={{ textAlign: "center" }}>frame {scrub} · {tS[scrub] != null ? fmtSecs(tS[scrub]) : ""}</div>
         </div>
 

@@ -411,9 +411,11 @@ def _compose(reader: ExperimentReader, idx: int, vmin: float, vmax: float, scale
     over = over_range_mask(counts)
     stats_vals = values if over is None else np.where(over, np.nan, values)
     bar = 24 if opts.colorbar else 0
+    # A title paints a bar over the top-left, so let it own that corner: draw the timestamp just
+    # below the bar instead of having thermal_frame_rgb bake it under the title.
     rgb = thermal_frame_rgb(values, vmin, vmax, reader.t_s(idx), bar_px=bar, scale=scale,
                             rois=rois if opts.with_rois else None, reader=reader,
-                            show_time=opts.timestamp)
+                            show_time=opts.timestamp and not opts.title)
     if over is not None:  # paint over-range pixels magenta, like the live display
         rgb = np.array(rgb, copy=True)  # thermal_frame_rgb may hand back a read-only view
         big = np.repeat(np.repeat(over, scale, axis=0), scale, axis=1)
@@ -426,9 +428,12 @@ def _compose(reader: ExperimentReader, idx: int, vmin: float, vmax: float, scale
         txt = f"min {lo:.1f}  max {hi:.1f}  mean {mean:.1f} °C"
         d.text((4, rgb.shape[0] - 2 * font.size - 8), txt, fill=(255, 255, 255), font=font)
     if opts.title:
+        bar_h = font.size + 8
         tw = d.textlength(opts.title, font=font)
-        d.rectangle((0, 0, rgb.shape[1], font.size + 8), fill=(0, 0, 0))
+        d.rectangle((0, 0, rgb.shape[1], bar_h), fill=(0, 0, 0))
         d.text(((rgb.shape[1] - tw) / 2, 3), opts.title, fill=(255, 255, 255), font=font)
+        if opts.timestamp:  # timestamp moved just under the title bar so the bar can't cover it
+            d.text((4, bar_h + 2), f"{reader.t_s(idx):.2f} s", fill=(255, 255, 255), font=font)
     if not plot:
         return np.asarray(pil, dtype=np.uint8)
     # append a full-width live-plot strip below the frame (taller output, no overlay)

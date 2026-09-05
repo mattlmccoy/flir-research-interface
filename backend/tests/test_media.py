@@ -189,6 +189,16 @@ def test_timestamp_toggle_actually_removes_the_time(tmp_path: Path) -> None:
     assert on != off  # turning the timestamp off changes the rendered frame
 
 
+@pytest.mark.skipif(not _HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_title_does_not_cover_the_timestamp(tmp_path: Path) -> None:
+    """A title caption must not paint over the elapsed-time label (they shared the top-left)."""
+    from flir_research_interface.analysis.media import MediaOptions, compose_preview
+    r = _make(tmp_path)
+    with_ts = compose_preview(r, MediaOptions(start=0, stop=20, title="Run A", timestamp=True, colorbar=False), 5)
+    no_ts = compose_preview(r, MediaOptions(start=0, stop=20, title="Run A", timestamp=False, colorbar=False), 5)
+    assert with_ts != no_ts  # the timestamp is still visible when a title is present
+
+
 def test_plot_series_gives_each_roi_its_own_stats(tmp_path: Path) -> None:
     """plot_series lets each ROI choose its own stats: ROI 1 mean+max, ROI 2 min only."""
     from flir_research_interface.analysis.media import MediaOptions, _plot_traces
