@@ -1,5 +1,6 @@
 import { ProfileEditor } from "./ProfileEditor.tsx";
 import { StoragePanel } from "./StoragePanel.tsx";
+import { RfLinkPanel } from "./RfLinkPanel.tsx";
 import { CredentialsHelp } from "./CredentialsHelp.tsx";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api.ts";
@@ -115,6 +116,11 @@ export function SetupPage({ onConnected }: { onConnected: () => void }) {
       <div className="card">
         <h2>5. Storage (offload runs to an external drive)</h2>
         <StoragePanel />
+      </div>
+
+      <div className="card">
+        <h2>6. RF link (external RF-power trigger)</h2>
+        <RfLinkPanel />
       </div>
 
       <details className="card" style={{ opacity: 0.8 }}>

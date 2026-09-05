@@ -68,6 +68,8 @@ export interface StorageInfo {
 }
 /** Progress of an offload/restore move (background job). */
 export interface MoveJob { state: "running" | "done" | "error" | "idle"; to?: "drive" | "local"; done?: number; total?: number; error?: string | null; }
+/** How FLIR reacts to RF-on/RF-off events posted by the separate T&C Power RF tool. */
+export interface RfLinkSettings { auto_start_on_rf_on: boolean; stop_on_rf_off: boolean; }
 
 export interface Experiment {
   name: string;
@@ -209,4 +211,8 @@ export const api = {
   connect: (backend: string, serial?: string) =>
     j<{ state: string }>(req("/api/camera/connect", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ backend, serial }) })),
   disconnect: () => j<{ state: string }>(req("/api/camera/disconnect", { method: "POST" })),
+  // -- RF link (external T&C Power RF-on/off events) --
+  rfLinkSettings: () => j<RfLinkSettings>(req("/api/rf-link/settings")),
+  saveRfLinkSettings: (s: RfLinkSettings) =>
+    j<RfLinkSettings>(req("/api/rf-link/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(s) })),
 };
