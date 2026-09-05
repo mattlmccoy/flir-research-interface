@@ -2,14 +2,20 @@ import { useEffect, useRef, useState } from "react";
 import { NumberField } from "./NumberField.tsx";
 import { api, type MediaJob } from "../lib/api.ts";
 
+interface RoiPick { id: number; name?: string; kind?: string; color?: string }
 interface Props {
   name: string;
   nFrames: number;
   index: number; // current playhead in playback, seeds the scrubber
   tS: number[]; // timeline seconds per frame
-  rois: { id: number; name?: string; kind?: string }[]; // stored ROIs, for the live-plot picker
+  rois: RoiPick[]; // stored ROIs, for the ROI picker
   onClose: () => void;
 }
+
+// Matches the backend overlay palette (annotate.DEFAULT_COLORS), so a picker dot shows the colour
+// the ROI's box and plot line will actually have in the export.
+const MEDIA_PALETTE = ["#ffb000", "#4cc9f0", "#ff8ad8", "#7cff6b", "#ff6b6b", "#c8a2ff", "#ffffff"];
+function dotColor(r: RoiPick, i: number): string { return r.color ?? MEDIA_PALETTE[i % MEDIA_PALETTE.length]; }
 
 function fmtSecs(s: number): string { return `${s.toFixed(2)} s`; }
 function fmtBytes(n: number): string { return n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${(n / 1e3).toFixed(0)} kB`; }
@@ -142,26 +148,31 @@ export function MediaExportEditor({ name, nFrames, index, tS, rois, onClose }: P
             <NumberField min={1} max={100} value={step} style={{ width: 64 }} aria-label="keep every Nth frame" onChange={(f) => setStep(Math.max(1, Math.floor(f)))} />
             <span className="hint">frame{step === 1 ? "" : "s"} → {Math.ceil((stop - start) / step)} out{fmt === "gif" ? ` @ ${Math.min(20, (30 * speed) / step).toFixed(0)} fps` : ""}</span>
           </span>
-          <span title="Pick ROIs to focus: each is drawn on the frame and plotted below. For an area ROI, pick any of mean/min/max as separate lines.">ROIs</span>
-          <span className="v plain roi-picker">
+          <span title="Tick a ROI to draw it on the frame and plot it below. For an area ROI, tick any of mean/min/max as separate lines.">ROIs</span>
+          <div className="v plain roi-rows">
             {rois.length === 0 && <span className="hint">no ROIs on this run</span>}
-            {rois.map((r) => {
+            {rois.map((r, i) => {
               const on = r.id in sel;
               const spot = r.kind === "spot";
               return (
-                <span key={r.id} className={`roi-group${on ? " on" : ""}`}>
-                  <button type="button" className={`chip${on ? " on" : ""}`} aria-pressed={on}
-                    onClick={() => toggleRoi(r.id)}>{r.name ?? `ROI ${r.id}`}</button>
-                  {on && !spot && ["mean", "min", "max"].map((s) => (
-                    <button key={s} type="button" className={`chip stat${(sel[r.id] ?? []).includes(s) ? " on" : ""}`}
-                      aria-pressed={(sel[r.id] ?? []).includes(s)} onClick={() => toggleStat(r.id, s)}>{s}</button>
-                  ))}
-                </span>
+                <div key={r.id} className={`roi-row${on ? " on" : ""}`}>
+                  <label className="roi-name">
+                    <input type="checkbox" checked={on} onChange={() => toggleRoi(r.id)} />
+                    <span className="roi-dot" style={{ background: dotColor(r, i) }} />
+                    {r.name ?? `ROI ${r.id}`}
+                  </label>
+                  {on && !spot && (
+                    <span className="roi-stats">
+                      {["mean", "min", "max"].map((s) => (
+                        <label key={s}><input type="checkbox" checked={(sel[r.id] ?? []).includes(s)} onChange={() => toggleStat(r.id, s)} /> {s}</label>
+                      ))}
+                    </span>
+                  )}
+                </div>
               );
             })}
-          </span>
-          {selIds.length > 0 && <span /> }
-          {selIds.length > 0 && <span className="hint">Only these {selIds.length} ROI{selIds.length === 1 ? "" : "s"} are drawn on the export.</span>}
+            {selIds.length > 0 && <span className="hint">Only these {selIds.length} ROI{selIds.length === 1 ? "" : "s"} are drawn on the export.</span>}
+          </div>
         </div>
         <label className="hint">Title / caption <input type="text" value={title} maxLength={80} placeholder="(optional, baked into the frame)" style={{ width: "100%" }} onChange={(e) => setTitle(e.target.value)} /></label>
         <div className="media-overlays">

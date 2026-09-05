@@ -253,10 +253,13 @@ ul.help li { line-height: 1.35; }
 .media-editor input[type="text"] { background: var(--panel); border: 1px solid var(--line-control); border-radius: var(--radius); padding: 4px 8px; color: var(--fg); box-sizing: border-box; }
 .media-editor .chip { background: transparent; color: var(--fg); border: 1px solid var(--line-control); border-radius: 999px; padding: 2px 9px; cursor: pointer; font-family: var(--font-mono); font-size: 11px; line-height: 1.5; }
 .media-editor .chip.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
-.media-editor .roi-picker { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.media-editor .roi-group { display: inline-flex; align-items: center; gap: 3px; padding: 2px; border-radius: 999px; }
-.media-editor .roi-group.on { background: var(--panel); padding-right: 5px; }
-.media-editor .chip.stat { font-size: 10px; padding: 1px 6px; }
+.media-editor .roi-rows { display: flex; flex-direction: column; gap: 2px; }
+.media-editor .roi-row { display: flex; align-items: center; gap: 12px; padding: 3px 6px; border-radius: var(--radius); flex-wrap: wrap; }
+.media-editor .roi-row.on { background: var(--panel); }
+.media-editor .roi-name { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; min-width: 190px; }
+.media-editor .roi-dot { width: 10px; height: 10px; border-radius: 2px; flex: none; box-shadow: 0 0 0 1px var(--scrim); }
+.media-editor .roi-stats { display: inline-flex; align-items: center; gap: 12px; }
+.media-editor .roi-stats label { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer; color: var(--fg); }
 
 /* ---- Inline busy spinner (buttons) -------------------------------------------------- */
 .spinner { display: inline-block; width: 11px; height: 11px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; vertical-align: -1px; margin-right: 6px; animation: spin 0.7s linear infinite; opacity: 0.85; }
