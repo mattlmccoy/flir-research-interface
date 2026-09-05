@@ -63,6 +63,17 @@ def test_rf_off_stops_when_configured(tmp_path: Path) -> None:
         assert r.json()["recording"] is False  # stopped
 
 
+def test_settings_reports_last_rf_link_event(tmp_path: Path) -> None:
+    with _client(tmp_path) as c:
+        _connect_sim(c)
+        assert c.get("/api/rf-link/settings").json()["last_event"] is None
+        c.post("/api/rf-link/event", json={"state": "on", "forward_w": 300.0})
+        last = c.get("/api/rf-link/settings").json()["last_event"]
+        assert last is not None
+        assert last["state"] == "on"
+        assert "ts" in last
+
+
 def test_rf_off_never_stops_an_operator_started_recording(tmp_path: Path) -> None:
     """Safety guarantee: the RF link only owns runs it started, so an RF-off event must NEVER stop
     a recording the operator started manually — even with stop_on_rf_off enabled."""

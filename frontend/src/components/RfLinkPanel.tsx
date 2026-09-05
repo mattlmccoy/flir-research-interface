@@ -1,13 +1,29 @@
 import { useEffect, useState } from "react";
-import { api, type RfLinkSettings } from "../lib/api.ts";
+import { api, type RfLinkEvent, type RfLinkSettings } from "../lib/api.ts";
+
+const RF_LINK_POLL_MS = 3000;
 
 /** Setup → RF link: what FLIR does when the separate T&C Power RF tool reports RF on/off. */
 export function RfLinkPanel() {
   const [settings, setSettings] = useState<RfLinkSettings | null>(null);
+  const [lastEvent, setLastEvent] = useState<RfLinkEvent | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => { api.rfLinkSettings().then(setSettings).catch((e) => setErr(String(e))); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    api.rfLinkSettings().then((s) => {
+      if (cancelled) return;
+      setSettings({ auto_start_on_rf_on: s.auto_start_on_rf_on, stop_on_rf_off: s.stop_on_rf_off });
+      setLastEvent(s.last_event);
+    }).catch((e) => { if (!cancelled) setErr(String(e)); });
+    // Poll only the last received event so the display updates as RF toggles fire, without
+    // clobbering the toggles while the operator is changing them.
+    const poll = setInterval(() => {
+      api.rfLinkSettings().then((s) => { if (!cancelled) setLastEvent(s.last_event); }).catch(() => {});
+    }, RF_LINK_POLL_MS);
+    return () => { cancelled = true; clearInterval(poll); };
+  }, []);
 
   async function save(patch: Partial<RfLinkSettings>) {
     if (!settings) return;
@@ -17,6 +33,12 @@ export function RfLinkPanel() {
   }
 
   if (!settings) return err ? <div className="errbox">{err}</div> : <div className="muted">loading…</div>;
+
+  const eventLine = lastEvent
+    ? `Last RF event: ${lastEvent.state === "on" ? "RF ON" : "RF OFF"}` +
+      (lastEvent.state === "on" && lastEvent.forward_w != null ? ` · ${lastEvent.forward_w.toFixed(1)} W` : "") +
+      ` · ${new Date(lastEvent.ts).toLocaleTimeString()}`
+    : "Last RF event: none received yet";
 
   return (
     <>
@@ -33,6 +55,7 @@ export function RfLinkPanel() {
         </label>
       </div>
       <div className="hint">Off (unchecked) keeps recording after RF-off to capture the cooldown, instead of stopping right away.</div>
+      <div className="hint">{eventLine}</div>
       {err && <div className="errbox">{err}</div>}
     </>
   );

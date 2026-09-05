@@ -241,6 +241,7 @@ def create_app(
         app.state.recorder = None
         app.state.visible = None
         app.state.rf_link_owns_run = None
+        app.state.rf_link_last_event = None
         yield
         await _finalize_recording()
         svc: AcquisitionService | None = app.state.service
@@ -651,7 +652,11 @@ def create_app(
     @app.get("/api/rf-link/settings")
     def get_rf_link_settings() -> dict[str, Any]:
         s = rf_link.load_settings(app.state.experiments_root)
-        return {"auto_start_on_rf_on": s.auto_start_on_rf_on, "stop_on_rf_off": s.stop_on_rf_off}
+        return {
+            "auto_start_on_rf_on": s.auto_start_on_rf_on,
+            "stop_on_rf_off": s.stop_on_rf_off,
+            "last_event": app.state.rf_link_last_event,
+        }
 
     @app.put("/api/rf-link/settings")
     def put_rf_link_settings(body: RfLinkSettingsBody) -> dict[str, Any]:
@@ -708,6 +713,12 @@ def create_app(
             if recording and rec_now is not None and rec_now.experiment_dir
             else None
         )
+        app.state.rf_link_last_event = {
+            "state": ev.state,
+            "reason": ev.reason,
+            "forward_w": ev.forward_w,
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }
         return {
             "recording": recording,
             "run": run_name,
