@@ -35,6 +35,7 @@ import { StudioFrame } from "./studio/StudioFrame.tsx";
 import { ToolStrip } from "./studio/ToolStrip.tsx";
 import { IconClip, IconRefresh } from "./studio/StripIcons.tsx";
 import { StripActions } from "./studio/StripActions.tsx";
+import { EventLegend } from "./EventLegend.tsx";
 import { Rail } from "./studio/Rail.tsx";
 import { RailSection } from "./studio/RailSection.tsx";
 import { PlotDock } from "./studio/PlotDock.tsx";
@@ -207,7 +208,8 @@ export function PlaybackPage(p: Props) {
   })();
 
   const transport = (
-    <span style={{ display: "flex", gap: 8, alignItems: "center", flex: "1 1 auto", minWidth: 0 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: "1 1 auto", minWidth: 0 }}>
+    <span style={{ display: "flex", gap: 8, alignItems: "center", minWidth: 0 }}>
       <button className="secondary" onClick={() => setIndex(0)} title="First frame" aria-label="First frame">⏮</button>
       <button className="secondary" onClick={() => setIndex((i) => clampIndex(i - 1, n))} title="Previous frame" aria-label="Previous frame">◀︎</button>
       <button className="primary" style={{ minWidth: 64 }} onClick={() => setPlaying((v) => !v)}>{playing ? "pause" : "play"}</button>
@@ -229,6 +231,8 @@ export function PlaybackPage(p: Props) {
       </span>
       <b style={{ whiteSpace: "nowrap", textAlign: "right" }}>{t.toFixed(3)} s · {index + 1}/{n}</b>
     </span>
+    <EventLegend markers={markers} />
+    </div>
   );
 
   function saveImage(): void {

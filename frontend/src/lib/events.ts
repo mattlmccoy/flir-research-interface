@@ -61,15 +61,32 @@ export function eventsToMarkers(events: ExperimentEvent[], tl: Timeline, started
   return out;
 }
 
-/** Theme-token color for an event marker by its label (RF on/off, NUC, gap). Shared by the
- *  playback scrubber and the media-export trim bar so a tick means the same thing in both. */
+/** The event categories shown as timeline ticks, each with a legend label and a distinct color.
+ *  Order here is the legend order. Colors must be visually distinct so a viewer can tell RF off
+ *  (amber) from a NUC (blue) at a glance. Shared by the playback scrubber and media-export bar. */
+interface MarkerCat { label: string; color: string; match: (upper: string) => boolean; }
+const MARKER_CATS: MarkerCat[] = [
+  { label: "RF on", color: "var(--live)", match: (l) => l.includes("RF") && l.includes("ON") },
+  { label: "RF off", color: "var(--warn)", match: (l) => l.includes("RF") && l.includes("OFF") },
+  { label: "NUC", color: "var(--trace-3)", match: (l) => l.includes("NUC") },
+  { label: "gap", color: "var(--err)", match: (l) => l.includes("GAP") },
+];
+const OTHER_CAT = { label: "event", color: "var(--fg-strong)" };
+
+/** Theme-token color for an event marker by its label (RF on/off, NUC, gap, other). */
 export function markColor(label: string): string {
   const l = label.toUpperCase();
-  if (l.includes("RF") && l.includes("ON")) return "var(--live)";   // RF on → green
-  if (l.includes("RF") && l.includes("OFF")) return "var(--warn)";  // RF off → amber
-  if (l.includes("NUC")) return "var(--accent)";
-  if (l.includes("GAP")) return "var(--err)";
-  return "var(--fg-strong)";
+  return MARKER_CATS.find((c) => c.match(l))?.color ?? OTHER_CAT.color;
+}
+
+/** The distinct event categories present in `markers`, in legend order, as {label, color}. Adds a
+ *  generic "event" entry when some marker matches no known category. Empty when there are none. */
+export function markerLegend(markers: Marker[]): { label: string; color: string }[] {
+  const uppers = markers.map((m) => m.label.toUpperCase());
+  const out = MARKER_CATS.filter((c) => uppers.some((l) => c.match(l)))
+    .map((c) => ({ label: c.label, color: c.color }));
+  if (uppers.some((l) => !MARKER_CATS.some((c) => c.match(l)))) out.push({ ...OTHER_CAT });
+  return out;
 }
 
 /** Time of the next (dir = 1) or previous (dir = -1) marker strictly beyond `t`, or null. */

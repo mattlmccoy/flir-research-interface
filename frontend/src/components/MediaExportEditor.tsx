@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { NumberField } from "./NumberField.tsx";
 import { api, type MediaJob, type RangeJob } from "../lib/api.ts";
 import { markColor } from "../lib/events.ts";
+import { EventLegend } from "./EventLegend.tsx";
 import type { Marker } from "./TimePlot.tsx";
 
 interface RoiPick { id: number; name?: string; kind?: string; color?: string }
@@ -196,6 +197,7 @@ export function MediaExportEditor({ name, nFrames, index, tS, markers, rois, has
 
         <TrimBar n={nFrames} start={start} stop={stop} scrub={scrub} marks={trimMarks}
           onStart={(f) => { setStart(f); setScrub(f); }} onStop={(f) => { setStop(f); setScrub(f - 1); }} onScrub={setScrub} />
+        {trimMarks.length > 0 && <EventLegend markers={markers} className="center" />}
         <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 6 }}>
           <span className="hint" style={{ display: "flex", gap: 6, alignItems: "center" }}>in
             <NumberField min={0} max={nFrames - 1} value={start} style={{ width: 80 }} aria-label="window start frame" onChange={(f) => { setStart(Math.min(f, stop - 1)); setScrub(Math.min(f, stop - 1)); }} />
