@@ -70,13 +70,16 @@ input[type=range] { accent-color: var(--accent); }
   border-radius: var(--radius); padding: 6px 10px; z-index: 60; white-space: nowrap; box-shadow: 0 3px 12px var(--scrim); }
 .strip .strip-popover input[type=range] { width: 120px; }
 .strip .strip-popover .v { min-width: 34px; text-align: right; font-family: var(--font-mono); font-size: 11px; color: var(--accent); }
-/* Palette picker flyout: a vertical list of gradient swatches + names. */
-.strip .strip-popover.palette-pop { flex-direction: column; align-items: stretch; gap: 3px; padding: 6px; max-height: 60vh; overflow-y: auto; }
-.strip .palette-opt { display: flex; align-items: center; gap: 8px; padding: 4px 6px; background: none; border: 1px solid transparent; border-radius: var(--radius); cursor: pointer; color: var(--fg); }
+/* Palette picker flyout: a vertical list of gradient swatches + names. An explicit width is
+   required — the vertical scroll (overflow-y) forces overflow-x to a non-visible value, which would
+   otherwise shrink-wrap the flyout and clip the swatches; the width lets every row lay out fully. */
+.strip .strip-popover.palette-pop { flex-direction: column; align-items: stretch; gap: 2px; padding: 6px; width: 168px; max-height: 60vh; overflow-y: auto; overflow-x: hidden; }
+.strip .palette-opt { display: flex; align-items: center; gap: 8px; padding: 4px 6px; background: none; border: 1px solid transparent; border-radius: var(--radius); cursor: pointer; color: var(--fg); text-align: left; width: 100%; }
 .strip .palette-opt:hover { background: var(--panel); }
 .strip .palette-opt.active { border-color: var(--accent); }
-.strip .palette-opt .sw { width: 46px; height: 12px; border-radius: 2px; border: 1px solid var(--line-strong); flex: none; }
-.strip .palette-opt .nm { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.02em; }
+.strip .palette-opt.active .nm { color: var(--accent); }
+.strip .palette-opt .sw { width: 54px; height: 14px; border-radius: 2px; border: 1px solid var(--line-strong); flex: none; }
+.strip .palette-opt .nm { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.02em; white-space: nowrap; }
 /* Hover tooltip: a flat description to the right of each strip symbol. */
 .strip button[data-tip]:hover::after {
   content: attr(data-tip); position: absolute; left: calc(100% + 9px); top: 50%; transform: translateY(-50%);

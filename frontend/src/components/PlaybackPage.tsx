@@ -283,7 +283,7 @@ export function PlaybackPage(p: Props) {
               <span className="strip-popover palette-pop" role="listbox" aria-label="Color palette">
                 {PALETTE_NAMES.map((name) => (
                   <button key={name} role="option" aria-selected={p.palette === name} className={`palette-opt${p.palette === name ? " active" : ""}`}
-                    onClick={() => { p.setPalette(name); setPaletteOpen(false); }} title={name}>
+                    onClick={() => p.setPalette(name)} title={name}>
                     <span className="sw" style={{ background: paletteGradient(name) }} />
                     <span className="nm">{name}</span>
                   </button>
