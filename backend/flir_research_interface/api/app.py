@@ -18,6 +18,7 @@ import sys
 import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -26,7 +27,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from flir_research_interface import __version__, storage
+from flir_research_interface import __version__, rf_link, storage
 from flir_research_interface.acquisition.service import AcquisitionService, ServiceState
 from flir_research_interface.api.frames import encode_frame_message
 from flir_research_interface.api.reveal import Runner, contained, reveal
@@ -174,6 +175,19 @@ def _parse_series(items: list[str]) -> tuple[tuple[int, str], ...]:
     return tuple(out)
 
 
+class RfLinkSettingsBody(BaseModel):
+    auto_start_on_rf_on: bool = True
+    stop_on_rf_off: bool = False
+
+
+class RfLinkEvent(BaseModel):
+    state: str  # "on" | "off"
+    forward_w: float | None = None
+    reflected_fraction: float | None = None
+    reason: str | None = None
+    source_ts_ns: int | None = None
+
+
 class RegisterDriveRequest(BaseModel):
     mount: str
 
@@ -226,6 +240,8 @@ def create_app(
         app.state.backend_name = None
         app.state.recorder = None
         app.state.visible = None
+        app.state.rf_link_owns_run = None
+        app.state.rf_link_last_event = None
         yield
         await _finalize_recording()
         svc: AcquisitionService | None = app.state.service
@@ -311,6 +327,9 @@ def create_app(
         return {"state": "idle"}
 
     async def _finalize_recording() -> dict[str, Any] | None:
+        # Any stop path (operator stop, disarm, disconnect, shutdown, or the RF-link) relinquishes
+        # RF-link ownership, so a later run can never be mistaken for the link-owned one.
+        app.state.rf_link_owns_run = None
         # Thermal data first (the science record), then the visible video; the visible stop may
         # wait on ffmpeg and must never delay or endanger the manifest.
         rec = recorder()
@@ -627,6 +646,85 @@ def create_app(
             headers={"Cache-Control": "no-store"},
             background=BackgroundTask(_done),
         )
+
+    # -- RF link (external RF on/off events from the T&C tool) -----------------------------
+
+    @app.get("/api/rf-link/settings")
+    def get_rf_link_settings() -> dict[str, Any]:
+        s = rf_link.load_settings(app.state.experiments_root)
+        return {
+            "auto_start_on_rf_on": s.auto_start_on_rf_on,
+            "stop_on_rf_off": s.stop_on_rf_off,
+            "last_event": app.state.rf_link_last_event,
+        }
+
+    @app.put("/api/rf-link/settings")
+    def put_rf_link_settings(body: RfLinkSettingsBody) -> dict[str, Any]:
+        s = rf_link.RfLinkSettings(
+            auto_start_on_rf_on=body.auto_start_on_rf_on, stop_on_rf_off=body.stop_on_rf_off
+        )
+        rf_link.save_settings(app.state.experiments_root, s)
+        return {"auto_start_on_rf_on": s.auto_start_on_rf_on, "stop_on_rf_off": s.stop_on_rf_off}
+
+    @app.post("/api/rf-link/event")
+    async def rf_link_event(ev: RfLinkEvent) -> dict[str, Any]:
+        """RF on/off event from the T&C tool; applies the persisted start/stop policy (best-effort
+        from the caller's side — this endpoint always returns 200 with the resulting state)."""
+        settings = rf_link.load_settings(app.state.experiments_root)
+        rec = recorder()
+        is_recording = rec is not None and rec.state == RecorderState.RECORDING
+        current_run = rec.experiment_dir.name if rec is not None and rec.experiment_dir else None
+        owns = bool(is_recording and app.state.rf_link_owns_run == current_run)
+        action = rf_link.plan_rf_action(
+            state=ev.state, is_recording=is_recording, link_owns=owns, settings=settings
+        )
+        detail = ""
+        if action.start:
+            try:
+                name = f"RF_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+                start_req = RecordingStartRequest(
+                    name=name,
+                    metadata={
+                        "trigger": "rf_link",
+                        "forward_w": ev.forward_w,
+                        "reflected_fraction": ev.reflected_fraction,
+                    },
+                )
+                _rec, exp_dir, _vis = await _start_recording(start_req)
+                app.state.rf_link_owns_run = exp_dir.name
+            except HTTPException as exc:
+                detail = f"start failed: {exc.detail}"
+        rec = recorder()
+        if action.mark and rec is not None and rec.state == RecorderState.RECORDING:
+            label = "RF ON" if ev.state == "on" else "RF OFF"
+            note = (
+                f"{ev.forward_w:.1f} W"
+                if ev.state == "on" and ev.forward_w is not None
+                else (ev.reason or "")
+            )
+            rec.note_event("annotation", {"name": label, "note": note})
+        if action.stop:
+            await _finalize_recording()
+            app.state.rf_link_owns_run = None
+        rec_now = recorder()
+        recording = rec_now is not None and rec_now.state == RecorderState.RECORDING
+        run_name = (
+            rec_now.experiment_dir.name
+            if recording and rec_now is not None and rec_now.experiment_dir
+            else None
+        )
+        app.state.rf_link_last_event = {
+            "state": ev.state,
+            "reason": ev.reason,
+            "forward_w": ev.forward_w,
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }
+        return {
+            "recording": recording,
+            "run": run_name,
+            "action": {"mark": action.mark, "start": action.start, "stop": action.stop},
+            "detail": detail,
+        }
 
     # -- recording -------------------------------------------------------------------------
 
