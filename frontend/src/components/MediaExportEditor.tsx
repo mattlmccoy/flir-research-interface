@@ -7,6 +7,7 @@ interface Props {
   nFrames: number;
   index: number; // current playhead in playback, seeds the scrubber
   tS: number[]; // timeline seconds per frame
+  rois: { id: number; name?: string; kind?: string }[]; // stored ROIs, for the live-plot picker
   onClose: () => void;
 }
 
@@ -48,14 +49,17 @@ function TrimBar({ n, start, stop, scrub, onStart, onStop, onScrub }: {
 }
 
 /** Full-screen editor: scrub a live preview and set an in/out window, then export MP4 or GIF. */
-export function MediaExportEditor({ name, nFrames, index, tS, onClose }: Props) {
+export function MediaExportEditor({ name, nFrames, index, tS, rois, onClose }: Props) {
   const [start, setStart] = useState(0);
   const [stop, setStop] = useState(nFrames);
   const [scrub, setScrub] = useState(Math.min(index, nFrames - 1));
   const [fmt, setFmt] = useState<"mp4" | "gif">("mp4");
   const [scale, setScale] = useState(2);
   const [speed, setSpeed] = useState(1);
-  const [rois, setRois] = useState(true);
+  const [step, setStep] = useState(1);
+  const [plotRoi, setPlotRoi] = useState<number | null>(null);
+  const [plotStat, setPlotStat] = useState("mean");
+  const [showRois, setShowRois] = useState(true);
   const [frameStats, setFrameStats] = useState(true);
   const [timestamp, setTimestamp] = useState(true);
   const [colorbar, setColorbar] = useState(true);
@@ -68,17 +72,17 @@ export function MediaExportEditor({ name, nFrames, index, tS, onClose }: Props) 
   const [previewUrl, setPreviewUrl] = useState("");
   useEffect(() => {
     const id = window.setTimeout(() => {
-      setPreviewUrl(api.mediaPreviewUrl(name, scrub, { with_rois: rois, frame_stats: frameStats, timestamp, colorbar, title: title.trim() || null }));
+      setPreviewUrl(api.mediaPreviewUrl(name, scrub, { with_rois: showRois, frame_stats: frameStats, timestamp, colorbar, title: title.trim() || null, plot_roi: plotRoi, plot_stat: plotStat, start, stop }));
     }, 120);
     return () => window.clearTimeout(id);
-  }, [name, scrub, rois, frameStats, timestamp, colorbar, title]);
+  }, [name, scrub, showRois, frameStats, timestamp, colorbar, title, plotRoi, plotStat, start, stop]);
 
   const windowSecs = tS.length ? (tS[Math.min(stop, tS.length) - 1] ?? 0) - (tS[start] ?? 0) : 0;
 
   async function run() {
     setErr(null); setJob({ state: "running", step: "starting", done: 0, total: 0 });
     try {
-      await api.exportMedia(name, { start, stop, scale, speed, fmt, with_rois: rois, frame_stats: frameStats, timestamp, colorbar, title: title.trim() || null });
+      await api.exportMedia(name, { start, stop, step, scale, speed, fmt, with_rois: showRois, frame_stats: frameStats, timestamp, colorbar, title: title.trim() || null, plot_roi: plotRoi, plot_stat: plotStat });
       for (;;) {
         await new Promise((r) => setTimeout(r, 700));
         const jb = await api.mediaStatus(name);
@@ -119,11 +123,24 @@ export function MediaExportEditor({ name, nFrames, index, tS, onClose }: Props) 
           <span>format</span><span className="v plain"><select value={fmt} onChange={(e) => setFmt(e.target.value as "mp4" | "gif")} aria-label="format"><option value="mp4">MP4 (H.264)</option><option value="gif">Animated GIF</option></select></span>
           <span>size</span><span className="v plain"><select value={scale} onChange={(e) => setScale(Number(e.target.value))} aria-label="size"><option value={1}>1× (native)</option><option value={2}>2× (crisp)</option></select></span>
           <span>speed</span><span className="v plain"><select value={speed} onChange={(e) => setSpeed(Number(e.target.value))} aria-label="speed">{[0.5, 1, 2, 4, 8].map((s) => <option key={s} value={s}>{s}×</option>)}</select></span>
+          <span title="Keep every Nth frame — fewer frames = smaller/faster file (handy for GIFs)">keep every</span>
+          <span className="v plain" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <NumberField min={1} max={100} value={step} style={{ width: 64 }} aria-label="keep every Nth frame" onChange={(f) => setStep(Math.max(1, Math.floor(f)))} />
+            <span className="hint">frame{step === 1 ? "" : "s"} → {Math.ceil((stop - start) / step)} out{fmt === "gif" ? ` @ ${Math.min(20, (30 * speed) / step).toFixed(0)} fps` : ""}</span>
+          </span>
+          <span title="Draw a small graph in the corner that grows the ROI's temperature over time">live plot</span>
+          <span className="v plain" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <select value={plotRoi ?? ""} onChange={(e) => setPlotRoi(e.target.value === "" ? null : Number(e.target.value))} aria-label="live plot ROI">
+              <option value="">off</option>
+              {rois.map((r) => <option key={r.id} value={r.id}>{r.name ?? `ROI ${r.id}`}</option>)}
+            </select>
+            {plotRoi != null && <select value={plotStat} onChange={(e) => setPlotStat(e.target.value)} aria-label="live plot stat"><option value="mean">mean</option><option value="min">min</option><option value="max">max</option></select>}
+          </span>
         </div>
         <label className="hint">Title / caption <input type="text" value={title} maxLength={80} placeholder="(optional, baked into the frame)" style={{ width: "100%" }} onChange={(e) => setTitle(e.target.value)} /></label>
         <div className="media-overlays">
           <b className="hint">Overlays</b>
-          <label><input type="checkbox" checked={rois} onChange={(e) => setRois(e.target.checked)} /> ROIs + values</label>
+          <label><input type="checkbox" checked={showRois} onChange={(e) => setShowRois(e.target.checked)} /> ROIs + values</label>
           <label><input type="checkbox" checked={frameStats} onChange={(e) => setFrameStats(e.target.checked)} /> frame min/max/mean</label>
           <label><input type="checkbox" checked={timestamp} onChange={(e) => setTimestamp(e.target.checked)} /> timestamp</label>
           <label><input type="checkbox" checked={colorbar} onChange={(e) => setColorbar(e.target.checked)} /> colour bar</label>

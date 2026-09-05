@@ -217,7 +217,7 @@ export function PlaybackPage(p: Props) {
 
   return (
     <>
-    {showMedia && tl && <MediaExportEditor name={p.name} nFrames={n} index={index} tS={tl.t_s} onClose={() => setShowMedia(false)} />}
+    {showMedia && tl && <MediaExportEditor name={p.name} nFrames={n} index={index} tS={tl.t_s} rois={(info?.rois ?? []).map((r) => ({ id: Number(r.id), name: typeof r.name === "string" ? r.name : undefined, kind: typeof r.kind === "string" ? r.kind : undefined }))} onClose={() => setShowMedia(false)} />}
     <StudioFrame layout={p.layout} topbar={p.topbar} dispatch={p.dispatch} dockFoot={transport}
       strip={<ToolStrip tool={p.layout.tool} onTool={(tool) => p.dispatch({ type: "setTool", tool })} onCollapseAll={() => p.dispatch({ type: !p.layout.rail && !p.layout.dock ? "restoreAll" : "collapseAll" })} collapsed={!p.layout.rail && !p.layout.dock} zoom={p.layout.zoom} onZoom={(z) => p.dispatch({ type: "setZoom", zoom: z })} />}
       center={

@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 from flir_research_interface.analysis.thermal_video import (
     FFMPEG_CANDIDATES,
@@ -51,11 +51,67 @@ class MediaOptions:
     timestamp: bool = True
     colorbar: bool = True
     title: str | None = None
+    plot_roi: int | None = None  # draw an animated live-plot inset of this ROI's temperature
+    plot_stat: str = "mean"  # which stat to plot for an area ROI (mean/min/max)
 
 
 def _slug(text: str) -> str:
     keep = "".join(c if c.isalnum() or c in "-_ " else "" for c in text).strip().replace(" ", "_")
     return keep[:48] or "clip"
+
+
+def _plot_trace(
+    reader: ExperimentReader, opts: MediaOptions, indices: list[int]
+) -> dict[str, Any] | None:
+    """The chosen ROI's temperature aligned to the export frame ``indices`` (for the live-plot)."""
+    if opts.plot_roi is None:
+        return None
+    from flir_research_interface.analysis.series import roi_series
+
+    stored = reader.metadata.get("rois") or []
+    roi = next((r for r in stored if r.get("id") == opts.plot_roi), None)
+    if roi is None:
+        return None
+    ser = roi_series(reader, [roi])["series"].get(str(roi["id"]))
+    if not ser:
+        return None
+    key = "value" if roi.get("kind") == "spot" else (
+        opts.plot_stat if opts.plot_stat in ser else "mean")
+    arr = ser.get(key) or ser.get("mean") or []
+    vals = [float(arr[i]) if i < len(arr) and arr[i] is not None else float("nan") for i in indices]
+    label = str(roi.get("name") or f"ROI {roi['id']}")
+    return {"v": vals, "label": label}
+
+
+def _draw_inset(d: ImageDraw.ImageDraw, trace: dict[str, Any], pos: int, w: int, h: int,
+                font: ImageFont.FreeTypeFont) -> None:
+    """A small line plot of ``trace`` grown to ``pos``, bottom-right corner, with a playhead dot."""
+    v = [x for x in trace["v"] if x == x]  # finite values for the y-range
+    if not v:
+        return
+    lo, hi = min(v), max(v)
+    if hi - lo < 1e-6:
+        lo, hi = lo - 0.5, hi + 0.5
+    pw, ph = min(240, w // 2), min(120, h // 3)
+    x0, y0 = w - pw - 8, h - ph - 8
+    d.rectangle((x0, y0, x0 + pw, y0 + ph), fill=(0, 0, 0, 200), outline=(150, 150, 150))
+    n = len(trace["v"])
+
+    def px(i: float) -> float:
+        return x0 + 6 + (pw - 12) * (i / max(1, n - 1))
+
+    def py(val: float) -> float:
+        return y0 + ph - 6 - (ph - 12) * (val - lo) / (hi - lo)
+    pts = [(px(i), py(trace["v"][i])) for i in range(min(pos + 1, n))
+           if trace["v"][i] == trace["v"][i]]
+    if len(pts) >= 2:
+        d.line(pts, fill=(255, 210, 90), width=2)
+    if pts:
+        cx, cy = pts[-1]
+        d.ellipse((cx - 3, cy - 3, cx + 3, cy + 3), fill=(255, 255, 255))
+    d.text((x0 + 6, y0 + 2), trace["label"], fill=(255, 255, 255), font=font)
+    d.text((x0 + 6, y0 + ph - font.size - 2), f"{lo:.1f}", fill=(200, 200, 200), font=font)
+    d.text((x0 + pw - 44, y0 + 2), f"{hi:.1f}", fill=(200, 200, 200), font=font)
 
 
 def _celsius(reader: ExperimentReader, idx: int) -> tuple[np.ndarray, np.ndarray]:
@@ -93,9 +149,10 @@ def render_clip(
     _, h0, w0 = reader.counts_block(0, 1).shape
     scale = max(1, opts.scale)
     rois = (reader.metadata.get("rois") or []) if opts.with_rois else []
+    trace = _plot_trace(reader, opts, indices)
 
     # size the first frame to fix the encoder geometry
-    first = _compose(reader, indices[0], vmin, vmax, scale, rois, opts)
+    first = _compose(reader, indices[0], vmin, vmax, scale, rois, opts, trace, 0)
     height, width = first.shape[0], first.shape[1]
     if width % 2 or height % 2:
         width += width % 2
@@ -113,7 +170,8 @@ def render_clip(
 
     def _frames() -> np.ndarray:
         for k, idx in enumerate(indices):
-            rgb = first if k == 0 else _compose(reader, idx, vmin, vmax, scale, rois, opts)
+            rgb = (first if k == 0 else
+                   _compose(reader, idx, vmin, vmax, scale, rois, opts, trace, k))
             if rgb.shape[0] != height or rgb.shape[1] != width:
                 pad = np.zeros((height, width, 3), dtype=np.uint8)
                 pad[: rgb.shape[0], : rgb.shape[1]] = rgb
@@ -133,7 +191,8 @@ def render_clip(
 
 
 def _compose(reader: ExperimentReader, idx: int, vmin: float, vmax: float, scale: int,
-             rois: list[dict[str, Any]], opts: MediaOptions) -> np.ndarray:
+             rois: list[dict[str, Any]], opts: MediaOptions,
+             plot: dict[str, Any] | None = None, plot_pos: int = 0) -> np.ndarray:
     values, counts = _celsius(reader, idx)
     over = over_range_mask(counts)
     stats_vals = values if over is None else np.where(over, np.nan, values)
@@ -143,13 +202,15 @@ def _compose(reader: ExperimentReader, idx: int, vmin: float, vmax: float, scale
     if over is not None:  # paint over-range pixels magenta, like the live display
         big = np.repeat(np.repeat(over, scale, axis=0), scale, axis=1)
         rgb[: big.shape[0], : big.shape[1]][big] = (255, 0, 255)
-    pil = Image.fromarray(rgb)
-    d = ImageDraw.Draw(pil)
+    pil = Image.fromarray(rgb).convert("RGB")
+    d = ImageDraw.Draw(pil, "RGBA")
     font = label_font(max(11, min(18, rgb.shape[0] // 26)))
     if opts.frame_stats:
         lo, hi, mean = np.nanmin(stats_vals), np.nanmax(stats_vals), np.nanmean(stats_vals)
         txt = f"min {lo:.1f}  max {hi:.1f}  mean {mean:.1f} °C"
         d.text((4, rgb.shape[0] - 2 * font.size - 8), txt, fill=(255, 255, 255), font=font)
+    if plot is not None:
+        _draw_inset(d, plot, plot_pos, rgb.shape[1], rgb.shape[0], font)
     if opts.title:
         tw = d.textlength(opts.title, font=font)
         d.rectangle((0, 0, rgb.shape[1], font.size + 8), fill=(0, 0, 0))
@@ -229,7 +290,12 @@ def compose_preview(reader: ExperimentReader, opts: MediaOptions, index: int) ->
         raise ValueError(f"index out of range 0..{reader.n_frames - 1}")
     vmin, vmax, _ = run_range(reader, robust=True)
     rois = (reader.metadata.get("rois") or []) if opts.with_rois else []
-    rgb = _compose(reader, index, vmin, vmax, max(1, opts.scale), rois, opts)
+    # trace over the window so the inset preview grows correctly as you scrub
+    stop = opts.stop or reader.n_frames
+    win = list(range(opts.start, stop, opts.step)) if opts.stop else list(range(reader.n_frames))
+    trace = _plot_trace(reader, opts, win)
+    pos = max(0, min(len(win) - 1, index - opts.start))
+    rgb = _compose(reader, index, vmin, vmax, max(1, opts.scale), rois, opts, trace, pos)
     from io import BytesIO
 
     buf = BytesIO()

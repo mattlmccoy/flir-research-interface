@@ -101,3 +101,19 @@ def test_media_preview_returns_png(tmp_path: Path) -> None:
     r = _make(tmp_path)
     png = compose_preview(r, MediaOptions(scale=1, frame_stats=True, title="Hi"), 5)
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+@pytest.mark.skipif(not _HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_live_plot_inset_draws_when_a_roi_is_chosen(tmp_path: Path) -> None:
+    import json
+
+    from flir_research_interface.analysis.media import MediaOptions, compose_preview
+    r = _make(tmp_path)
+    meta = json.loads((r.path / "metadata.json").read_text())
+    meta["rois"] = [{"id": 1, "kind": "rect", "x0": 20, "y0": 10, "x1": 44, "y1": 30, "name": "box"}]
+    (r.path / "metadata.json").write_text(json.dumps(meta))
+    r2 = ExperimentReader(r.path)
+    plain = compose_preview(r2, MediaOptions(start=0, stop=20), 10)
+    with_plot = compose_preview(r2, MediaOptions(start=0, stop=20, plot_roi=1), 10)
+    assert plain[:8] == b"\x89PNG\r\n\x1a\n" and with_plot[:8] == b"\x89PNG\r\n\x1a\n"
+    assert with_plot != plain  # the inset changed the frame
