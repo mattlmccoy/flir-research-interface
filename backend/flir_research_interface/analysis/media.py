@@ -126,13 +126,6 @@ def _overlay_rois(reader: ExperimentReader, opts: MediaOptions) -> list[dict[str
     return out
 
 
-def _shade(color: tuple[int, int, int], stat: str) -> tuple[int, int, int]:
-    """Same hue as the ROI box; brighten for max, dim for min, so stacked lines stay legible."""
-    f = {"max": 1.0, "mean": 0.82, "min": 0.6}.get(stat, 0.82)
-    if stat == "max":  # lift toward white so the top line reads brightest
-        return tuple(int(c + (255 - c) * 0.25) for c in color)
-    return tuple(int(c * f) for c in color)
-
 
 def _read_series_csv(reader: ExperimentReader) -> dict[str, Any] | None:
     """Parse a precomputed ``exports/roi_series.csv`` (fast path: no per-frame recompute).
@@ -220,8 +213,8 @@ def _plot_traces(reader: ExperimentReader, opts: MediaOptions) -> list[dict[str,
         base = _rgb(roi.get("color") or DEFAULT_COLORS[idx_of[rid] % len(DEFAULT_COLORS)])
         name = str(roi.get("name") or f"ROI {rid}")
         label = name if is_spot else f"{name} · {key}"
-        color = base if is_spot else _shade(base, key)
-        out.append({"v": v_ds, "t": t_ds, "label": label, "color": color})
+        # keep the ROI's own colour for every stat; the stat is shown by line style + marker.
+        out.append({"v": v_ds, "t": t_ds, "label": label, "color": base, "stat": key})
     return out
 
 
@@ -265,9 +258,58 @@ def _nice_ticks(lo: float, hi: float, target: int = 4) -> list[float]:
     return ticks or [lo, hi]
 
 
+# Each stat gets a distinct line style + marker so several stats of one ROI (same colour) read
+# apart: mean = solid + circle, max = dashed + up-triangle, min = dotted + down-triangle.
+_STAT_STYLE = {
+    "mean": {"dash": None, "marker": "o"},
+    "max": {"dash": (9, 5), "marker": "^"},
+    "min": {"dash": (2, 4), "marker": "v"},
+    "value": {"dash": None, "marker": "o"},
+}
+
+
+def _dashed(d: ImageDraw.ImageDraw, pts: list[tuple[float, float]], col: tuple[int, ...],
+            width: int, dash: tuple[int, int] | None) -> None:
+    """Polyline, solid when ``dash`` is None, else on/off dashes of (on, off) px along the path."""
+    if len(pts) < 2:
+        return
+    if dash is None:
+        d.line(pts, fill=col, width=width)
+        return
+    on, off = dash
+    draw_on, rem = True, on
+    for (x1, y1), (x2, y2) in zip(pts, pts[1:], strict=False):
+        seg = math.hypot(x2 - x1, y2 - y1)
+        done = 0.0
+        while done < seg:
+            step = min(rem, seg - done)
+            f0, f1 = done / seg, (done + step) / seg
+            if draw_on:
+                d.line((x1 + (x2 - x1) * f0, y1 + (y2 - y1) * f0,
+                        x1 + (x2 - x1) * f1, y1 + (y2 - y1) * f1), fill=col, width=width)
+            done += step
+            rem -= step
+            if rem <= 1e-6:
+                draw_on = not draw_on
+                rem = on if draw_on else off
+
+
+def _marker(d: ImageDraw.ImageDraw, x: float, y: float, shape: str, col: tuple[int, ...],
+            r: float, scrim: tuple[int, int, int] = (12, 12, 14)) -> None:
+    if shape == "^":
+        pts = [(x, y - r), (x + r, y + r), (x - r, y + r)]
+    elif shape == "v":
+        pts = [(x, y + r), (x + r, y - r), (x - r, y - r)]
+    else:
+        d.ellipse((x - r, y - r, x + r, y + r), fill=col, outline=scrim)
+        return
+    d.polygon(pts, fill=col, outline=scrim)
+
+
 def _draw_panel(d: ImageDraw.ImageDraw, traces: list[dict[str, Any]], cur_t: float, x0: int,
                 y0: int, w: int, h: int, font: ImageFont.FreeTypeFont) -> None:
-    """A full-width, multi-line plot over time, drawn up to ``cur_t`` (seconds), with °C y-ticks."""
+    """A full-width, multi-line plot over time, drawn up to ``cur_t`` (seconds), with °C y-ticks,
+    a wrapping legend, and a distinct line style + marker per stat."""
     finite = [x for tr in traces for x in tr["v"] if x == x]
     all_t = [t for tr in traces for t in tr["t"]]
     if not finite or not all_t:
@@ -279,7 +321,39 @@ def _draw_panel(d: ImageDraw.ImageDraw, traces: list[dict[str, Any]], cur_t: flo
     pad = max(4, font.size // 3)
     yticks = _nice_ticks(lo, hi)
     gutter = int(max(d.textlength(f"{t:.0f}", font=font) for t in yticks)) + 8
-    legend_h = font.size + 6
+    line_h = font.size + 5
+
+    # --- wrapping legend across the top: swatch + "name · stat  value°" per entry -------------
+    def cur_val(tr: dict[str, Any]) -> float | None:
+        v, ts = tr["v"], tr["t"]
+        return next((v[k] for k in range(len(v) - 1, -1, -1)
+                     if v[k] == v[k] and ts[k] <= cur_t + 1e-6), None)
+    entries = []
+    for tr in traces:
+        c = cur_val(tr)
+        txt = f"{tr['label']}  {c:.1f}°" if c is not None else str(tr["label"])
+        entries.append((tr, txt, 20 + int(d.textlength(txt, font=font)) + 14))
+    rows, row, rw = [], [], 0
+    for e in entries:
+        if row and rw + e[2] > w - 4:
+            rows.append(row)
+            row, rw = [], 0
+        row.append(e)
+        rw += e[2]
+    if row:
+        rows.append(row)
+    legend_h = len(rows) * line_h + 4
+    for ri, r in enumerate(rows):
+        lx = x0 + 2
+        ly = y0 + 2 + ri * line_h
+        for tr, txt, ewidth in r:
+            col = tuple(tr["color"])
+            st = _STAT_STYLE.get(tr.get("stat", "mean"), _STAT_STYLE["mean"])
+            d.line((lx, ly + line_h / 2, lx + 15, ly + line_h / 2), fill=col, width=2)  # style key
+            _marker(d, lx + 7.5, ly + line_h / 2, st["marker"], col, max(2.5, font.size / 4))
+            d.text((lx + 20, ly), txt, fill=(235, 235, 240), font=font)
+            lx += ewidth
+
     ax0, ay0 = x0 + gutter, y0 + legend_h + pad
     aw = w - gutter - pad - 6
     ah = h - legend_h - pad - (font.size + 6)  # room for x-tick labels at the bottom
@@ -296,33 +370,30 @@ def _draw_panel(d: ImageDraw.ImageDraw, traces: list[dict[str, Any]], cur_t: flo
         d.line((ax0 - 4, gy, ax0, gy), fill=_AXIS)
         d.text((x0 + 2, gy - font.size / 2), f"{tv:.0f}", fill=_MUTE, font=font)
     d.rectangle((ax0, ay0, ax0 + aw, ay0 + ah), outline=_AXIS)
-    d.text((x0 + 2, y0 + 2), "°C", fill=_MUTE, font=font)
+    d.text((x0 + 2, ay0 - font.size - 1), "°C", fill=_MUTE, font=font)
 
-    if t1 - t0 > 1e-6:  # x tick marks along the time axis
-        for tt in _nice_ticks(t0, t1, 5):
+    if t1 - t0 > 1e-6:  # x tick marks along the time axis (denser)
+        n_x = max(6, min(12, int(aw / 90)))
+        for tt in _nice_ticks(t0, t1, n_x):
             gx = px(tt)
+            d.line((gx, ay0, gx, ay0 + ah), fill=_GRID)  # vertical gridline
             d.line((gx, ay0 + ah, gx, ay0 + ah + 4), fill=_AXIS)
             lbl = f"{tt:.0f}s"
             d.text((gx - d.textlength(lbl, font=font) / 2, ay0 + ah + 4), lbl,
                    fill=_MUTE, font=font)
 
-    lx = ax0
-    for tr in traces:  # one line per (ROI, stat), coloured like its box; legend shows live value
+    for tr in traces:  # one line per (ROI, stat): ROI colour, stat = style + periodic marker
         col = tuple(tr["color"])
+        st = _STAT_STYLE.get(tr.get("stat", "mean"), _STAT_STYLE["mean"])
         ts, v = tr["t"], tr["v"]
         drawn = [(px(ts[k]), py(v[k])) for k in range(len(v))
                  if v[k] == v[k] and ts[k] <= cur_t + 1e-6]
-        if len(drawn) >= 2:
-            d.line(drawn, fill=col, width=2)
+        _dashed(d, drawn, col, 2, st["dash"])
+        step = max(1, len(drawn) // max(1, int(aw / 60)))  # a few markers, not a clog
+        for k in range(0, len(drawn), step):
+            _marker(d, drawn[k][0], drawn[k][1], st["marker"], col, max(2.5, font.size / 4))
         if drawn:
-            cx, cy = drawn[-1]
-            d.ellipse((cx - 3, cy - 3, cx + 3, cy + 3), fill=col)
-        cur = next((v[k] for k in range(len(v) - 1, -1, -1)
-                    if v[k] == v[k] and ts[k] <= cur_t + 1e-6), None)
-        chip = f"{tr['label']}  {cur:.1f}°" if cur is not None else str(tr["label"])
-        d.rectangle((lx, y0 + 2, lx + 12, y0 + 2 + font.size), fill=col)
-        d.text((lx + 16, y0 + 2), chip, fill=(235, 235, 240), font=font)
-        lx += 16 + int(d.textlength(chip, font=font)) + 16
+            _marker(d, drawn[-1][0], drawn[-1][1], st["marker"], col, max(3.0, font.size / 3))
     hx = px(max(t0, min(t1, cur_t)))  # playhead rule shared by all lines
     d.line((hx, ay0, hx, ay0 + ah), fill=(120, 120, 128))
 
@@ -460,12 +531,15 @@ def _compose(reader: ExperimentReader, idx: int, vmin: float, vmax: float, scale
             d.text((4, bar_h + 2), f"{reader.t_s(idx):.2f} s", fill=(255, 255, 255), font=font)
     if not plot:
         return np.asarray(pil, dtype=np.uint8)
-    # append a full-width live-plot strip below the frame (taller output, no overlay)
-    panel = _PANEL_H * scale
+    # append a full-width live-plot strip below the frame; it grows taller as the wrapping legend
+    # needs more rows, so many ROI×stat lines stay readable (taller output, no overlay).
+    pfont = label_font(max(11, min(18, (_PANEL_H * scale) // 8)))
+    per_row = max(1, rgb.shape[1] // 210)
+    legend_rows = max(1, math.ceil(len(plot) / per_row))
+    panel = (_PANEL_H + (legend_rows - 1) * 22) * scale
     canvas = Image.new("RGB", (rgb.shape[1], rgb.shape[0] + panel), (14, 14, 16))
     canvas.paste(pil, (0, 0))
     dp = ImageDraw.Draw(canvas, "RGBA")
-    pfont = label_font(max(11, min(18, panel // 8)))
     _draw_panel(dp, plot, cur_t, 0, rgb.shape[0], rgb.shape[1], panel, pfont)
     return np.asarray(canvas, dtype=np.uint8)
 

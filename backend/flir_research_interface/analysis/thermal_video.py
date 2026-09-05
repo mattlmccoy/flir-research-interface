@@ -80,6 +80,23 @@ def label_font(size: int = 14) -> ImageFont.FreeTypeFont:
     return font
 
 
+def _bar_ticks(lo: float, hi: float, target: int = 6) -> list[float]:
+    """A short list of round tick temperatures spanning [lo, hi] (1/2/5 × 10^k spacing)."""
+    import math
+    span = hi - lo
+    if span <= 0:
+        return [lo]
+    raw = span / max(1, target)
+    mag = 10.0 ** math.floor(math.log10(raw))
+    step = next((m * mag for m in (1, 2, 5, 10) if m * mag >= raw), 10 * mag)
+    start = math.ceil(lo / step) * step
+    out, t = [], start
+    while t <= hi + step * 1e-6:
+        out.append(round(t, 6))
+        t += step
+    return out or [lo, hi]
+
+
 def thermal_frame_rgb(
     values: npt.NDArray[np.float32],
     vmin: float,
@@ -110,11 +127,21 @@ def thermal_frame_rgb(
     pil = Image.fromarray(img)
     if rois and reader is not None:
         draw_rois(pil, rois, scale=scale, values=roi_values_at(reader, values, rois))
-    d = ImageDraw.Draw(pil)
+    d = ImageDraw.Draw(pil, "RGBA")
     font = label_font(max(10, min(16, h // 30)))
     if show_time:
         d.text((4, 2), f"{t_s:.2f} s", fill=(255, 255, 255), font=font)
     d.text((4, h - font.size - 4), f"{vmin:.1f} to {vmax:.1f} °C", fill=(255, 255, 255), font=font)
+    if bar_px >= 12 and vmax > vmin:  # temperature tick labels beside the colour bar
+        for tv in _bar_ticks(vmin, vmax):
+            ty = min(max(0.0, h * (vmax - tv) / (vmax - vmin)), h - 1.0)
+            d.line((w, ty, w + 5, ty), fill=(255, 255, 255))  # tick into the bar
+            lbl = f"{tv:.0f}"
+            tw = d.textlength(lbl, font=font)
+            tx = w - tw - 4
+            d.rectangle((tx - 2, ty - font.size / 2 - 1, tx + tw + 1, ty + font.size / 2 + 1),
+                        fill=(0, 0, 0, 150))
+            d.text((tx, ty - font.size / 2), lbl, fill=(255, 255, 255), font=font)
     return np.asarray(pil, dtype=np.uint8)
 
 
