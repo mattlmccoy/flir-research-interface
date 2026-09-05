@@ -41,6 +41,9 @@
   --danger-ink: #ffffff;
   --font-ui: "IBM Plex Sans", system-ui, sans-serif;
   --font-mono: "Space Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* A clean neutral sans for readability-critical identifiers (long run names) where the mono
+     face reads poorly bold-white-on-dark. Helvetica Neue on macOS, IBM Plex Sans / Arial elsewhere. */
+  --font-read: "Helvetica Neue", Helvetica, "IBM Plex Sans", Arial, system-ui, sans-serif;
   --fs: 13px;
   --space: 4px;
   --radius: 3px;

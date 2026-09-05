@@ -35,7 +35,7 @@ button, select, input { font: inherit; }
 .tabs button { background: none; border: none; color: var(--muted); padding: 10px 10px; cursor: pointer; border-bottom: 2px solid transparent; font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.04em; }
 .tabs button.active { color: var(--fg-strong); border-bottom-color: var(--accent); }
 .crumb { display: flex; align-items: center; gap: 10px; font-family: var(--font-mono); font-size: 12px; color: var(--muted); min-width: 0; }
-.crumb .open-name { color: var(--fg-strong); font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
+.crumb .open-name { color: var(--fg-strong); font-family: var(--font-read); font-weight: 500; font-size: 14px; letter-spacing: 0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
 .crumb .bad { color: var(--err); }
 .crumb button { padding: 2px 8px; }
 .conn { margin-left: auto; display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
@@ -161,7 +161,7 @@ pre { background: var(--bg-deep); border: 1px solid var(--line); padding: 8px; b
 .exp-card .thumb .t { position: absolute; left: 6px; bottom: 6px; background: var(--scrim); color: var(--accent); padding: 2px 6px; font-family: var(--font-mono); font-size: 11px; }
 .exp-card .thumb .ph { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
 .exp-card .body { padding: 10px; display: flex; flex-direction: column; gap: 6px; }
-.exp-card .name { color: var(--fg-strong); font-family: var(--font-mono); font-size: 12px; word-break: break-all; }
+.exp-card .name { color: var(--fg-strong); font-family: var(--font-read); font-weight: 500; font-size: 13px; letter-spacing: 0.01em; word-break: break-word; }
 .exp-card .meta { display: flex; gap: 10px; flex-wrap: wrap; color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
 .exp-card .actions { display: flex; flex-direction: column; gap: 6px; margin-top: auto; }
 .exp-card .actions-row { display: flex; gap: 6px; }

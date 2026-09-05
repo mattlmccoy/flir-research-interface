@@ -38,7 +38,7 @@ const REQUIRED_TOKENS = [
   "--rec",
   "--trace-3", "--trace-4", "--trace-5", "--trace-6",
   "--image-bg", "--scrim", "--shadow", "--danger-ink",
-  "--font-ui", "--font-mono",
+  "--font-ui", "--font-mono", "--font-read",
   "--fs", "--space", "--radius",
   "--strip-w", "--rail-w", "--dock-h", "--topbar-h", "--statusbar-h",
 ];
