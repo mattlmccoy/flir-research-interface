@@ -254,7 +254,7 @@ export function PlaybackPage(p: Props) {
           <button aria-label="Save image" data-tip="Save image — PNG snapshot of this frame with overlays" disabled={n === 0} onClick={saveImage}><IconSaveImage /></button>
           <button aria-label={p.layout.roisHidden ? "Show ROIs" : "Hide ROIs"} aria-pressed={p.layout.roisHidden} className={p.layout.roisHidden ? "active" : ""} data-tip={p.layout.roisHidden ? "Show ROI overlays" : "Hide ROI overlays (measurements keep running)"} onClick={() => p.dispatch({ type: "toggleRois" })}><IconEye off={p.layout.roisHidden} /></button>
           <span className="strip-pop-anchor">
-            <button aria-label="Visible-camera overlay" aria-pressed={p.layout.visibleMode === "overlay"} className={p.layout.visibleMode === "overlay" ? "active" : ""} data-tip={hasVideo ? "Overlay the recorded visible camera (opacity slider)" : "This recording has no visible video"} disabled={!hasVideo} onClick={toggleVisibleOverlay}><IconLayers /></button>
+            <button aria-label="Visible-camera overlay" aria-pressed={p.layout.visibleMode === "overlay"} className={p.layout.visibleMode === "overlay" ? "active" : ""} data-tip={p.layout.visibleMode === "overlay" ? undefined : (hasVideo ? "Overlay the recorded visible camera (opacity slider)" : "This recording has no visible video")} disabled={!hasVideo} onClick={toggleVisibleOverlay}><IconLayers /></button>
             {hasVideo && p.layout.visibleMode === "overlay" && (
               <span className="strip-popover" role="group" aria-label="Visible overlay opacity">
                 <input type="range" min={0} max={1} step={0.05} value={p.layout.overlay.opacity} aria-label="visible camera opacity"
