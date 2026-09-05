@@ -31,3 +31,33 @@ def test_put_settings_persists(tmp_path: Path) -> None:
     with _client(tmp_path) as c:
         c.put("/api/rf-link/settings", json={"auto_start_on_rf_on": True, "stop_on_rf_off": True})
         assert c.get("/api/rf-link/settings").json()["stop_on_rf_off"] is True
+
+
+def test_rf_on_starts_recording_and_marks(tmp_path: Path) -> None:
+    with _client(tmp_path) as c:
+        _connect_sim(c)
+        r = c.post("/api/rf-link/event", json={"state": "on", "forward_w": 300.0})
+        assert r.status_code == 200, r.text
+        assert r.json()["recording"] is True
+        # the RF ON mark is in the run's events
+        status = c.get("/api/recording/status").json()
+        assert status["state"] == "recording"
+
+
+def test_rf_off_keeps_recording_by_default(tmp_path: Path) -> None:
+    with _client(tmp_path) as c:
+        _connect_sim(c)
+        c.post("/api/rf-link/event", json={"state": "on", "forward_w": 300.0})
+        r = c.post("/api/rf-link/event", json={"state": "off", "reason": "operator"})
+        assert r.status_code == 200, r.text
+        assert r.json()["recording"] is True  # kept (stop_on_rf_off default False)
+
+
+def test_rf_off_stops_when_configured(tmp_path: Path) -> None:
+    with _client(tmp_path) as c:
+        _connect_sim(c)
+        c.put("/api/rf-link/settings", json={"auto_start_on_rf_on": True, "stop_on_rf_off": True})
+        c.post("/api/rf-link/event", json={"state": "on", "forward_w": 300.0})
+        r = c.post("/api/rf-link/event", json={"state": "off", "reason": "operator"})
+        assert r.status_code == 200, r.text
+        assert r.json()["recording"] is False  # stopped

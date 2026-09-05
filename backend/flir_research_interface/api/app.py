@@ -18,6 +18,7 @@ import sys
 import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -177,6 +178,14 @@ def _parse_series(items: list[str]) -> tuple[tuple[int, str], ...]:
 class RfLinkSettingsBody(BaseModel):
     auto_start_on_rf_on: bool = True
     stop_on_rf_off: bool = False
+
+
+class RfLinkEvent(BaseModel):
+    state: str  # "on" | "off"
+    forward_w: float | None = None
+    reflected_fraction: float | None = None
+    reason: str | None = None
+    source_ts_ns: int | None = None
 
 
 class RegisterDriveRequest(BaseModel):
@@ -648,6 +657,60 @@ def create_app(
         )
         rf_link.save_settings(app.state.experiments_root, s)
         return {"auto_start_on_rf_on": s.auto_start_on_rf_on, "stop_on_rf_off": s.stop_on_rf_off}
+
+    @app.post("/api/rf-link/event")
+    async def rf_link_event(ev: RfLinkEvent) -> dict[str, Any]:
+        """RF on/off event from the T&C tool; applies the persisted start/stop policy (best-effort
+        from the caller's side — this endpoint always returns 200 with the resulting state)."""
+        settings = rf_link.load_settings(app.state.experiments_root)
+        rec = recorder()
+        is_recording = rec is not None and rec.state == RecorderState.RECORDING
+        current_run = rec.experiment_dir.name if rec is not None and rec.experiment_dir else None
+        owns = bool(is_recording and app.state.rf_link_owns_run == current_run)
+        action = rf_link.plan_rf_action(
+            state=ev.state, is_recording=is_recording, link_owns=owns, settings=settings
+        )
+        detail = ""
+        if action.start:
+            try:
+                name = f"RF_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+                start_req = RecordingStartRequest(
+                    name=name,
+                    metadata={
+                        "trigger": "rf_link",
+                        "forward_w": ev.forward_w,
+                        "reflected_fraction": ev.reflected_fraction,
+                    },
+                )
+                _rec, exp_dir, _vis = await _start_recording(start_req)
+                app.state.rf_link_owns_run = exp_dir.name
+            except HTTPException as exc:
+                detail = f"start failed: {exc.detail}"
+        rec = recorder()
+        if action.mark and rec is not None and rec.state == RecorderState.RECORDING:
+            label = "RF ON" if ev.state == "on" else "RF OFF"
+            note = (
+                f"{ev.forward_w:.1f} W"
+                if ev.state == "on" and ev.forward_w is not None
+                else (ev.reason or "")
+            )
+            rec.note_event("annotation", {"name": label, "note": note})
+        if action.stop:
+            await _finalize_recording()
+            app.state.rf_link_owns_run = None
+        rec_now = recorder()
+        recording = rec_now is not None and rec_now.state == RecorderState.RECORDING
+        run_name = (
+            rec_now.experiment_dir.name
+            if recording and rec_now is not None and rec_now.experiment_dir
+            else None
+        )
+        return {
+            "recording": recording,
+            "run": run_name,
+            "action": {"mark": action.mark, "start": action.start, "stop": action.stop},
+            "detail": detail,
+        }
 
     # -- recording -------------------------------------------------------------------------
 
