@@ -26,7 +26,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from flir_research_interface import __version__, storage
+from flir_research_interface import __version__, rf_link, storage
 from flir_research_interface.acquisition.service import AcquisitionService, ServiceState
 from flir_research_interface.api.frames import encode_frame_message
 from flir_research_interface.api.reveal import Runner, contained, reveal
@@ -174,6 +174,11 @@ def _parse_series(items: list[str]) -> tuple[tuple[int, str], ...]:
     return tuple(out)
 
 
+class RfLinkSettingsBody(BaseModel):
+    auto_start_on_rf_on: bool = True
+    stop_on_rf_off: bool = False
+
+
 class RegisterDriveRequest(BaseModel):
     mount: str
 
@@ -226,6 +231,7 @@ def create_app(
         app.state.backend_name = None
         app.state.recorder = None
         app.state.visible = None
+        app.state.rf_link_owns_run = None
         yield
         await _finalize_recording()
         svc: AcquisitionService | None = app.state.service
@@ -627,6 +633,21 @@ def create_app(
             headers={"Cache-Control": "no-store"},
             background=BackgroundTask(_done),
         )
+
+    # -- RF link (external RF on/off events from the T&C tool) -----------------------------
+
+    @app.get("/api/rf-link/settings")
+    def get_rf_link_settings() -> dict[str, Any]:
+        s = rf_link.load_settings(app.state.experiments_root)
+        return {"auto_start_on_rf_on": s.auto_start_on_rf_on, "stop_on_rf_off": s.stop_on_rf_off}
+
+    @app.put("/api/rf-link/settings")
+    def put_rf_link_settings(body: RfLinkSettingsBody) -> dict[str, Any]:
+        s = rf_link.RfLinkSettings(
+            auto_start_on_rf_on=body.auto_start_on_rf_on, stop_on_rf_off=body.stop_on_rf_off
+        )
+        rf_link.save_settings(app.state.experiments_root, s)
+        return {"auto_start_on_rf_on": s.auto_start_on_rf_on, "stop_on_rf_off": s.stop_on_rf_off}
 
     # -- recording -------------------------------------------------------------------------
 
