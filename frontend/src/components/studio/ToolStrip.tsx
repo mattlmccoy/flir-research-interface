@@ -21,6 +21,8 @@ interface Props {
   onCollapseAll: () => void;
   /** Rendered before the tools (e.g. a back button on the playback page). */
   leading?: ReactNode;
+  /** Shortcut buttons rendered under the tools, below a divider (e.g. media export). */
+  extras?: ReactNode;
   /** Panels are hidden: the ⛶ button restores them instead. */
   collapsed?: boolean;
   /** Tools that make no sense in this context (e.g. camera controls during playback). */
@@ -33,7 +35,7 @@ interface Props {
  * Left icon strip (spec §3). Disabled tools stay visible so the layout never shifts between
  * releases; they use aria-disabled (not the disabled attribute) so their tooltip still shows.
  */
-export function ToolStrip({ tool, onTool, onCollapseAll, leading, disabledTools = [], zoom = "fit", onZoom, collapsed = false }: Props) {
+export function ToolStrip({ tool, onTool, onCollapseAll, leading, extras, disabledTools = [], zoom = "fit", onZoom, collapsed = false }: Props) {
   return (
     <nav className="strip" aria-label="tools">
       {leading}
@@ -54,6 +56,7 @@ export function ToolStrip({ tool, onTool, onCollapseAll, leading, disabledTools 
           </button>
         );
       })}
+      {extras && <><span className="divider" role="separator" />{extras}</>}
       <span className="spacer" />
       {onZoom && (
         <button className={`zoom ${zoom === "fit" ? "active" : ""}`} aria-label={`Image zoom: ${zoomLabel(zoom)} (click to cycle fit, 1:1, 2×)`} title={`Zoom ${zoomLabel(zoom)} · click: ${zoomLabel(nextZoom(zoom))}`} onClick={() => onZoom(nextZoom(zoom))}>

@@ -62,6 +62,7 @@ input[type=range] { accent-color: var(--accent); }
 .strip button.active { border-color: var(--accent); color: var(--accent); background: var(--warn-bg); }
 .strip button[aria-disabled="true"] { opacity: 0.35; cursor: default; }
 .strip .spacer { flex: 1; }
+.strip .divider { width: 18px; height: 1px; background: var(--line-control); margin: 3px 0; flex: none; }
 
 /* ---- Center / image ---------------------------------------------------------- */
 .view { position: relative; display: flex; flex: 1; align-items: center; justify-content: center; background: var(--image-bg); min-width: 0; min-height: 0; overflow: hidden; }
