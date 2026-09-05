@@ -5,6 +5,7 @@ per frame, for the annotated thermal video. Nothing here touches the store."""
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import numpy as np
@@ -45,6 +46,69 @@ def _font(size: int) -> ImageFont.FreeTypeFont:
     return f
 
 
+_LABEL_GAP = 4  # keep a label this far from other labels
+
+
+def _leader_anchor(r: dict[str, Any], s: float) -> tuple[float, float, float]:
+    """(cx, cy, reach) a leader line can tie to: the ring edge for circles/ellipses, else the
+    centre (reach 0). Mirrors the live overlay's roiLeaderAnchor so both renders match."""
+    k = r["kind"]
+    if k == "spot":
+        return (r["x"] + 0.5) * s, (r["y"] + 0.5) * s, 0.0
+    if k == "rect":
+        return (r["x0"] + r["x1"]) / 2 * s, (r["y0"] + r["y1"]) / 2 * s, 0.0
+    if k in ("circle", "ellipse"):
+        rx = (r["r"] if k == "circle" else r["rx"]) * s
+        ry = (r["r"] if k == "circle" else r["ry"]) * s
+        return (r["cx"] + 0.5) * s, (r["cy"] + 0.5) * s, min(rx, ry)
+    if k == "line":
+        return ((r["x0"] + r["x1"]) / 2 + 0.5) * s, ((r["y0"] + r["y1"]) / 2 + 0.5) * s, 0.0
+    pts = r["points"]
+    return (sum(p[0] for p in pts) / len(pts) + 0.5) * s, \
+           (sum(p[1] for p in pts) / len(pts) + 0.5) * s, 0.0
+
+
+def _layout_labels(
+    boxes: list[dict[str, float]], img_w: float, img_h: float, gap: float = _LABEL_GAP,
+) -> list[dict[str, Any]]:
+    """Greedy collision resolution (a port of the live overlay's layoutLabels): each box keeps its
+    x, and its y is swept down/up to clear already-placed boxes sharing that column. A box that had
+    to move is flagged ``displaced`` so the caller draws a leader line back to its ROI."""
+    placed: list[dict[str, float]] = []
+    out: list[dict[str, Any]] = []
+    for b in boxes:
+        x = min(max(0.0, b["ax"]), max(0.0, img_w - b["w"]))
+        y = _resolve_y(x, b["ay"], b["w"], b["h"], placed, img_h, gap)
+        placed.append({"x": x, "y": y, "w": b["w"], "h": b["h"]})
+        out.append({"id": b["id"], "x": x, "y": y, "displaced": abs(y - b["ay"]) > 0.5})
+    return out
+
+
+def _resolve_y(x: float, ay: float, w: float, h: float, placed: list[dict[str, float]],
+               img_h: float, gap: float) -> float:
+    max_y = max(0.0, img_h - h)
+    start = min(max(0.0, ay), max_y)
+    rel = [r for r in placed if x < r["x"] + r["w"] and r["x"] < x + w]
+
+    def sweep(down: bool) -> float:
+        y = start
+        for _ in range(len(rel) + 1):
+            hit = next((r for r in rel if y < r["y"] + r["h"] + gap and r["y"] < y + h + gap), None)
+            if hit is None:
+                return y
+            y = (hit["y"] + hit["h"] + gap) if down else (hit["y"] - h - gap)
+            if y < 0 or y > max_y:
+                break
+        return y
+    d1 = sweep(True)
+    if 0 <= d1 <= max_y:
+        return d1
+    d2 = sweep(False)
+    if 0 <= d2 <= max_y:
+        return d2
+    return start
+
+
 def draw_rois(
     img: Image.Image,
     rois: list[dict[str, Any]],
@@ -53,31 +117,90 @@ def draw_rois(
     values: dict[int, str] | None = None,
     width: int = 2,
 ) -> None:
-    """Outline every ROI (sensor coordinates x ``scale``) in its colour, with a label.
-
-    Labels are drawn first and outlines last, so an edge always keeps its exact colour.
-    """
+    """Outline every ROI (sensor coordinates x ``scale``) in its colour, with a label placed to
+    avoid overlapping the other labels; a leader line ties a moved label back to its ROI so the
+    labels do not sit on top of the shapes when there is room beside them."""
     d = ImageDraw.Draw(img, "RGBA")
     font = _font(max(11, int(7 * scale)))
-    for outline in (False, True):
-        for i, r in enumerate(rois):
-            _draw_one(d, r, i, scale, font, values, width, outline)
+    img_w, img_h = img.size
+
+    bboxes = [_bbox(r, scale) for r in rois]
+    boxes: list[dict[str, float]] = []
+    meta: dict[int, dict[str, Any]] = {}
+    for i, r in enumerate(rois):
+        label = r.get("name") or f"{r['kind']} {r['id']}"
+        if values and r["id"] in values:
+            label = f"{label}  {values[r['id']]}"
+        tw = d.textlength(label, font=font)
+        w, h = tw + 4, font.size + 2
+        tcx, tty = _shape_top(r, scale)  # centre the label above the shape's top edge
+        ax = tcx - w / 2
+        # lift above the TOPMOST shape sharing the label's x-range, so a label nested inside a
+        # bigger ROI (e.g. concentric circles) rises above the whole cluster and uses a leader.
+        top = min([tty] + [bt for (bl, bt, br, _bb) in bboxes if bl < ax + w and ax < br])
+        boxes.append({"id": r["id"], "ax": ax, "ay": top - h - _LABEL_GAP, "w": w, "h": h})
+        meta[r["id"]] = {"label": label, "w": w, "h": h,
+                         "col": _rgb(r.get("color") or DEFAULT_COLORS[i % len(DEFAULT_COLORS)]),
+                         "anchor": _leader_anchor(r, scale)}
+
+    placed = _layout_labels(boxes, img_w, img_h)
+    for pl in placed:  # leader lines under the labels, only for labels that had to move
+        if not pl["displaced"]:
+            continue
+        m = meta[pl["id"]]
+        dotx, doty = pl["x"] + m["w"] / 2, pl["y"] + m["h"] / 2
+        cx, cy, reach = m["anchor"]
+        tx, ty = cx, cy
+        if reach > 0:
+            ddx, ddy = dotx - cx, doty - cy
+            dist = math.hypot(ddx, ddy) or 1.0
+            tx, ty = cx + ddx / dist * reach, cy + ddy / dist * reach
+        d.line([(tx, ty), (dotx, doty)], fill=(*m["col"], 150), width=1)
+    for pl in placed:  # label boxes + text
+        m = meta[pl["id"]]
+        x, y = pl["x"], pl["y"]
+        d.rectangle([x - 2, y - 1, x + m["w"], y + m["h"]], fill=(0, 0, 0, 160))
+        d.text((x, y), m["label"], fill=m["col"], font=font)
+    for i, r in enumerate(rois):  # outlines last, so an edge stays crisp even under a label
+        _draw_one(d, r, i, scale, font, values, width)
 
 
-def _anchor(r: dict[str, Any], s: float) -> tuple[float, float]:
+def _bbox(r: dict[str, Any], s: float) -> tuple[float, float, float, float]:
+    """(left, top, right, bottom) of a ROI in canvas px."""
     k = r["kind"]
     if k == "spot":
-        return (r["x"] + 0.5) * s + 8, (r["y"] + 0.5) * s - 8
+        x, y = (r["x"] + 0.5) * s, (r["y"] + 0.5) * s
+        return x - 6, y - 6, x + 6, y + 6
     if k == "rect":
-        return r["x0"] * s, r["y0"] * s - 14
+        return r["x0"] * s, r["y0"] * s, r["x1"] * s, r["y1"] * s
     if k in ("circle", "ellipse"):
-        rx = r["r"] if k == "circle" else r["rx"]
-        ry = r["r"] if k == "circle" else r["ry"]
-        return (r["cx"] + 0.5) * s - rx * s, (r["cy"] + 0.5) * s - ry * s - 14
+        rx = (r["r"] if k == "circle" else r["rx"]) * s
+        ry = (r["r"] if k == "circle" else r["ry"]) * s
+        cx, cy = (r["cx"] + 0.5) * s, (r["cy"] + 0.5) * s
+        return cx - rx, cy - ry, cx + rx, cy + ry
     if k == "line":
-        return min(r["x0"], r["x1"]) * s, min(r["y0"], r["y1"]) * s - 14
+        return (min(r["x0"], r["x1"]) * s, min(r["y0"], r["y1"]) * s,
+                max(r["x0"], r["x1"]) * s, max(r["y0"], r["y1"]) * s)
     pts = r["points"]
-    return min(p[0] for p in pts) * s, min(p[1] for p in pts) * s - 14
+    xs = [p[0] * s for p in pts]
+    ys = [p[1] * s for p in pts]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _shape_top(r: dict[str, Any], s: float) -> tuple[float, float]:
+    """(centre_x, top_y) of a ROI in canvas px — so a label can sit centred just above the shape."""
+    k = r["kind"]
+    if k == "spot":
+        return (r["x"] + 0.5) * s, (r["y"] + 0.5) * s - 8
+    if k == "rect":
+        return (r["x0"] + r["x1"]) / 2 * s, r["y0"] * s
+    if k in ("circle", "ellipse"):
+        ry = (r["r"] if k == "circle" else r["ry"]) * s
+        return (r["cx"] + 0.5) * s, (r["cy"] + 0.5) * s - ry
+    if k == "line":
+        return (r["x0"] + r["x1"]) / 2 * s, min(r["y0"], r["y1"]) * s
+    pts = r["points"]
+    return sum(p[0] for p in pts) / len(pts) * s, min(p[1] for p in pts) * s
 
 
 def _draw_one(
@@ -88,41 +211,30 @@ def _draw_one(
     font: ImageFont.FreeTypeFont,
     values: dict[int, str] | None,
     width: int,
-    outline: bool,
+    outline: bool = True,
 ) -> None:
+    """Stroke one ROI's outline in its colour (labels are placed separately by draw_rois)."""
     col = _rgb(r.get("color") or DEFAULT_COLORS[i % len(DEFAULT_COLORS)])
     k = r["kind"]
-    if outline:
-        if k == "spot":
-            x, y = (r["x"] + 0.5) * s, (r["y"] + 0.5) * s
-            d.line([(x - 6, y), (x + 6, y)], fill=col, width=width)
-            d.line([(x, y - 6), (x, y + 6)], fill=col, width=width)
-        elif k == "rect":
-            box = [r["x0"] * s, r["y0"] * s, r["x1"] * s - 1, r["y1"] * s - 1]
-            d.rectangle(box, outline=col, width=width)
-        elif k in ("circle", "ellipse"):
-            rx = (r["r"] if k == "circle" else r["rx"]) * s
-            ry = (r["r"] if k == "circle" else r["ry"]) * s
-            cx, cy = (r["cx"] + 0.5) * s, (r["cy"] + 0.5) * s
-            d.ellipse([cx - rx, cy - ry, cx + rx, cy + ry], outline=col, width=width)
-        elif k == "line":
-            a = ((r["x0"] + 0.5) * s, (r["y0"] + 0.5) * s)
-            b = ((r["x1"] + 0.5) * s, (r["y1"] + 0.5) * s)
-            d.line([a, b], fill=col, width=width)
-        else:  # polygon / polyline
-            pts = [((x + 0.5) * s, (y + 0.5) * s) for x, y in r["points"]]
-            d.line(pts + ([pts[0]] if k == "polygon" else []), fill=col, width=width)
-        return
-    label = r.get("name") or f"{k} {r['id']}"
-    if values and r["id"] in values:
-        label = f"{label}  {values[r['id']]}"
-    lx, ly = _anchor(r, s)
-    tw = d.textlength(label, font=font)
-    img_w = d.im.size[0] if hasattr(d, "im") else lx + tw + 4  # keep the label inside the image
-    lx = max(2.0, min(lx, img_w - tw - 4))
-    ly = max(2.0, ly)
-    d.rectangle([lx - 2, ly - 1, lx + tw + 2, ly + font.size + 1], fill=(0, 0, 0, 160))
-    d.text((lx, ly), label, fill=col, font=font)
+    if k == "spot":
+        x, y = (r["x"] + 0.5) * s, (r["y"] + 0.5) * s
+        d.line([(x - 6, y), (x + 6, y)], fill=col, width=width)
+        d.line([(x, y - 6), (x, y + 6)], fill=col, width=width)
+    elif k == "rect":
+        box = [r["x0"] * s, r["y0"] * s, r["x1"] * s - 1, r["y1"] * s - 1]
+        d.rectangle(box, outline=col, width=width)
+    elif k in ("circle", "ellipse"):
+        rx = (r["r"] if k == "circle" else r["rx"]) * s
+        ry = (r["r"] if k == "circle" else r["ry"]) * s
+        cx, cy = (r["cx"] + 0.5) * s, (r["cy"] + 0.5) * s
+        d.ellipse([cx - rx, cy - ry, cx + rx, cy + ry], outline=col, width=width)
+    elif k == "line":
+        a = ((r["x0"] + 0.5) * s, (r["y0"] + 0.5) * s)
+        b = ((r["x1"] + 0.5) * s, (r["y1"] + 0.5) * s)
+        d.line([a, b], fill=col, width=width)
+    else:  # polygon / polyline
+        pts = [((x + 0.5) * s, (y + 0.5) * s) for x, y in r["points"]]
+        d.line(pts + ([pts[0]] if k == "polygon" else []), fill=col, width=width)
 
 
 def _celsius(reader: ExperimentReader, index: int) -> npt.NDArray[np.float32]:

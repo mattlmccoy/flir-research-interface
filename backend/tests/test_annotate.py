@@ -60,3 +60,24 @@ def test_write_annotated_frames_creates_peak_frame_files(tmp_path: Path) -> None
     assert im.width >= 32 and im.format == "PNG"
     r2 = ExperimentReader(r.path)
     assert r2.n_frames == r.n_frames  # store untouched
+
+
+def test_layout_labels_pushes_overlapping_labels_apart() -> None:
+    from flir_research_interface.analysis.annotate import _layout_labels
+    # two labels wanting the same spot: the second is displaced downward, first keeps its anchor
+    boxes = [
+        {"id": 1, "ax": 10.0, "ay": 10.0, "w": 100.0, "h": 20.0},
+        {"id": 2, "ax": 10.0, "ay": 12.0, "w": 100.0, "h": 20.0},
+    ]
+    placed = _layout_labels(boxes, 400, 400, gap=3)
+    assert placed[0]["displaced"] is False and abs(placed[0]["y"] - 10.0) < 0.5
+    assert placed[1]["displaced"] is True and placed[1]["y"] >= 10.0 + 20.0 + 3  # below the first
+
+
+def test_leader_anchor_circle_ties_to_the_ring() -> None:
+    from flir_research_interface.analysis.annotate import _leader_anchor
+    cx, cy, reach = _leader_anchor({"kind": "circle", "cx": 10, "cy": 10, "r": 5}, 2.0)
+    assert (round(cx, 1), round(cy, 1), round(reach, 1)) == (21.0, 21.0, 10.0)
+    # a spot has reach 0 (the leader points at the spot itself)
+    _, _, reach0 = _leader_anchor({"kind": "spot", "x": 3, "y": 4}, 2.0)
+    assert reach0 == 0.0
