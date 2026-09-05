@@ -223,4 +223,18 @@ def _encode_gif(  # type: ignore[no-untyped-def]
     return {}
 
 
-__all__ = ["MediaOptions", "render_clip", "MAX_GIF_FRAMES"]
+def compose_preview(reader: ExperimentReader, opts: MediaOptions, index: int) -> bytes:
+    """One composed frame (same overlays as the export) as PNG bytes for the live preview."""
+    if not (0 <= index < reader.n_frames):
+        raise ValueError(f"index out of range 0..{reader.n_frames - 1}")
+    vmin, vmax, _ = run_range(reader, robust=True)
+    rois = (reader.metadata.get("rois") or []) if opts.with_rois else []
+    rgb = _compose(reader, index, vmin, vmax, max(1, opts.scale), rois, opts)
+    from io import BytesIO
+
+    buf = BytesIO()
+    Image.fromarray(rgb).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+__all__ = ["MediaOptions", "render_clip", "compose_preview", "MAX_GIF_FRAMES"]

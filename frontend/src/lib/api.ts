@@ -135,6 +135,9 @@ export const api = {
     j<MediaJob>(req(`/api/experiments/${encodeURIComponent(name)}/export/media/status`)),
   clipUrl: (name: string, file: string) =>
     u(`/api/experiments/${encodeURIComponent(name)}/exports/clips/${encodeURIComponent(file)}`),
+  /** A composed preview frame (PNG) for the editor: same overlays as the export, at `index`. */
+  mediaPreviewUrl: (name: string, index: number, o: { with_rois?: boolean; frame_stats?: boolean; timestamp?: boolean; colorbar?: boolean; title?: string | null }) =>
+    u(`/api/experiments/${encodeURIComponent(name)}/export/media/preview?index=${index}&scale=1&with_rois=${o.with_rois !== false}&frame_stats=${!!o.frame_stats}&timestamp=${o.timestamp !== false}&colorbar=${o.colorbar !== false}${o.title ? `&title=${encodeURIComponent(o.title)}` : ""}`),
   exportFileUrl: (name: string, file: string) => u(`/api/experiments/${encodeURIComponent(name)}/exports/${encodeURIComponent(file)}`),
   thermalVideoUrl: (name: string) => u(`/api/experiments/${encodeURIComponent(name)}/thermal_preview.mp4`),
   frameBuffer: async (name: string, index: number): Promise<ArrayBuffer> => {

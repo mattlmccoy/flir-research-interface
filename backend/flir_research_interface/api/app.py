@@ -1273,6 +1273,23 @@ def create_app(
     def export_media_status(name: str) -> dict[str, Any]:
         return app.state.media_jobs.get(name) or {"state": "idle"}
 
+    @app.get("/api/experiments/{name}/export/media/preview")
+    async def export_media_preview(
+        name: str, index: int, scale: int = Query(default=1, ge=1, le=4),
+        with_rois: bool = True, frame_stats: bool = False, timestamp: bool = True,
+        colorbar: bool = True, title: str | None = None,
+    ) -> Response:
+        """One composed frame (same overlays as the export) as PNG for the editor preview."""
+        from flir_research_interface.analysis.media import MediaOptions, compose_preview
+
+        opts = MediaOptions(scale=scale, with_rois=with_rois, frame_stats=frame_stats,
+                            timestamp=timestamp, colorbar=colorbar, title=title)
+        try:
+            png = await run_in_threadpool(compose_preview, _open(name), opts, index)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return Response(content=png, media_type="image/png")
+
     @app.get("/api/experiments/{name}/series")
     async def experiment_series(
         name: str, rois: str, valid: str | None = None, max_points: int = 0

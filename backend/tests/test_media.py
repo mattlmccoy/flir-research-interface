@@ -93,3 +93,11 @@ def test_media_export_api_job(tmp_path: Path) -> None:
         fname = job["file"]["name"]
         assert fname.endswith(".gif")
         assert c.get(f"/api/experiments/{name}/exports/clips/{fname}").status_code == 200
+
+
+@pytest.mark.skipif(not _HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_media_preview_returns_png(tmp_path: Path) -> None:
+    from flir_research_interface.analysis.media import MediaOptions, compose_preview
+    r = _make(tmp_path)
+    png = compose_preview(r, MediaOptions(scale=1, frame_stats=True, title="Hi"), 5)
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
