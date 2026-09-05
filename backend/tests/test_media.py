@@ -179,6 +179,16 @@ def test_plot_stats_min_max_mean_each_make_a_line(tmp_path: Path) -> None:
     assert "mean" in joined and "min" in joined and "max" in joined
 
 
+@pytest.mark.skipif(not _HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_timestamp_toggle_actually_removes_the_time(tmp_path: Path) -> None:
+    """The timestamp checkbox must change the frame (it was baked in unconditionally)."""
+    from flir_research_interface.analysis.media import MediaOptions, compose_preview
+    r = _make(tmp_path)
+    on = compose_preview(r, MediaOptions(start=0, stop=20, timestamp=True, colorbar=False), 5)
+    off = compose_preview(r, MediaOptions(start=0, stop=20, timestamp=False, colorbar=False), 5)
+    assert on != off  # turning the timestamp off changes the rendered frame
+
+
 def test_plot_series_gives_each_roi_its_own_stats(tmp_path: Path) -> None:
     """plot_series lets each ROI choose its own stats: ROI 1 mean+max, ROI 2 min only."""
     from flir_research_interface.analysis.media import MediaOptions, _plot_traces

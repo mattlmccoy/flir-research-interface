@@ -412,7 +412,8 @@ def _compose(reader: ExperimentReader, idx: int, vmin: float, vmax: float, scale
     stats_vals = values if over is None else np.where(over, np.nan, values)
     bar = 24 if opts.colorbar else 0
     rgb = thermal_frame_rgb(values, vmin, vmax, reader.t_s(idx), bar_px=bar, scale=scale,
-                            rois=rois if opts.with_rois else None, reader=reader)
+                            rois=rois if opts.with_rois else None, reader=reader,
+                            show_time=opts.timestamp)
     if over is not None:  # paint over-range pixels magenta, like the live display
         rgb = np.array(rgb, copy=True)  # thermal_frame_rgb may hand back a read-only view
         big = np.repeat(np.repeat(over, scale, axis=0), scale, axis=1)

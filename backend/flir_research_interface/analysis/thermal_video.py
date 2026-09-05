@@ -90,8 +90,13 @@ def thermal_frame_rgb(
     scale: int = 1,
     rois: list[dict[str, Any]] | None = None,
     reader: ExperimentReader | None = None,
+    show_time: bool = True,
 ) -> npt.NDArray[np.uint8]:
-    """Colourised frame plus a vertical colour bar (vmax at the top) and labels: (h, w+bar, 3)."""
+    """Colourised frame plus a vertical colour bar (vmax at the top) and labels: (h, w+bar, 3).
+
+    ``show_time`` draws the elapsed-time label at top-left (media export gates it on its own
+    timestamp toggle); the derived preview video always shows it.
+    """
     from flir_research_interface.analysis.annotate import colorize, draw_rois, roi_values_at
 
     h0, w0 = values.shape
@@ -107,7 +112,8 @@ def thermal_frame_rgb(
         draw_rois(pil, rois, scale=scale, values=roi_values_at(reader, values, rois))
     d = ImageDraw.Draw(pil)
     font = label_font(max(10, min(16, h // 30)))
-    d.text((4, 2), f"{t_s:.2f} s", fill=(255, 255, 255), font=font)
+    if show_time:
+        d.text((4, 2), f"{t_s:.2f} s", fill=(255, 255, 255), font=font)
     d.text((4, h - font.size - 4), f"{vmin:.1f} to {vmax:.1f} °C", fill=(255, 255, 255), font=font)
     return np.asarray(pil, dtype=np.uint8)
 
