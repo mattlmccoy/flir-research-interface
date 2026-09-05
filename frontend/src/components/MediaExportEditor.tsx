@@ -9,6 +9,7 @@ interface Props {
   index: number; // current playhead in playback, seeds the scrubber
   tS: number[]; // timeline seconds per frame
   rois: RoiPick[]; // stored ROIs, for the ROI picker
+  hasVisible?: boolean; // the run has an aligned visible-camera recording
   onClose: () => void;
 }
 
@@ -55,7 +56,7 @@ function TrimBar({ n, start, stop, scrub, onStart, onStop, onScrub }: {
 }
 
 /** Full-screen editor: scrub a live preview and set an in/out window, then export MP4 or GIF. */
-export function MediaExportEditor({ name, nFrames, index, tS, rois, onClose }: Props) {
+export function MediaExportEditor({ name, nFrames, index, tS, rois, hasVisible, onClose }: Props) {
   const [start, setStart] = useState(0);
   const [stop, setStop] = useState(nFrames);
   const [scrub, setScrub] = useState(Math.min(index, nFrames - 1));
@@ -83,6 +84,7 @@ export function MediaExportEditor({ name, nFrames, index, tS, rois, onClose }: P
   const [frameStats, setFrameStats] = useState(true);
   const [timestamp, setTimestamp] = useState(true);
   const [colorbar, setColorbar] = useState(true);
+  const [visibleOpacity, setVisibleOpacity] = useState(0);
   const [title, setTitle] = useState("");
   const [job, setJob] = useState<MediaJob | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -95,17 +97,17 @@ export function MediaExportEditor({ name, nFrames, index, tS, rois, onClose }: P
   useEffect(() => {
     setPreviewLoading(true);
     const id = window.setTimeout(() => {
-      setPreviewUrl(api.mediaPreviewUrl(name, scrub, { with_rois: showRois, frame_stats: frameStats, timestamp, colorbar, title: title.trim() || null, plot_series: plotSeries, overlay_rois: selIds, start, stop }));
+      setPreviewUrl(api.mediaPreviewUrl(name, scrub, { with_rois: showRois, frame_stats: frameStats, timestamp, colorbar, title: title.trim() || null, plot_series: plotSeries, overlay_rois: selIds, visible_opacity: visibleOpacity, start, stop }));
     }, 120);
     return () => window.clearTimeout(id);
-  }, [name, scrub, showRois, frameStats, timestamp, colorbar, title, plotSeries.join(","), selIds.join(","), start, stop]);
+  }, [name, scrub, showRois, frameStats, timestamp, colorbar, title, plotSeries.join(","), selIds.join(","), visibleOpacity, start, stop]);
 
   const windowSecs = tS.length ? (tS[Math.min(stop, tS.length) - 1] ?? 0) - (tS[start] ?? 0) : 0;
 
   async function run() {
     setErr(null); setJob({ state: "running", step: "starting", done: 0, total: 0 });
     try {
-      await api.exportMedia(name, { start, stop, step, scale, speed, fmt, with_rois: showRois, frame_stats: frameStats, timestamp, colorbar, title: title.trim() || null, plot_series: plotSeries, overlay_rois: selIds });
+      await api.exportMedia(name, { start, stop, step, scale, speed, fmt, with_rois: showRois, frame_stats: frameStats, timestamp, colorbar, title: title.trim() || null, plot_series: plotSeries, overlay_rois: selIds, visible_opacity: visibleOpacity });
       for (;;) {
         await new Promise((r) => setTimeout(r, 700));
         const jb = await api.mediaStatus(name);
@@ -188,6 +190,14 @@ export function MediaExportEditor({ name, nFrames, index, tS, rois, onClose }: P
           <label><input type="checkbox" checked={timestamp} onChange={(e) => setTimestamp(e.target.checked)} /> timestamp</label>
           <label><input type="checkbox" checked={colorbar} onChange={(e) => setColorbar(e.target.checked)} /> colour bar</label>
         </div>
+        {hasVisible && (
+          <label className="row" style={{ alignItems: "center", gap: 8 }}>
+            <span className="hint" style={{ minWidth: 96 }}>visible camera</span>
+            <input type="range" min={0} max={1} step={0.05} value={visibleOpacity} style={{ flex: 1, maxWidth: 260 }}
+              aria-label="visible camera opacity" onChange={(e) => setVisibleOpacity(Number(e.target.value))} />
+            <span className="v" style={{ minWidth: 44, textAlign: "right" }}>{visibleOpacity === 0 ? "off" : `${Math.round(visibleOpacity * 100)}%`}</span>
+          </label>
+        )}
 
         <div className="media-actions">
           <button className="primary" disabled={busy || nFrames === 0} onClick={run}>{busy ? "rendering…" : `Export ${fmt.toUpperCase()}`}</button>

@@ -69,6 +69,7 @@ class MediaOptions:
     plot_stats: tuple[str, ...] = ()  # legacy: stats applied to every plot_roi
     plot_series: tuple[tuple[int, str], ...] = ()  # per-ROI lines: (roi_id, stat) pairs
     overlay_rois: tuple[int, ...] = ()  # which ROI boxes to draw on the frame ((): all)
+    visible_opacity: float = 0.0  # blend the recorded visible camera over the frame (0 = off)
 
 
 def _slug(text: str) -> str:
@@ -362,51 +363,67 @@ def render_clip(
     scale = max(1, opts.scale)
     rois = _overlay_rois(reader, opts)
     traces = _plot_traces(reader, opts)
+    vsrc = _visible_source(reader, opts, ffmpeg,
+                           float(reader.t_s(indices[0])), float(reader.t_s(indices[-1])),
+                           w0 * scale, h0 * scale)
+    try:
+        # size the first frame to fix the encoder geometry
+        first = _compose(reader, indices[0], vmin, vmax, scale, rois, opts, traces,
+                         float(reader.t_s(indices[0])), vsrc)
+        height, width = first.shape[0], first.shape[1]
+        if width % 2 or height % 2:
+            width += width % 2
+            height += height % 2
 
-    # size the first frame to fix the encoder geometry
-    first = _compose(reader, indices[0], vmin, vmax, scale, rois, opts, traces,
-                     float(reader.t_s(indices[0])))
-    height, width = first.shape[0], first.shape[1]
-    if width % 2 or height % 2:
-        width += width % 2
-        height += height % 2
+        src_fps = _fps(reader)
+        out_fps = opts.fps or max(1.0, src_fps * opts.speed)
+        if opts.fmt == "gif":
+            out_fps = min(out_fps, 20.0)
 
-    src_fps = _fps(reader)
-    out_fps = opts.fps or max(1.0, src_fps * opts.speed)
-    if opts.fmt == "gif":
-        out_fps = min(out_fps, 20.0)
+        out_dir = reader.path / "exports" / CLIPS_DIR
+        out_dir.mkdir(parents=True, exist_ok=True)
+        stem = _slug(opts.title or f"clip_{opts.start}-{stop}")
+        total = len(indices)
 
-    out_dir = reader.path / "exports" / CLIPS_DIR
-    out_dir.mkdir(parents=True, exist_ok=True)
-    stem = _slug(opts.title or f"clip_{opts.start}-{stop}")
-    total = len(indices)
+        def _frames() -> np.ndarray:
+            for k, idx in enumerate(indices):
+                rgb = (first if k == 0 else
+                       _compose(reader, idx, vmin, vmax, scale, rois, opts, traces,
+                                float(reader.t_s(idx)), vsrc))
+                if rgb.shape[0] != height or rgb.shape[1] != width:
+                    pad = np.zeros((height, width, 3), dtype=np.uint8)
+                    pad[: rgb.shape[0], : rgb.shape[1]] = rgb
+                    rgb = pad
+                yield k, rgb
 
-    def _frames() -> np.ndarray:
-        for k, idx in enumerate(indices):
-            rgb = (first if k == 0 else
-                   _compose(reader, idx, vmin, vmax, scale, rois, opts, traces,
-                            float(reader.t_s(idx))))
-            if rgb.shape[0] != height or rgb.shape[1] != width:
-                pad = np.zeros((height, width, 3), dtype=np.uint8)
-                pad[: rgb.shape[0], : rgb.shape[1]] = rgb
-                rgb = pad
-            yield k, rgb
-
-    if opts.fmt == "mp4":
-        out = out_dir / f"{stem}.mp4"
-        info = _encode_mp4(ffmpeg, width, height, out_fps, out, _frames(), total, on_progress)
-    else:
-        out = out_dir / f"{stem}.gif"
-        info = _encode_gif(ffmpeg, width, height, out_fps, out, _frames(), total, on_progress)
+        if opts.fmt == "mp4":
+            out = out_dir / f"{stem}.mp4"
+            info = _encode_mp4(ffmpeg, width, height, out_fps, out, _frames(), total, on_progress)
+        else:
+            out = out_dir / f"{stem}.gif"
+            info = _encode_gif(ffmpeg, width, height, out_fps, out, _frames(), total, on_progress)
+    finally:
+        if vsrc is not None:
+            vsrc.close()
     info.update({"path": str(out), "name": out.name, "frames": total, "fps": out_fps,
                  "width": width, "height": height, "bytes": out.stat().st_size, "note": guard_note})
     logger.info("media clip written: %s", info)
     return info
 
 
+def _visible_source(reader: ExperimentReader, opts: MediaOptions, ffmpeg: str,
+                    t0: float, t1: float, out_w: int, out_h: int) -> Any:
+    """A VisibleSource covering [t0, t1] when the visible overlay is requested, else None."""
+    if opts.visible_opacity <= 0:
+        return None
+    from flir_research_interface.analysis.visible_overlay import VisibleSource
+    return VisibleSource(reader, ffmpeg, t0, t1, out_w, out_h)
+
+
 def _compose(reader: ExperimentReader, idx: int, vmin: float, vmax: float, scale: int,
              rois: list[dict[str, Any]], opts: MediaOptions,
-             plot: list[dict[str, Any]] | None = None, cur_t: float = 0.0) -> np.ndarray:
+             plot: list[dict[str, Any]] | None = None, cur_t: float = 0.0,
+             visible: Any = None) -> np.ndarray:
     values, counts = _celsius(reader, idx)
     over = over_range_mask(counts)
     stats_vals = values if over is None else np.where(over, np.nan, values)
@@ -420,6 +437,13 @@ def _compose(reader: ExperimentReader, idx: int, vmin: float, vmax: float, scale
         rgb = np.array(rgb, copy=True)  # thermal_frame_rgb may hand back a read-only view
         big = np.repeat(np.repeat(over, scale, axis=0), scale, axis=1)
         rgb[: big.shape[0], : big.shape[1]][big] = (255, 0, 255)
+    if visible is not None and opts.visible_opacity > 0:  # blend the recorded visible camera
+        from flir_research_interface.analysis.visible_overlay import blend_visible
+        warped = visible.warped_at(cur_t)
+        if warped is not None:
+            bh, bw = values.shape[0] * scale, values.shape[1] * scale
+            rgb = np.array(rgb, copy=True) if not rgb.flags.writeable else rgb
+            rgb[:bh, :bw] = blend_visible(rgb[:bh, :bw], warped, opts.visible_opacity)
     pil = Image.fromarray(rgb).convert("RGB")
     d = ImageDraw.Draw(pil, "RGBA")
     font = label_font(max(11, min(18, rgb.shape[0] // 26)))
@@ -517,10 +541,19 @@ def compose_preview(reader: ExperimentReader, opts: MediaOptions, index: int) ->
     if not (0 <= index < reader.n_frames):
         raise ValueError(f"index out of range 0..{reader.n_frames - 1}")
     vmin, vmax, _ = _cached_range(reader)
+    scale = max(1, opts.scale)
     rois = _overlay_rois(reader, opts)
     traces = _plot_traces(reader, opts)  # covers the window; grows to the current time as you scrub
-    rgb = _compose(reader, index, vmin, vmax, max(1, opts.scale), rois, opts, traces,
-                   float(reader.t_s(index)))
+    t = float(reader.t_s(index))
+    _, h0, w0 = reader.counts_block(0, 1).shape
+    ffmpeg = find_ffprobe(FFMPEG_CANDIDATES)
+    vsrc = (_visible_source(reader, opts, ffmpeg, t, t, w0 * scale, h0 * scale)
+            if ffmpeg else None)
+    try:
+        rgb = _compose(reader, index, vmin, vmax, scale, rois, opts, traces, t, vsrc)
+    finally:
+        if vsrc is not None:
+            vsrc.close()
     from io import BytesIO
 
     buf = BytesIO()
