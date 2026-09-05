@@ -19,6 +19,8 @@ interface Props {
   /** Mirror the geometry to match a flipped image; labels stay readable. */
   flipH?: boolean; flipV?: boolean;
   cursor: string;
+  /** Hide all shapes + labels (a view toggle); the canvas stays for pointer interaction. */
+  hidden?: boolean;
   /** Active drawing tool; label dragging is only armed on the "select" tool. */
   tool?: string;
   /** localStorage scope for label-position nudges (live vs a specific experiment). */
@@ -224,6 +226,7 @@ export function RoiOverlay(p: Props) {
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, p.box.width, p.box.height);
+    if (p.hidden) { chipRects.current = []; return; }  // ROI overlays toggled off (view only)
     BASE.set(ctx, ctx.getTransform());  // CSS-pixel space at device resolution; labels draw in this
     if (p.flipH || p.flipV) { ctx.translate(p.flipH ? p.box.width : 0, p.flipV ? p.box.height : 0); ctx.scale(p.flipH ? -1 : 1, p.flipV ? -1 : 1); }
     const sx = p.box.width / p.width;

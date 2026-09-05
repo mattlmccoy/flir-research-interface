@@ -154,6 +154,18 @@ test("hot/cold markers default on, toggle, and survive a reload", () => {
   assert.equal(loadLayout(storage).extremes, false);
 });
 
+test("ROI overlays default visible and toggle on/off, persisting", () => {
+  assert.equal(DEFAULT_LAYOUT.roisHidden, false);
+  const s1 = layoutReducer(DEFAULT_LAYOUT, { type: "toggleRois" });
+  assert.equal(s1.roisHidden, true);
+  const s2 = layoutReducer(s1, { type: "toggleRois" });
+  assert.equal(s2.roisHidden, false);
+  const store = new Map<string, string>();
+  const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); } } as unknown as Storage;
+  saveLayout(storage, s1);
+  assert.equal(loadLayout(storage).roisHidden, true);
+});
+
 test("isotherm settings live in the layout and persist", () => {
   assert.equal(DEFAULT_LAYOUT.isotherm.mode, "off");
   const s1 = layoutReducer(DEFAULT_LAYOUT, { type: "setIsotherm", isotherm: { mode: "above", lo: 50, hi: 60, color: "#00ff88" } });

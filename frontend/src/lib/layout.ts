@@ -50,6 +50,8 @@ export interface LayoutState {
   visibleMode: VisibleMode;
   /** Draw ▲ hottest / ▽ coldest pixel markers inside area ROIs. */
   extremes: boolean;
+  /** Hide all ROI shapes + labels on the image (measurements/plot keep running). */
+  roisHidden: boolean;
   /** Isotherm painting over the palette (live + playback). */
   isotherm: Isotherm;
   /** Plot an extra trace A − B (ROI ids), or null. */
@@ -120,6 +122,7 @@ export const DEFAULT_LAYOUT: LayoutState = {
   zoom: "fit",
   visibleMode: "rail",
   extremes: true,
+  roisHidden: false,
   isotherm: DEFAULT_ISOTHERM,
   delta: null,
   floating: {},
@@ -145,6 +148,7 @@ export type LayoutAction =
   | { type: "setTool"; tool: Tool }
   | { type: "setZoom"; zoom: Zoom }
   | { type: "setExtremes"; on: boolean }
+  | { type: "toggleRois" }
   | { type: "setIsotherm"; isotherm: Isotherm }
   | { type: "setDelta"; delta: { a: number; b: number } | null }
   | { type: "popOut"; section: Section }
@@ -173,6 +177,7 @@ export function layoutReducer(s: LayoutState, a: LayoutAction): LayoutState {
     case "setZoom": return { ...s, zoom: a.zoom };
     case "setVisibleMode": return { ...s, visibleMode: a.mode };
     case "setExtremes": return { ...s, extremes: a.on };
+    case "toggleRois": return { ...s, roisHidden: !s.roisHidden };
     case "setIsotherm": return { ...s, isotherm: parseIsotherm(a.isotherm) };
     case "setDelta": return { ...s, delta: a.delta };
     case "popOut": {
@@ -231,6 +236,7 @@ export function loadLayout(storage: Storage | null): LayoutState {
       zoom: isZoom(parsed.zoom) ? parsed.zoom : DEFAULT_LAYOUT.zoom,
       visibleMode: isVisibleMode(parsed.visibleMode) ? parsed.visibleMode : parsed.visibleSide === true ? "side" : DEFAULT_LAYOUT.visibleMode,
       extremes: typeof parsed.extremes === "boolean" ? parsed.extremes : DEFAULT_LAYOUT.extremes,
+      roisHidden: parsed.roisHidden === true,
       isotherm: parseIsotherm(parsed.isotherm),
       delta: isDelta(parsed.delta) ? parsed.delta : null,
       floating: parseFloating(parsed.floating),

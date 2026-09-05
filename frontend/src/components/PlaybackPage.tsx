@@ -72,6 +72,7 @@ export function PlaybackPage(p: Props) {
   const [stats, setStats] = useState<StatsMap>(new Map());
   const [series, setSeries] = useState<RoiSeries | null>(null);
   const [showMedia, setShowMedia] = useState(false);
+  const [regenBusy, setRegenBusy] = useState(false);
   const cache = useRef(new Map<number, FrameMessage>());
   const inflight = useRef(new Map<number, Promise<void>>());
   const BLOCK = 60;
@@ -215,16 +216,47 @@ export function PlaybackPage(p: Props) {
     </span>
   );
 
+  function saveImage(): void {
+    const v = document.querySelector<HTMLElement>(".view");
+    if (v) saveSnapshot(v, snapshotFilename(p.name, index, t), snapshotFooter({ name: p.name, tS: t, index, range: shown, palette: p.palette, rois: p.rois.rois.length, reference: !!reference }));
+  }
+  function toggleVisibleOverlay(): void {
+    p.dispatch({ type: "setVisibleMode", mode: p.layout.visibleMode === "overlay" ? "rail" : "overlay" });
+  }
+  // Quick "update derived to the current ROIs" (plot + CSV + preview video); the export rail
+  // section has the full options. Runs in the background — poll to completion, then refresh.
+  async function quickRegenerate(): Promise<void> {
+    if (regenBusy || n === 0) return;
+    setRegenBusy(true); setErr(null);
+    try {
+      await api.putRois(p.name, p.rois.rois);
+      await api.exportDerived(p.name, true);
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 800));
+        const jb = await api.exportDerivedStatus(p.name);
+        if (jb.state === "done") { api.experiment(p.name).then(setInfo).catch(() => undefined); break; }
+        if (jb.state === "error") { setErr(jb.error ?? "regenerate failed"); break; }
+        if (jb.state === "idle") break;
+      }
+    } catch (e) { setErr(String(e)); } finally { setRegenBusy(false); }
+  }
+
   return (
     <>
     {showMedia && tl && <MediaExportEditor name={p.name} nFrames={n} index={index} tS={tl.t_s} rois={(info?.rois ?? []).map((r) => ({ id: Number(r.id), name: typeof r.name === "string" ? r.name : undefined, kind: typeof r.kind === "string" ? r.kind : undefined, color: typeof r.color === "string" ? r.color : undefined }))} onClose={() => setShowMedia(false)} />}
     <StudioFrame layout={p.layout} topbar={p.topbar} dispatch={p.dispatch} dockFoot={transport}
       strip={<ToolStrip tool={p.layout.tool} onTool={(tool) => p.dispatch({ type: "setTool", tool })} onCollapseAll={() => p.dispatch({ type: !p.layout.rail && !p.layout.dock ? "restoreAll" : "collapseAll" })} collapsed={!p.layout.rail && !p.layout.dock} zoom={p.layout.zoom} onZoom={(z) => p.dispatch({ type: "setZoom", zoom: z })}
-        extras={<button aria-label="Media export (clip / GIF)" title="Media export: MP4/GIF of a chosen window with overlays" disabled={n === 0} onClick={() => setShowMedia(true)}>🎬</button>} />}
+        extras={<>
+          <button aria-label="Media export (clip / GIF)" title="Media export: MP4/GIF of a chosen window with overlays" disabled={n === 0} onClick={() => setShowMedia(true)}>🎬</button>
+          <button aria-label="Save image" title="Save image: PNG snapshot of this frame with overlays" disabled={n === 0} onClick={saveImage}>📷</button>
+          <button aria-label={p.layout.roisHidden ? "Show ROIs" : "Hide ROIs"} aria-pressed={p.layout.roisHidden} className={p.layout.roisHidden ? "active" : ""} title={p.layout.roisHidden ? "Show ROI overlays" : "Hide ROI overlays (measurements keep running)"} onClick={() => p.dispatch({ type: "toggleRois" })}>🏷️</button>
+          <button aria-label="Visible-camera overlay" aria-pressed={p.layout.visibleMode === "overlay"} className={p.layout.visibleMode === "overlay" ? "active" : ""} title={hasVideo ? "Overlay the recorded visible camera on the thermal image" : "This recording has no visible video"} disabled={!hasVideo} onClick={toggleVisibleOverlay}>👁️</button>
+          <button aria-label="Regenerate derived exports" title="Regenerate derived exports (plot + CSV + preview) for the current ROIs" disabled={n === 0 || regenBusy} onClick={quickRegenerate}>{regenBusy ? <span className="spinner" /> : "♻️"}</button>
+        </>} />}
       center={
         <div className={`center-split ${p.layout.visibleMode === "side" && hasVideo ? "on" : ""}`}>
           <ThermalView frame={frame} palette={p.palette} scaleMode={p.scaleMode} manual={p.manual} onScale={setShown} setManual={p.setManual} setScaleMode={p.setScaleMode}
-            rois={p.rois.rois} selected={p.rois.selected} selectedIds={p.rois.selectedIds} tool={p.layout.tool} labelScope={`exp.${p.name}`} zoom={p.layout.zoom} onRoi={p.roiDispatch} onStats={onStats} rad={rad} extremes={p.layout.extremes} isotherm={p.layout.isotherm} onField={setField} reference={reference} hold={p.layout.hold} flipH={p.layout.flipH} flipV={p.layout.flipV} agc={p.layout.agc} filter={p.layout.filter} units={p.layout.units} valid={p.layout.segment.on ? { min: p.layout.segment.min, max: p.layout.segment.max } : null}
+            rois={p.rois.rois} selected={p.rois.selected} selectedIds={p.rois.selectedIds} tool={p.layout.tool} roisHidden={p.layout.roisHidden} labelScope={`exp.${p.name}`} zoom={p.layout.zoom} onRoi={p.roiDispatch} onStats={onStats} rad={rad} extremes={p.layout.extremes} isotherm={p.layout.isotherm} onField={setField} reference={reference} hold={p.layout.hold} flipH={p.layout.flipH} flipV={p.layout.flipV} agc={p.layout.agc} filter={p.layout.filter} units={p.layout.units} valid={p.layout.segment.on ? { min: p.layout.segment.min, max: p.layout.segment.max } : null}
             overlay={p.layout.visibleMode === "overlay" && hasVideo ? <VisibleVideo plain name={p.name} t={t} playing={playing} speed={speed} /> : undefined} overlayStyle={p.layout.overlay} overlayH={overlayH} />
           {p.layout.visibleMode === "side" && hasVideo && <VisibleVideo big flipH={p.layout.flipH} flipV={p.layout.flipV} name={p.name} t={t} playing={playing} speed={speed} measuredFps={info?.visible?.measured_fps} />}
         </div>
