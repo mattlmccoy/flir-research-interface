@@ -1,4 +1,9 @@
-from flir_research_interface.rf_link import RfLinkSettings, load_settings, save_settings
+from flir_research_interface.rf_link import (
+    RfLinkSettings,
+    load_settings,
+    plan_rf_action,
+    save_settings,
+)
 
 
 def test_default_settings():
@@ -16,9 +21,6 @@ def test_settings_roundtrip(tmp_path):
 
 def test_load_missing_returns_defaults(tmp_path):
     assert load_settings(tmp_path) == RfLinkSettings()
-
-
-from flir_research_interface.rf_link import plan_rf_action
 
 
 def test_rf_on_when_idle_and_autostart_starts_and_marks():
