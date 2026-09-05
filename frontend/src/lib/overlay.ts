@@ -88,3 +88,22 @@ export function vertexHandles(roi: Roi): [number, number][] {
   if (roi.kind === "line") return [[roi.x0, roi.y0], [roi.x1, roi.y1]];
   return [];
 }
+
+/** A ROI's centre and a "reach" radius in canvas pixels (image coords × sx/sy), so a leader line
+ *  can tie to the shape itself — the ring edge facing the label for circles/ellipses, the centre
+ *  (reach 0) otherwise — instead of floating at the label's bounding-box corner. */
+export function roiLeaderAnchor(r: Roi, sx: number, sy: number): [number, number, number] {
+  switch (r.kind) {
+    case "spot": return [(r.x + 0.5) * sx, (r.y + 0.5) * sy, 0];
+    case "rect": return [(r.x0 + r.x1) / 2 * sx, (r.y0 + r.y1) / 2 * sy, 0];
+    case "circle": return [(r.cx + 0.5) * sx, (r.cy + 0.5) * sy, r.r * sx];
+    case "ellipse": return [(r.cx + 0.5) * sx, (r.cy + 0.5) * sy, Math.min(r.rx * sx, r.ry * sy)];
+    case "line": return [((r.x0 + r.x1) / 2 + 0.5) * sx, ((r.y0 + r.y1) / 2 + 0.5) * sy, 0];
+    default: {  // polyline / polygon: centroid of the vertices
+      const pts = r.points;
+      const mx = pts.reduce((a, p) => a + p[0], 0) / pts.length;
+      const my = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+      return [(mx + 0.5) * sx, (my + 0.5) * sy, 0];
+    }
+  }
+}

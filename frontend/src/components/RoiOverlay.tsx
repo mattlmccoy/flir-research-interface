@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as RKeyboardEvent, MouseEvent as RMouseEvent, PointerEvent as RPointerEvent } from "react";
 import { roiLabel, type Roi, type RoiInput, type RoiStats } from "../lib/roi.ts";
-import { roiColor, type Box, vertexHandles } from "../lib/overlay.ts";
+import { roiColor, roiLeaderAnchor, type Box, vertexHandles } from "../lib/overlay.ts";
 import { layoutLabels, type LabelBox } from "../lib/labels.ts";
 import { type ChipRect, hitChip, loadOffsets, type Offsets, saveOffsets } from "../lib/labelDrag.ts";
 
@@ -236,7 +236,8 @@ export function RoiOverlay(p: Props) {
     ctx.font = `11px ${cssVar("--font-mono")}`;
     const base = BASE.get(ctx) ?? new DOMMatrix();
     // pass 1: shapes, selection, vertices, hot/cold markers; collect label chips for a later pass
-    const labels: { id: number; content: ChipContent; color: string; ax: number; ay: number; selected: boolean }[] = [];
+    const labels: { id: number; content: ChipContent; color: string; ax: number; ay: number;
+      cx: number; cy: number; reach: number; selected: boolean }[] = [];
     p.rois.forEach((r, i) => {
       if (r.hidden) return; // keep i so default colours match the rows
       const color = resolve(roiColor(r, i));
@@ -247,8 +248,11 @@ export function RoiOverlay(p: Props) {
       const [lx, ly] = drawShape(ctx, r, sx, sy, true);
       if (sel) { ctx.strokeStyle = accent; ctx.lineWidth = 1; ctx.setLineDash([3, 3]); drawShape(ctx, r, sx, sy, false); ctx.setLineDash([]); }
       // the label anchor in unflipped screen space, so a mirrored image never mirrors the text
-      const scr = base.inverse().transformPoint(ctx.getTransform().transformPoint(new DOMPoint(lx, ly)));
-      labels.push({ id: r.id, content: labelContent(r, p.stats.get(r.id)), color, ax: scr.x, ay: scr.y, selected: r.id === p.selected });
+      const toScr = (dx: number, dy: number) => base.inverse().transformPoint(ctx.getTransform().transformPoint(new DOMPoint(dx, dy)));
+      const scr = toScr(lx, ly);
+      const [ccx, ccy, reach] = roiLeaderAnchor(r, sx, sy); // a point the leader can connect to
+      const c = toScr(ccx, ccy);
+      labels.push({ id: r.id, content: labelContent(r, p.stats.get(r.id)), color, ax: scr.x, ay: scr.y, cx: c.x, cy: c.y, reach, selected: r.id === p.selected });
       if (r.id === p.selected) for (const [vx, vy] of vertexHandles(r)) {
         const hx = (vx + 0.5) * sx, hy = (vy + 0.5) * sy;
         ctx.setLineDash([]); ctx.fillStyle = accent; ctx.strokeStyle = scrim; ctx.lineWidth = 1.5;
@@ -285,8 +289,17 @@ export function RoiOverlay(p: Props) {
     for (const pl of placed) { // leader lines first, under the chips
       if (!pl.displaced) continue;
       const l = meta.get(pl.id)!;
-      ctx.globalAlpha = 0.55; ctx.strokeStyle = l.color; ctx.lineWidth = 1; ctx.setLineDash([]);
-      ctx.beginPath(); ctx.moveTo(l.ax, l.ay); ctx.lineTo(pl.x + PAD + DOTR, pl.y + LINE1_H / 2); ctx.stroke();
+      // connect the chip's colour dot to the ROI itself: the point on its edge facing the chip
+      // (ring edge for circles/ellipses; the centre for spots/rects/polygons where reach == 0).
+      const dotX = pl.x + PAD + DOTR, dotY = pl.y + LINE1_H / 2;
+      let tx = l.cx, ty = l.cy;
+      if (l.reach > 0) {
+        const dx = dotX - l.cx, dy = dotY - l.cy, dist = Math.hypot(dx, dy) || 1;
+        tx = l.cx + (dx / dist) * l.reach; ty = l.cy + (dy / dist) * l.reach;
+      }
+      ctx.globalAlpha = 0.6; ctx.strokeStyle = l.color; ctx.lineWidth = 1; ctx.setLineDash([]);
+      ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(dotX, dotY); ctx.stroke();
+      ctx.beginPath(); ctx.arc(tx, ty, 2, 0, Math.PI * 2); ctx.fillStyle = l.color; ctx.fill();  // tie-point
       ctx.globalAlpha = 1;
     }
     // draw non-selected first, the selected label last so it is always on top

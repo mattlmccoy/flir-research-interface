@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { COLOR_PRESETS, clientToImage, hitTest, roiColor, traceColor, vertexHit } from "./overlay.ts";
+import { COLOR_PRESETS, clientToImage, hitTest, roiColor, roiLeaderAnchor, traceColor, vertexHit } from "./overlay.ts";
 import type { Roi } from "./roi.ts";
 
 const RECT = { left: 100, top: 50, width: 320, height: 240 }; // canvas drawn at half size of 640x480
@@ -60,4 +60,13 @@ test("vertexHit finds a polygon/polyline vertex or a line endpoint within tolera
   assert.deepEqual(vertexHit(line, 21, 19, 2), { kind: "endpoint", end: 1 });
   assert.deepEqual(vertexHit(line, 2, 3, 2), { kind: "endpoint", end: 0 });
   assert.equal(vertexHit({ id: 3, kind: "spot", x: 1, y: 1 }, 1, 1, 2), null, "no vertices on a spot");
+});
+
+test("roiLeaderAnchor: circle ties to the ring (centre + radius reach), spot/rect to the centre", () => {
+  // circle cx=10 cy=10 r=5 at sx=sy=2 → centre (21,21), reach = 5*2 = 10 (the ring)
+  assert.deepEqual(roiLeaderAnchor({ id: 1, kind: "circle", cx: 10, cy: 10, r: 5 }, 2, 2), [21, 21, 10]);
+  // spot has reach 0 → the leader points at the spot itself
+  assert.deepEqual(roiLeaderAnchor({ id: 2, kind: "spot", x: 3, y: 4 }, 2, 2), [7, 9, 0]);
+  // rect ties to the centre with reach 0
+  assert.deepEqual(roiLeaderAnchor({ id: 3, kind: "rect", x0: 0, y0: 0, x1: 10, y1: 20 }, 1, 1), [5, 10, 0]);
 });
