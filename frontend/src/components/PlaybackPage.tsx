@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import type { Dispatch, ReactNode } from "react";
 import { api, type ExperimentInfo, type RecordingStatus, type RoiSeries, type Status, type Timeline } from "../lib/api.ts";
 import { type FrameMessage, decodeFrameBlock } from "../lib/protocol.ts";
-import { PALETTE_NAMES, paletteGradient, type PaletteName } from "../lib/palette.ts";
+import type { PaletteName } from "../lib/palette.ts";
 import type { Range, ScaleMode } from "../lib/scale.ts";
 import type { LayoutAction, LayoutState } from "../lib/layout.ts";
 import { SPEEDS, clampIndex, nextFrameDelayMs, speedLabel } from "../lib/playback.ts";
@@ -33,7 +33,8 @@ import { loadAlignment, parseAlignment } from "../lib/alignment.ts";
 import { TimePlot, type Trace } from "./TimePlot.tsx";
 import { StudioFrame } from "./studio/StudioFrame.tsx";
 import { ToolStrip } from "./studio/ToolStrip.tsx";
-import { IconClip, IconEye, IconLayers, IconPalette, IconRefresh, IconSaveImage } from "./studio/StripIcons.tsx";
+import { IconClip, IconRefresh } from "./studio/StripIcons.tsx";
+import { StripActions } from "./studio/StripActions.tsx";
 import { Rail } from "./studio/Rail.tsx";
 import { RailSection } from "./studio/RailSection.tsx";
 import { PlotDock } from "./studio/PlotDock.tsx";
@@ -76,7 +77,6 @@ export function PlaybackPage(p: Props) {
   const [series, setSeries] = useState<RoiSeries | null>(null);
   const [showMedia, setShowMedia] = useState(false);
   const [regenBusy, setRegenBusy] = useState(false);
-  const [paletteOpen, setPaletteOpen] = useState(false);
   const cache = useRef(new Map<number, FrameMessage>());
   const inflight = useRef(new Map<number, Promise<void>>());
   const BLOCK = 60;
@@ -265,32 +265,13 @@ export function PlaybackPage(p: Props) {
       strip={<ToolStrip tool={p.layout.tool} onTool={(tool) => p.dispatch({ type: "setTool", tool })} onCollapseAll={() => p.dispatch({ type: !p.layout.rail && !p.layout.dock ? "restoreAll" : "collapseAll" })} collapsed={!p.layout.rail && !p.layout.dock} zoom={p.layout.zoom} onZoom={(z) => p.dispatch({ type: "setZoom", zoom: z })}
         extras={<>
           <button aria-label="Media export (clip / GIF)" data-tip="Media export — MP4/GIF of a chosen window with overlays" disabled={n === 0} onClick={() => setShowMedia(true)}><IconClip /></button>
-          <button aria-label="Save image" data-tip="Save image — PNG snapshot of this frame with overlays" disabled={n === 0} onClick={saveImage}><IconSaveImage /></button>
-          <button aria-label={p.layout.roisHidden ? "Show ROIs" : "Hide ROIs"} aria-pressed={p.layout.roisHidden} className={p.layout.roisHidden ? "active" : ""} data-tip={p.layout.roisHidden ? "Show ROI overlays" : "Hide ROI overlays (measurements keep running)"} onClick={() => p.dispatch({ type: "toggleRois" })}><IconEye off={p.layout.roisHidden} /></button>
-          <span className="strip-pop-anchor">
-            <button aria-label="Visible-camera overlay" aria-pressed={p.layout.visibleMode === "overlay"} className={p.layout.visibleMode === "overlay" ? "active" : ""} data-tip={p.layout.visibleMode === "overlay" ? undefined : (hasVideo ? "Overlay the recorded visible camera (opacity slider)" : "This recording has no visible video")} disabled={!hasVideo} onClick={toggleVisibleOverlay}><IconLayers /></button>
-            {hasVideo && p.layout.visibleMode === "overlay" && (
-              <span className="strip-popover" role="group" aria-label="Visible overlay opacity">
-                <input type="range" min={0} max={1} step={0.05} value={p.layout.overlay.opacity} aria-label="visible camera opacity"
-                  onChange={(e) => p.dispatch({ type: "setOverlay", patch: { opacity: Number(e.target.value) } })} />
-                <span className="v">{Math.round(p.layout.overlay.opacity * 100)}%</span>
-              </span>
-            )}
-          </span>
-          <span className="strip-pop-anchor">
-            <button aria-label="Color palette" aria-pressed={paletteOpen} className={paletteOpen ? "active" : ""} data-tip={paletteOpen ? undefined : `Color palette — ${p.palette}`} onClick={() => setPaletteOpen((v) => !v)}><IconPalette /></button>
-            {paletteOpen && (
-              <span className="strip-popover palette-pop" role="listbox" aria-label="Color palette">
-                {PALETTE_NAMES.map((name) => (
-                  <button key={name} role="option" aria-selected={p.palette === name} className={`palette-opt${p.palette === name ? " active" : ""}`}
-                    onClick={() => p.setPalette(name)} title={name}>
-                    <span className="sw" style={{ background: paletteGradient(name) }} />
-                    <span className="nm">{name}</span>
-                  </button>
-                ))}
-              </span>
-            )}
-          </span>
+          <StripActions
+            onSaveImage={saveImage} saveDisabled={n === 0}
+            roisHidden={p.layout.roisHidden} onToggleRois={() => p.dispatch({ type: "toggleRois" })}
+            hasVisible={hasVideo} visibleOverlayOn={p.layout.visibleMode === "overlay"} onToggleVisible={toggleVisibleOverlay}
+            overlayOpacity={p.layout.overlay.opacity} onOverlayOpacity={(v) => p.dispatch({ type: "setOverlay", patch: { opacity: v } })}
+            visibleTip="This recording has no visible video"
+            palette={p.palette} setPalette={p.setPalette} />
           <button aria-label="Regenerate derived exports" data-tip="Regenerate derived exports (plot + CSV + preview) — asks first" disabled={n === 0 || regenBusy} onClick={quickRegenerate}>{regenBusy ? <span className="spinner" /> : <IconRefresh />}</button>
         </>} />}
       center={

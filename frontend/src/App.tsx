@@ -30,6 +30,7 @@ import { ExperimentsPage } from "./components/ExperimentsPage.tsx";
 import { PlaybackPage } from "./components/PlaybackPage.tsx";
 import { StudioFrame } from "./components/studio/StudioFrame.tsx";
 import { ToolStrip } from "./components/studio/ToolStrip.tsx";
+import { StripActions } from "./components/studio/StripActions.tsx";
 import { Rail } from "./components/studio/Rail.tsx";
 import { RailSection } from "./components/studio/RailSection.tsx";
 import { PlotDock } from "./components/studio/PlotDock.tsx";
@@ -175,6 +176,12 @@ export function App() {
     return a && b ? [...traces, deltaTrace(a, b)] : traces;
   })();
 
+  // PNG snapshot of the live view (thermal + overlays), same as the display-controls camera button.
+  const saveLiveImage = () => {
+    const v = document.querySelector<HTMLElement>(".view");
+    if (v) saveSnapshot(v, snapshotFilename("live", null, null), snapshotFooter({ name: "live", tS: null, index: null, range: shown, palette, rois: rois.rois.length, reference: !!reference }));
+  };
+
   const topbar = (
     <>
       <span className="wordmark">FLIR RESEARCH INTERFACE</span>
@@ -221,11 +228,19 @@ export function App() {
   return (
     <StudioFrame layout={layout} topbar={topbar} dispatch={dispatch} statusbar={statusbar}
       strip={<ToolStrip tool={layout.tool} onCollapseAll={() => dispatch({ type: allHidden ? "restoreAll" : "collapseAll" })} collapsed={allHidden} zoom={layout.zoom} onZoom={(z) => dispatch({ type: "setZoom", zoom: z })}
-        onTool={(t) => dispatch({ type: "setTool", tool: t })} />}
+        onTool={(t) => dispatch({ type: "setTool", tool: t })}
+        extras={<StripActions
+          onSaveImage={saveLiveImage} saveDisabled={!frame}
+          roisHidden={layout.roisHidden} onToggleRois={() => dispatch({ type: "toggleRois" })}
+          hasVisible={visibleAvailable} visibleOverlayOn={layout.visibleMode === "overlay"}
+          onToggleVisible={() => dispatch({ type: "setVisibleMode", mode: layout.visibleMode === "overlay" ? "rail" : "overlay" })}
+          overlayOpacity={layout.overlay.opacity} onOverlayOpacity={(v) => dispatch({ type: "setOverlay", patch: { opacity: v } })}
+          visibleTip="No visible camera configured for live overlay"
+          palette={palette} setPalette={setPalette} />} />}
       center={
         <div className={`center-split ${(layout.visibleMode === "side" || calibrating) && visibleAvailable ? "on" : ""}`}>
           <ThermalView frame={frame} palette={palette} scaleMode={scaleMode} manual={manual} onScale={setShown} setManual={setManual} setScaleMode={setScaleMode}
-            rois={rois.rois} selected={rois.selected} selectedIds={rois.selectedIds} tool={layout.tool} labelScope={roiScope} zoom={layout.zoom} onRoi={roiDispatch} onStats={onStats} rad={rad} extremes={layout.extremes} isotherm={layout.isotherm} onField={setField} reference={reference} hold={layout.hold} flipH={layout.flipH} flipV={layout.flipV} agc={layout.agc} filter={layout.filter} units={layout.units} valid={layout.segment.on ? { min: layout.segment.min, max: layout.segment.max } : null}
+            rois={rois.rois} selected={rois.selected} selectedIds={rois.selectedIds} tool={layout.tool} roisHidden={layout.roisHidden} labelScope={roiScope} zoom={layout.zoom} onRoi={roiDispatch} onStats={onStats} rad={rad} extremes={layout.extremes} isotherm={layout.isotherm} onField={setField} reference={reference} hold={layout.hold} flipH={layout.flipH} flipV={layout.flipV} agc={layout.agc} filter={layout.filter} units={layout.units} valid={layout.segment.on ? { min: layout.segment.min, max: layout.segment.max } : null}
             overlay={layout.visibleMode === "overlay" && !calibrating && visibleAvailable ? <VisibleLive plain /> : undefined} overlayStyle={layout.overlay} overlayH={align.H}
             topLayer={calibrating ? <PickLayer label="IR" color="var(--live)" points={align.pairs.map((p) => p.ir)} pending={align.pending?.ir} onPick={(p) => alignDispatch({ type: "pick", side: "ir", p })} /> : undefined} />
           {(layout.visibleMode === "side" || calibrating) && visibleAvailable && (
@@ -273,7 +288,7 @@ export function App() {
             <RecordPanel acquiring={status.state === "acquiring"} rois={rois.rois} />
           </RailSection>
           <RailSection id="display" title="display" open={layout.sections.display} onToggle={() => dispatch({ type: "toggleSection", section: "display" })} tag="visualization only">
-            <DisplayControls palette={palette} setPalette={setPalette} scaleMode={scaleMode} setScaleMode={setScaleMode} manual={manual} setManual={setManual} shown={shown} isotherm={layout.isotherm} setIsotherm={(isotherm) => dispatch({ type: "setIsotherm", isotherm })} hasReference={!!reference} onSetReference={() => { if (field) setReference(new Float32Array(field.c)); }} onClearReference={() => setReference(null)} onRangeFromRoi={(() => { const sel = rois.rois.find((r) => r.id === rois.selected); if (!field || !sel || sel.kind === "spot") return null; return () => { const rg = rangeFromRoi(field.c, field.w, field.h, sel); if (rg) { setManual({ min: Math.floor(rg.min * 10) / 10, max: Math.ceil(rg.max * 10) / 10 }); setScaleMode("manual"); } }; })()} hold={layout.hold} setHold={(hold) => dispatch({ type: "setHold", hold })} flipH={layout.flipH} flipV={layout.flipV} setFlip={(h, v) => dispatch({ type: "setFlip", h, v })} agc={layout.agc} setAgc={(agc) => dispatch({ type: "setAgc", agc })} units={layout.units} setUnits={(units) => dispatch({ type: "setUnits", units })} conv={field?.conv ?? null} filter={layout.filter} setFilter={(filter) => dispatch({ type: "setFilter", filter })} segment={layout.segment} setSegment={(segment) => dispatch({ type: "setSegment", segment })} saturation={(() => { const cs = (info as Record<string, unknown> | null | undefined)?.active_case as { low_c?: number; high_c?: number } | undefined; if (!field || !cs || typeof cs.low_c !== "number" || typeof cs.high_c !== "number") return null; const n = saturationCount(field.c, { low: cs.low_c, high: cs.high_c }); return { ...n, lowC: cs.low_c, highC: cs.high_c }; })()} onSnapshot={() => { const v = document.querySelector<HTMLElement>(".view"); if (v) saveSnapshot(v, snapshotFilename("live", null, null), snapshotFooter({ name: "live", tS: null, index: null, range: shown, palette: palette, rois: rois.rois.length, reference: !!reference })); }} />
+            <DisplayControls palette={palette} setPalette={setPalette} scaleMode={scaleMode} setScaleMode={setScaleMode} manual={manual} setManual={setManual} shown={shown} isotherm={layout.isotherm} setIsotherm={(isotherm) => dispatch({ type: "setIsotherm", isotherm })} hasReference={!!reference} onSetReference={() => { if (field) setReference(new Float32Array(field.c)); }} onClearReference={() => setReference(null)} onRangeFromRoi={(() => { const sel = rois.rois.find((r) => r.id === rois.selected); if (!field || !sel || sel.kind === "spot") return null; return () => { const rg = rangeFromRoi(field.c, field.w, field.h, sel); if (rg) { setManual({ min: Math.floor(rg.min * 10) / 10, max: Math.ceil(rg.max * 10) / 10 }); setScaleMode("manual"); } }; })()} hold={layout.hold} setHold={(hold) => dispatch({ type: "setHold", hold })} flipH={layout.flipH} flipV={layout.flipV} setFlip={(h, v) => dispatch({ type: "setFlip", h, v })} agc={layout.agc} setAgc={(agc) => dispatch({ type: "setAgc", agc })} units={layout.units} setUnits={(units) => dispatch({ type: "setUnits", units })} conv={field?.conv ?? null} filter={layout.filter} setFilter={(filter) => dispatch({ type: "setFilter", filter })} segment={layout.segment} setSegment={(segment) => dispatch({ type: "setSegment", segment })} saturation={(() => { const cs = (info as Record<string, unknown> | null | undefined)?.active_case as { low_c?: number; high_c?: number } | undefined; if (!field || !cs || typeof cs.low_c !== "number" || typeof cs.high_c !== "number") return null; const n = saturationCount(field.c, { low: cs.low_c, high: cs.high_c }); return { ...n, lowC: cs.low_c, highC: cs.high_c }; })()} onSnapshot={saveLiveImage} />
           </RailSection>
           <RailSection id="visible" title="visible camera" open={layout.sections.visible} onToggle={() => dispatch({ type: "toggleSection", section: "visible" })} tag="preview only">
             <VisiblePanel mode="live" available={visibleAvailable} reason={recording?.visible?.reason} visibleMode={layout.visibleMode} overlay={layout.overlay} dispatch={dispatch} aligned={!!align.H} />
