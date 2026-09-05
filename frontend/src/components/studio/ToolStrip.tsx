@@ -2,10 +2,23 @@ import type { ReactNode } from "react";
 import { TOOLS, type Tool } from "../../lib/layout.ts";
 import { nextZoom, zoomLabel, type Zoom } from "../../lib/zoom.ts";
 
+/** A crosshair reticle for the spot tool — a centre dot with N/S/E/W ticks (drawn as SVG so it
+ *  reads as crosshairs and never falls back to a tofu box like an exotic glyph would). */
+function SpotReticle() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+      strokeWidth="1.3" strokeLinecap="round" aria-hidden="true" focusable="false">
+      <circle cx="8" cy="8" r="3" />
+      <path d="M8 0.8 V4 M8 12 V15.2 M0.8 8 H4 M12 8 H15.2" />
+      <circle cx="8" cy="8" r="0.6" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 /** Presentation for each tool id (ids come from TOOLS in lib/layout.ts). */
-const TOOL_META: Record<Tool, { glyph: string; title: string; enabled: boolean }> = {
+const TOOL_META: Record<Tool, { glyph: ReactNode; title: string; enabled: boolean }> = {
   select: { glyph: "↖", title: "Select: click an ROI to select it (Delete removes it)", enabled: true },
-  spot: { glyph: "◎", title: "Spot: click to place a single-pixel measurement", enabled: true },
+  spot: { glyph: <SpotReticle />, title: "Spot: click to place a single-pixel measurement", enabled: true },
   rect: { glyph: "▭", title: "Rectangle: drag corner to corner", enabled: true },
   circle: { glyph: "◯", title: "Circle: drag from the centre outwards", enabled: true },
   ellipse: { glyph: "⬭", title: "Ellipse: drag the bounding box corner to corner", enabled: true },
