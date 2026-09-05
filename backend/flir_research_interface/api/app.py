@@ -326,6 +326,9 @@ def create_app(
         return {"state": "idle"}
 
     async def _finalize_recording() -> dict[str, Any] | None:
+        # Any stop path (operator stop, disarm, disconnect, shutdown, or the RF-link) relinquishes
+        # RF-link ownership, so a later run can never be mistaken for the link-owned one.
+        app.state.rf_link_owns_run = None
         # Thermal data first (the science record), then the visible video; the visible stop may
         # wait on ffmpeg and must never delay or endanger the manifest.
         rec = recorder()
