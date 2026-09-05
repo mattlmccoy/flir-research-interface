@@ -221,12 +221,15 @@ export function PlaybackPage(p: Props) {
     if (v) saveSnapshot(v, snapshotFilename(p.name, index, t), snapshotFooter({ name: p.name, tS: t, index, range: shown, palette: p.palette, rois: p.rois.rois.length, reference: !!reference }));
   }
   function toggleVisibleOverlay(): void {
-    p.dispatch({ type: "setVisibleMode", mode: p.layout.visibleMode === "overlay" ? "rail" : "overlay" });
+    const turningOn = p.layout.visibleMode !== "overlay";
+    p.dispatch({ type: "setVisibleMode", mode: turningOn ? "overlay" : "rail" });
+    if (turningOn) p.dispatch({ type: "openSection", section: "visible" });  // reveal the opacity slider
   }
   // Quick "update derived to the current ROIs" (plot + CSV + preview video); the export rail
   // section has the full options. Runs in the background — poll to completion, then refresh.
   async function quickRegenerate(): Promise<void> {
     if (regenBusy || n === 0) return;
+    if (!window.confirm(`Regenerate this run's derived exports (plot + CSV + preview video) to match the ${p.rois.rois.length} ROI${p.rois.rois.length === 1 ? "" : "s"} on screen? This can take a while on a long recording.`)) return;
     setRegenBusy(true); setErr(null);
     try {
       await api.putRois(p.name, p.rois.rois);
@@ -247,11 +250,11 @@ export function PlaybackPage(p: Props) {
     <StudioFrame layout={p.layout} topbar={p.topbar} dispatch={p.dispatch} dockFoot={transport}
       strip={<ToolStrip tool={p.layout.tool} onTool={(tool) => p.dispatch({ type: "setTool", tool })} onCollapseAll={() => p.dispatch({ type: !p.layout.rail && !p.layout.dock ? "restoreAll" : "collapseAll" })} collapsed={!p.layout.rail && !p.layout.dock} zoom={p.layout.zoom} onZoom={(z) => p.dispatch({ type: "setZoom", zoom: z })}
         extras={<>
-          <button aria-label="Media export (clip / GIF)" title="Media export: MP4/GIF of a chosen window with overlays" disabled={n === 0} onClick={() => setShowMedia(true)}>🎬</button>
-          <button aria-label="Save image" title="Save image: PNG snapshot of this frame with overlays" disabled={n === 0} onClick={saveImage}>📷</button>
-          <button aria-label={p.layout.roisHidden ? "Show ROIs" : "Hide ROIs"} aria-pressed={p.layout.roisHidden} className={p.layout.roisHidden ? "active" : ""} title={p.layout.roisHidden ? "Show ROI overlays" : "Hide ROI overlays (measurements keep running)"} onClick={() => p.dispatch({ type: "toggleRois" })}>🏷️</button>
-          <button aria-label="Visible-camera overlay" aria-pressed={p.layout.visibleMode === "overlay"} className={p.layout.visibleMode === "overlay" ? "active" : ""} title={hasVideo ? "Overlay the recorded visible camera on the thermal image" : "This recording has no visible video"} disabled={!hasVideo} onClick={toggleVisibleOverlay}>👁️</button>
-          <button aria-label="Regenerate derived exports" title="Regenerate derived exports (plot + CSV + preview) for the current ROIs" disabled={n === 0 || regenBusy} onClick={quickRegenerate}>{regenBusy ? <span className="spinner" /> : "♻️"}</button>
+          <button aria-label="Media export (clip / GIF)" data-tip="Media export — MP4/GIF of a chosen window with overlays" disabled={n === 0} onClick={() => setShowMedia(true)}>▷</button>
+          <button aria-label="Save image" data-tip="Save image — PNG snapshot of this frame with overlays" disabled={n === 0} onClick={saveImage}>⤓</button>
+          <button aria-label={p.layout.roisHidden ? "Show ROIs" : "Hide ROIs"} aria-pressed={p.layout.roisHidden} className={p.layout.roisHidden ? "active" : ""} data-tip={p.layout.roisHidden ? "Show ROI overlays" : "Hide ROI overlays (measurements keep running)"} onClick={() => p.dispatch({ type: "toggleRois" })}>⬚</button>
+          <button aria-label="Visible-camera overlay" aria-pressed={p.layout.visibleMode === "overlay"} className={p.layout.visibleMode === "overlay" ? "active" : ""} data-tip={hasVideo ? "Overlay the recorded visible camera (opens the opacity slider)" : "This recording has no visible video"} disabled={!hasVideo} onClick={toggleVisibleOverlay}>⊙</button>
+          <button aria-label="Regenerate derived exports" data-tip="Regenerate derived exports (plot + CSV + preview) — asks first" disabled={n === 0 || regenBusy} onClick={quickRegenerate}>{regenBusy ? <span className="spinner" /> : "↻"}</button>
         </>} />}
       center={
         <div className={`center-split ${p.layout.visibleMode === "side" && hasVideo ? "on" : ""}`}>

@@ -46,7 +46,7 @@ export function ToolStrip({ tool, onTool, onCollapseAll, leading, extras, disabl
           <button
             key={id}
             className={tool === id ? "active" : ""}
-            title={m.title}
+            data-tip={m.title}
             aria-label={m.title}
             aria-disabled={!enabled}
             aria-pressed={tool === id}
@@ -59,11 +59,11 @@ export function ToolStrip({ tool, onTool, onCollapseAll, leading, extras, disabl
       {extras && <><span className="divider" role="separator" />{extras}</>}
       <span className="spacer" />
       {onZoom && (
-        <button className={`zoom ${zoom === "fit" ? "active" : ""}`} aria-label={`Image zoom: ${zoomLabel(zoom)} (click to cycle fit, 1:1, 2×)`} title={`Zoom ${zoomLabel(zoom)} · click: ${zoomLabel(nextZoom(zoom))}`} onClick={() => onZoom(nextZoom(zoom))}>
+        <button className={`zoom ${zoom === "fit" ? "active" : ""}`} aria-label={`Image zoom: ${zoomLabel(zoom)} (click to cycle fit, 1:1, 2×)`} data-tip={`Zoom ${zoomLabel(zoom)} · click: ${zoomLabel(nextZoom(zoom))}`} onClick={() => onZoom(nextZoom(zoom))}>
           {zoom === "fit" ? "⤢" : zoomLabel(zoom)}
         </button>
       )}
-      <button className={collapsed ? "active" : ""} aria-pressed={collapsed} aria-label={collapsed ? "Restore panels" : "Hide panels (image only)"} title={collapsed ? "Restore panels" : "Hide panels (image only)"} onClick={onCollapseAll}>⛶</button>
+      <button className={collapsed ? "active" : ""} aria-pressed={collapsed} aria-label={collapsed ? "Restore panels" : "Hide panels (image only)"} data-tip={collapsed ? "Restore panels" : "Hide panels (image only)"} onClick={onCollapseAll}>⛶</button>
     </nav>
   );
 }

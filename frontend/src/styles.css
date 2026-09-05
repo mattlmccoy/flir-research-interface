@@ -57,12 +57,23 @@ input[type=number] { width: 84px; }
 input[type=range] { accent-color: var(--accent); }
 
 /* ---- Tool strip -------------------------------------------------------------- */
-.strip { background: var(--bg-deep); border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; padding: 8px 0; gap: 6px; overflow: hidden; }
-.strip button { width: 28px; height: 28px; border-radius: var(--radius); border: 1px solid var(--line-control); background: transparent; color: var(--fg); cursor: pointer; font-family: var(--font-mono); font-size: 12px; display: grid; place-items: center; }
+.strip { background: var(--bg-deep); border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; padding: 8px 0; gap: 6px; overflow: visible; z-index: 5; }
+.strip button { position: relative; width: 28px; height: 28px; border-radius: var(--radius); border: 1px solid var(--line-control); background: transparent; color: var(--fg); cursor: pointer; font-family: var(--font-mono); font-size: 14px; line-height: 1; display: grid; place-items: center; }
 .strip button.active { border-color: var(--accent); color: var(--accent); background: var(--warn-bg); }
-.strip button[aria-disabled="true"] { opacity: 0.35; cursor: default; }
+.strip button[aria-disabled="true"], .strip button:disabled { opacity: 0.35; cursor: default; }
 .strip .spacer { flex: 1; }
 .strip .divider { width: 18px; height: 1px; background: var(--line-control); margin: 3px 0; flex: none; }
+/* Hover tooltip: a flat description to the right of each strip symbol. */
+.strip button[data-tip]:hover::after {
+  content: attr(data-tip); position: absolute; left: calc(100% + 9px); top: 50%; transform: translateY(-50%);
+  background: var(--bg-deep); color: var(--fg); border: 1px solid var(--line-control); border-radius: var(--radius);
+  padding: 5px 9px; width: max-content; max-width: 230px; white-space: normal; text-align: left; line-height: 1.3;
+  font-family: var(--font-mono); font-size: 11px; z-index: 60; pointer-events: none; box-shadow: 0 3px 12px var(--scrim);
+}
+.strip button[data-tip]:hover::before {
+  content: ""; position: absolute; left: calc(100% + 3px); top: 50%; transform: translateY(-50%) rotate(45deg);
+  width: 8px; height: 8px; background: var(--bg-deep); border-left: 1px solid var(--line-control); border-bottom: 1px solid var(--line-control); z-index: 61; pointer-events: none;
+}
 
 /* ---- Center / image ---------------------------------------------------------- */
 .view { position: relative; display: flex; flex: 1; align-items: center; justify-content: center; background: var(--image-bg); min-width: 0; min-height: 0; overflow: hidden; }
