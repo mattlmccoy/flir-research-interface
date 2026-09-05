@@ -55,7 +55,7 @@ export interface ThermalVideoExport { path: string; frames: number; fps: number;
 /** Progress of an on-demand derived regenerate (background job). */
 export interface DerivedJob { state: "running" | "done" | "error" | "idle"; step?: string; done?: number; total?: number; exports?: { name: string; bytes: number }[] | null; error?: string | null; }
 /** Options for a media-export render (a window of frames to MP4/GIF with overlays). */
-export interface MediaOptions { start: number; stop: number; step?: number; scale?: number; speed?: number; fps?: number | null; fmt: "mp4" | "gif"; with_rois?: boolean; frame_stats?: boolean; timestamp?: boolean; colorbar?: boolean; title?: string | null; plot_roi?: number | null; plot_rois?: number[]; plot_stat?: string; plot_stats?: string[]; rois?: unknown[] | null; }
+export interface MediaOptions { start: number; stop: number; step?: number; scale?: number; speed?: number; fps?: number | null; fmt: "mp4" | "gif"; with_rois?: boolean; frame_stats?: boolean; timestamp?: boolean; colorbar?: boolean; title?: string | null; plot_roi?: number | null; plot_rois?: number[]; plot_stat?: string; plot_stats?: string[]; plot_series?: string[]; overlay_rois?: number[]; rois?: unknown[] | null; }
 /** Progress of a media-export render (background job). */
 export interface MediaJob { state: "running" | "done" | "error" | "idle"; step?: string; done?: number; total?: number; file?: { name: string; bytes: number; note?: string | null } | null; error?: string | null; }
 /** A user-selectable external drive for offload. */
@@ -136,8 +136,8 @@ export const api = {
   clipUrl: (name: string, file: string) =>
     u(`/api/experiments/${encodeURIComponent(name)}/exports/clips/${encodeURIComponent(file)}`),
   /** A composed preview frame (PNG) for the editor: same overlays as the export, at `index`. */
-  mediaPreviewUrl: (name: string, index: number, o: { with_rois?: boolean; frame_stats?: boolean; timestamp?: boolean; colorbar?: boolean; title?: string | null; plot_rois?: number[]; plot_stats?: string[]; start?: number; stop?: number }) =>
-    u(`/api/experiments/${encodeURIComponent(name)}/export/media/preview?index=${index}&scale=1&with_rois=${o.with_rois !== false}&frame_stats=${!!o.frame_stats}&timestamp=${o.timestamp !== false}&colorbar=${o.colorbar !== false}${o.title ? `&title=${encodeURIComponent(o.title)}` : ""}${(o.plot_rois?.length ? `${o.plot_rois.map((r) => `&plot_rois=${r}`).join("")}${(o.plot_stats?.length ? o.plot_stats : ["mean"]).map((s) => `&plot_stats=${s}`).join("")}&start=${o.start ?? 0}&stop=${o.stop ?? 0}` : "")}`),
+  mediaPreviewUrl: (name: string, index: number, o: { with_rois?: boolean; frame_stats?: boolean; timestamp?: boolean; colorbar?: boolean; title?: string | null; plot_series?: string[]; overlay_rois?: number[]; start?: number; stop?: number }) =>
+    u(`/api/experiments/${encodeURIComponent(name)}/export/media/preview?index=${index}&scale=1&with_rois=${o.with_rois !== false}&frame_stats=${!!o.frame_stats}&timestamp=${o.timestamp !== false}&colorbar=${o.colorbar !== false}${o.title ? `&title=${encodeURIComponent(o.title)}` : ""}${(o.plot_series ?? []).map((s) => `&plot_series=${encodeURIComponent(s)}`).join("")}${(o.overlay_rois ?? []).map((r) => `&overlay_rois=${r}`).join("")}${o.plot_series?.length ? `&start=${o.start ?? 0}&stop=${o.stop ?? 0}` : ""}`),
   exportFileUrl: (name: string, file: string) => u(`/api/experiments/${encodeURIComponent(name)}/exports/${encodeURIComponent(file)}`),
   thermalVideoUrl: (name: string) => u(`/api/experiments/${encodeURIComponent(name)}/thermal_preview.mp4`),
   frameBuffer: async (name: string, index: number): Promise<ArrayBuffer> => {

@@ -154,10 +154,22 @@ class MediaRequest(BaseModel):
     colorbar: bool = True
     title: str | None = None
     plot_roi: int | None = None  # legacy single-ROI live plot
-    plot_rois: list[int] = Field(default_factory=list)  # ROIs to draw on the live-plot strip
+    plot_rois: list[int] = Field(default_factory=list)  # legacy: same stats for every ROI
     plot_stat: str = "mean"  # legacy single stat
-    plot_stats: list[str] = Field(default_factory=list)  # mean/min/max lines per area ROI
+    plot_stats: list[str] = Field(default_factory=list)  # legacy: stats for every plot_roi
+    plot_series: list[str] = Field(default_factory=list)  # per-ROI lines as "<roi_id>:<stat>"
+    overlay_rois: list[int] = Field(default_factory=list)  # ROI boxes to draw ([]=all)
     rois: list[dict[str, Any]] | None = None  # when given, persist first (on-screen ROIs)
+
+
+def _parse_series(items: list[str]) -> tuple[tuple[int, str], ...]:
+    """Parse "<roi_id>:<stat>" strings into (id, stat) pairs, skipping malformed ones."""
+    out: list[tuple[int, str]] = []
+    for it in items:
+        rid, _, stat = it.partition(":")
+        if stat and rid.strip().lstrip("-").isdigit():
+            out.append((int(rid), stat))
+    return tuple(out)
 
 
 class RegisterDriveRequest(BaseModel):
@@ -1248,7 +1260,8 @@ def create_app(
             fps=req.fps, fmt=req.fmt, with_rois=req.with_rois, frame_stats=req.frame_stats,
             timestamp=req.timestamp, colorbar=req.colorbar, title=req.title,
             plot_roi=req.plot_roi, plot_rois=tuple(req.plot_rois), plot_stat=req.plot_stat,
-            plot_stats=tuple(req.plot_stats),
+            plot_stats=tuple(req.plot_stats), plot_series=_parse_series(req.plot_series),
+            overlay_rois=tuple(req.overlay_rois),
         )
 
         def _work() -> dict[str, Any]:
@@ -1287,6 +1300,8 @@ def create_app(
         plot_roi: int | None = None,
         plot_rois: Annotated[list[int] | None, Query()] = None,
         plot_stats: Annotated[list[str] | None, Query()] = None,
+        plot_series: Annotated[list[str] | None, Query()] = None,
+        overlay_rois: Annotated[list[int] | None, Query()] = None,
         plot_stat: str = "mean", start: int = 0, stop: int = 0,
     ) -> Response:
         """One composed frame (same overlays as the export) as PNG for the editor preview."""
@@ -1296,6 +1311,8 @@ def create_app(
                             timestamp=timestamp, colorbar=colorbar, title=title,
                             plot_roi=plot_roi, plot_rois=tuple(plot_rois or ()),
                             plot_stat=plot_stat, plot_stats=tuple(plot_stats or ()),
+                            plot_series=_parse_series(plot_series or []),
+                            overlay_rois=tuple(overlay_rois or ()),
                             start=start, stop=stop)
         try:
             png = await run_in_threadpool(compose_preview, _open(name), opts, index)

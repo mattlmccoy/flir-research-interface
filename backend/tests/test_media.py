@@ -179,6 +179,29 @@ def test_plot_stats_min_max_mean_each_make_a_line(tmp_path: Path) -> None:
     assert "mean" in joined and "min" in joined and "max" in joined
 
 
+def test_plot_series_gives_each_roi_its_own_stats(tmp_path: Path) -> None:
+    """plot_series lets each ROI choose its own stats: ROI 1 mean+max, ROI 2 min only."""
+    from flir_research_interface.analysis.media import MediaOptions, _plot_traces
+    r2 = _two_rect_reader(tmp_path)
+    opts = MediaOptions(start=0, stop=20,
+                        plot_series=((1, "mean"), (1, "max"), (2, "min")))
+    traces = _plot_traces(r2, opts)
+    labels = [t["label"] for t in traces]
+    assert labels == ["hot · mean", "hot · max", "cool · min"]
+
+
+def test_overlay_rois_filters_which_boxes_draw(tmp_path: Path) -> None:
+    """overlay_rois limits the ROI boxes drawn on the frame; colours stay index-stable."""
+    from flir_research_interface.analysis.media import MediaOptions, _overlay_rois
+    r2 = _two_rect_reader(tmp_path)
+    all_boxes = _overlay_rois(r2, MediaOptions())
+    assert {b["id"] for b in all_boxes} == {1, 2}  # default: all
+    one = _overlay_rois(r2, MediaOptions(overlay_rois=(2,)))
+    assert [b["id"] for b in one] == [2]
+    # ROI 2's colour is the same whether or not ROI 1 is also drawn (explicit colour, not by index)
+    assert one[0]["color"] == next(b["color"] for b in all_boxes if b["id"] == 2)
+
+
 def test_plot_roi_singular_still_supported(tmp_path: Path) -> None:
     """The legacy single ``plot_roi``/``plot_stat`` still yields one trace (backward compatible)."""
     import json

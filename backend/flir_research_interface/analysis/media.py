@@ -64,9 +64,11 @@ class MediaOptions:
     colorbar: bool = True
     title: str | None = None
     plot_roi: int | None = None  # legacy single-ROI live plot (kept for compatibility)
-    plot_rois: tuple[int, ...] = ()  # ROIs to draw on the live-plot strip below the frame
+    plot_rois: tuple[int, ...] = ()  # legacy: ROIs drawn on the strip (× plot_stats, all the same)
     plot_stat: str = "mean"  # legacy single stat (kept for compatibility)
-    plot_stats: tuple[str, ...] = ()  # which stats to draw per area ROI (mean/min/max)
+    plot_stats: tuple[str, ...] = ()  # legacy: stats applied to every plot_roi
+    plot_series: tuple[tuple[int, str], ...] = ()  # per-ROI lines: (roi_id, stat) pairs
+    overlay_rois: tuple[int, ...] = ()  # which ROI boxes to draw on the frame ((): all)
 
 
 def _slug(text: str) -> str:
@@ -88,6 +90,39 @@ def _plot_stats(opts: MediaOptions) -> list[str]:
     """The stats to draw per area ROI, from ``plot_stats`` or the legacy single ``plot_stat``."""
     stats = [s for s in (opts.plot_stats or (opts.plot_stat,)) if s in ("mean", "min", "max")]
     return list(dict.fromkeys(stats)) or ["mean"]
+
+
+def _plot_pairs(opts: MediaOptions) -> list[tuple[int, str]]:
+    """The (roi_id, stat) lines to draw. ``plot_series`` is per-ROI; the legacy fields apply the
+    same stats to every selected ROI."""
+    if opts.plot_series:
+        return [(int(r), s) for r, s in opts.plot_series]
+    ids = _plot_ids(opts)
+    if not ids:
+        return []
+    stats = _plot_stats(opts)
+    return [(rid, s) for rid in ids for s in stats]
+
+
+def _overlay_rois(reader: ExperimentReader, opts: MediaOptions) -> list[dict[str, Any]]:
+    """The ROI boxes to draw on the frame. ``overlay_rois`` limits them; empty means all.
+
+    Each ROI gets its overlay palette colour resolved from its *original* index, so filtering the
+    list never shifts a ROI's colour (and the box matches its plot line).
+    """
+    if not opts.with_rois:
+        return []
+    from flir_research_interface.analysis.annotate import DEFAULT_COLORS
+
+    keep = set(opts.overlay_rois) if opts.overlay_rois else None
+    out: list[dict[str, Any]] = []
+    for i, r in enumerate(reader.metadata.get("rois") or []):
+        if keep is not None and r.get("id") not in keep:
+            continue
+        rr = dict(r)
+        rr["color"] = r.get("color") or DEFAULT_COLORS[i % len(DEFAULT_COLORS)]
+        out.append(rr)
+    return out
 
 
 def _shade(color: tuple[int, int, int], stat: str) -> tuple[int, int, int]:
@@ -151,38 +186,41 @@ def _plot_traces(reader: ExperimentReader, opts: MediaOptions) -> list[dict[str,
     to computing the series from the store. Colours match the on-frame ROI overlay, which assigns
     ``DEFAULT_COLORS`` by list order when a ROI has no explicit colour.
     """
-    ids = _plot_ids(opts)
-    if not ids:
+    pairs = _plot_pairs(opts)
+    if not pairs:
         return []
     from flir_research_interface.analysis.annotate import DEFAULT_COLORS, _rgb
 
     stored = reader.metadata.get("rois") or []
-    stats = _plot_stats(opts)
+    idx_of = {r["id"]: i for i, r in enumerate(stored)}
+    roi_of = {r["id"]: r for r in stored}
     lo, hi = opts.start, (opts.stop or reader.n_frames)
     csv_series = _read_series_csv(reader)
+    series_cache: dict[int, tuple[list[float], dict[str, list[float]]] | None] = {}
     out: list[dict[str, Any]] = []
-    for i, roi in enumerate(stored):
-        rid = roi.get("id")
-        if rid not in ids:
+    for rid, stat in pairs:
+        roi = roi_of.get(rid)
+        if roi is None:
             continue
-        base = _rgb(roi.get("color") or DEFAULT_COLORS[i % len(DEFAULT_COLORS)])
-        name = str(roi.get("name") or f"ROI {rid}")
         is_spot = roi.get("kind") == "spot"
-        want = ["value"] if is_spot else stats
-        series = _roi_values(reader, roi, csv_series)
+        key = "value" if is_spot else stat
+        if rid not in series_cache:  # read each ROI's series once, even for several stats
+            series_cache[rid] = _roi_values(reader, roi, csv_series)
+        series = series_cache[rid]
         if series is None:
             continue
         t_all, by_stat = series
+        arr = by_stat.get(key) or by_stat.get("mean") or by_stat.get("value")
+        if not arr:
+            continue
         t_win = [t for k, t in enumerate(t_all) if lo <= k < hi]
-        for stat in want:
-            arr = by_stat.get(stat) or by_stat.get("mean") or by_stat.get("value")
-            if not arr:
-                continue
-            v_win = [arr[k] for k in range(len(arr)) if lo <= k < hi]
-            t_ds, v_ds = _downsample(t_win, v_win)
-            label = name if is_spot else f"{name} · {stat}"
-            color = base if is_spot else _shade(base, stat)
-            out.append({"v": v_ds, "t": t_ds, "label": label, "color": color})
+        v_win = [arr[k] for k in range(len(arr)) if lo <= k < hi]
+        t_ds, v_ds = _downsample(t_win, v_win)
+        base = _rgb(roi.get("color") or DEFAULT_COLORS[idx_of[rid] % len(DEFAULT_COLORS)])
+        name = str(roi.get("name") or f"ROI {rid}")
+        label = name if is_spot else f"{name} · {key}"
+        color = base if is_spot else _shade(base, key)
+        out.append({"v": v_ds, "t": t_ds, "label": label, "color": color})
     return out
 
 
@@ -322,7 +360,7 @@ def render_clip(
     vmin, vmax, _units = _cached_range(reader)
     _, h0, w0 = reader.counts_block(0, 1).shape
     scale = max(1, opts.scale)
-    rois = (reader.metadata.get("rois") or []) if opts.with_rois else []
+    rois = _overlay_rois(reader, opts)
     traces = _plot_traces(reader, opts)
 
     # size the first frame to fix the encoder geometry
@@ -473,7 +511,7 @@ def compose_preview(reader: ExperimentReader, opts: MediaOptions, index: int) ->
     if not (0 <= index < reader.n_frames):
         raise ValueError(f"index out of range 0..{reader.n_frames - 1}")
     vmin, vmax, _ = _cached_range(reader)
-    rois = (reader.metadata.get("rois") or []) if opts.with_rois else []
+    rois = _overlay_rois(reader, opts)
     traces = _plot_traces(reader, opts)  # covers the window; grows to the current time as you scrub
     rgb = _compose(reader, index, vmin, vmax, max(1, opts.scale), rois, opts, traces,
                    float(reader.t_s(index)))
