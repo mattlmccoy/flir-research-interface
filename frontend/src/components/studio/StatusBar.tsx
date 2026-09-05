@@ -34,6 +34,13 @@ export function StatusBar({ status, recording, displayFps = 0, stale = false, le
   }, []);
   const drive = storage?.drive ?? null;
 
+  const [version, setVersion] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    api.health().then((h) => { if (alive) setVersion(h.app_version ?? h.version ?? null); }).catch(() => undefined);
+    return () => { alive = false; };
+  }, []);
+
   return (
     <footer className="statusbar">
       {left}
@@ -64,6 +71,7 @@ export function StatusBar({ status, recording, displayFps = 0, stale = false, le
             ? <span title={`Offload drive at ${drive.mount}`}>drive <b>{gb(drive.free_bytes)}</b> GB</span>
             : <span className="warnv" title={`Registered drive ${drive.mount} is not connected`}>drive ⚠ reconnect</span>
         )}
+        {version && <span className="muted" title="FLIR Research Interface version (operator build)">v{version}</span>}
       </span>
     </footer>
   );
