@@ -242,6 +242,50 @@ export function linePixels(x0: number, y0: number, x1: number, y1: number): [num
   return out;
 }
 
+/** Uniform Catmull-Rom samples (float x,y) through the control points — the curve a "spline" ROI
+ *  follows (passing through every control point). Step count is the integer Manhattan span of each
+ *  control segment, so the sampling — and thus the rasterised pixel set — is bit-for-bit identical
+ *  here and in the Python backend (analysis/series.py `_spline_samples`). Keep the two in lockstep. */
+export function splineSamples(points: [number, number][]): [number, number][] {
+  const n = points.length;
+  if (n < 2) return points.slice();
+  const P = (i: number): [number, number] => points[Math.max(0, Math.min(n - 1, i))];
+  const out: [number, number][] = [];
+  for (let i = 0; i < n - 1; i++) {
+    const [x0, y0] = P(i - 1), [x1, y1] = P(i), [x2, y2] = P(i + 1), [x3, y3] = P(i + 2);
+    const steps = Math.max(1, Math.abs(x2 - x1) + Math.abs(y2 - y1));
+    for (let s = 0; s < steps; s++) {
+      const t = s / steps, t2 = t * t, t3 = t2 * t;
+      out.push([
+        0.5 * (2 * x1 + (-x0 + x2) * t + (2 * x0 - 5 * x1 + 4 * x2 - x3) * t2 + (-x0 + 3 * x1 - 3 * x2 + x3) * t3),
+        0.5 * (2 * y1 + (-y0 + y2) * t + (2 * y0 - 5 * y1 + 4 * y2 - y3) * t2 + (-y0 + 3 * y1 - 3 * y2 + y3) * t3),
+      ]);
+    }
+  }
+  out.push(points[n - 1]);  // land exactly on the final control point
+  return out;
+}
+
+/** Integer pixel indices along the spline through `points`, in path order, deduped, clipped to w×h.
+ *  Consecutive rounded samples are Bresenham-joined so the path is 8-connected with no gaps. */
+export function splinePixels(points: [number, number][], w: number, h: number): number[] {
+  const out: number[] = [];
+  const seen = new Set<number>();
+  const push = (x: number, y: number): void => {
+    if (x < 0 || y < 0 || x >= w || y >= h) return;
+    const k = y * w + x;
+    if (!seen.has(k)) { seen.add(k); out.push(k); }
+  };
+  let prev: [number, number] | null = null;
+  for (const [fx, fy] of splineSamples(points)) {
+    const x = Math.floor(fx + 0.5), y = Math.floor(fy + 0.5);  // round-half-up == Python floor(x+0.5)
+    if (prev === null) push(x, y);
+    else { const seg = linePixels(prev[0], prev[1], x, y); for (let j = 1; j < seg.length; j++) push(seg[j][0], seg[j][1]); }
+    prev = [x, y];
+  }
+  return out;
+}
+
 /** Even-odd point-in-polygon test on pixel centres; boundary pixels (Bresenham edges) are included. */
 export function polygonPixels(points: [number, number][], w: number, h: number): number[] {
   const seen = new Set<number>();
@@ -315,14 +359,8 @@ function computeRoiPixels(roi: Roi, w: number, h: number): number[] {
       }
       return out;
     }
-    case "polyline": {
-      const out: number[] = [];
-      for (let i = 1; i < roi.points.length; i++) {
-        const seg = linePixels(roi.points[i - 1][0], roi.points[i - 1][1], roi.points[i][0], roi.points[i][1]);
-        for (let j = i === 1 ? 0 : 1; j < seg.length; j++) { const [x, y] = seg[j]; if (inside(x, y)) out.push(y * w + x); }
-      }
-      return out;
-    }
+    case "polyline":
+      return splinePixels(roi.points, w, h);  // a "spline" ROI: pixels along the Catmull-Rom curve
     case "line":
       return linePixels(roi.x0, roi.y0, roi.x1, roi.y1).filter(([x, y]) => inside(x, y)).map(([x, y]) => y * w + x);
     case "polygon":

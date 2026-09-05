@@ -164,19 +164,77 @@ def _line_pixels(x0: int, y0: int, x1: int, y1: int) -> list[tuple[int, int]]:
     return out
 
 
+def _spline_samples(points: list[tuple[int, int]]) -> list[tuple[float, float]]:
+    """Uniform Catmull-Rom samples through the control points — the curve a "spline" ROI follows.
+
+    Mirrors the frontend ``lib/roi.ts`` ``splineSamples`` bit-for-bit: same integer Manhattan step
+    count and the same float64 arithmetic, so the rasterised pixels match the live UI exactly. Any
+    change here must be mirrored there.
+    """
+    n = len(points)
+    if n < 2:
+        return [(float(x), float(y)) for x, y in points]
+
+    def p(i: int) -> tuple[int, int]:
+        return points[max(0, min(n - 1, i))]
+
+    out: list[tuple[float, float]] = []
+    for i in range(n - 1):
+        x0, y0 = p(i - 1)
+        x1, y1 = p(i)
+        x2, y2 = p(i + 1)
+        x3, y3 = p(i + 2)
+        steps = max(1, abs(x2 - x1) + abs(y2 - y1))
+        for s in range(steps):
+            t = s / steps
+            t2 = t * t
+            t3 = t2 * t
+            out.append((_cr(x0, x1, x2, x3, t, t2, t3), _cr(y0, y1, y2, y3, t, t2, t3)))
+    out.append((float(points[-1][0]), float(points[-1][1])))
+    return out
+
+
+def _cr(a0: int, a1: int, a2: int, a3: int, t: float, t2: float, t3: float) -> float:
+    """One axis of a uniform Catmull-Rom point (same operation order as frontend splineSamples)."""
+    return 0.5 * (2 * a1 + (-a0 + a2) * t + (2 * a0 - 5 * a1 + 4 * a2 - a3) * t2
+                  + (-a0 + 3 * a1 - 3 * a2 + a3) * t3)
+
+
+def _spline_pixels(points: list[tuple[int, int]], w: int, h: int) -> list[tuple[int, int]]:
+    """Integer pixels along the spline, deduped in path order, clipped (mirrors splinePixels)."""
+    out: list[tuple[int, int]] = []
+    seen: set[int] = set()
+
+    def push(x: int, y: int) -> None:
+        if x < 0 or y < 0 or x >= w or y >= h:
+            return
+        k = y * w + x
+        if k not in seen:
+            seen.add(k)
+            out.append((x, y))
+
+    prev: tuple[int, int] | None = None
+    for fx, fy in _spline_samples(points):
+        x = math.floor(fx + 0.5)  # round-half-up == JS Math.floor(x + 0.5)
+        y = math.floor(fy + 0.5)
+        if prev is None:
+            push(x, y)
+        else:
+            seg = _line_pixels(prev[0], prev[1], x, y)
+            for j in range(1, len(seg)):
+                push(seg[j][0], seg[j][1])
+        prev = (x, y)
+    return out
+
+
 def roi_index(roi: dict[str, Any], w: int, h: int) -> tuple[np.ndarray, np.ndarray]:
     """(ys, xs) of the pixels a non-rect ROI covers inside a w×h image (no duplicates)."""
     kind = roi["kind"]
     pts: list[tuple[int, int]]
     if kind == "spot":
         pts = [(int(roi["x"]), int(roi["y"]))]
-    elif kind == "polyline":
-        pts = roi["points"]
-        seq: list[tuple[int, int]] = []
-        for (x0, y0), (x1, y1) in zip(pts, pts[1:], strict=False):
-            seg = _line_pixels(x0, y0, x1, y1)
-            seq.extend(seg[1:] if seq else seg)  # joints once
-        keep = [(x, y) for x, y in seq if 0 <= x < w and 0 <= y < h]
+    elif kind == "polyline":  # a "spline" ROI: pixels along the Catmull-Rom curve
+        keep = _spline_pixels([(int(x), int(y)) for x, y in roi["points"]], w, h)
         ys_l = np.array([y for _, y in keep], dtype=np.intp)
         xs_l = np.array([x for x, _ in keep], dtype=np.intp)
         return ys_l, xs_l

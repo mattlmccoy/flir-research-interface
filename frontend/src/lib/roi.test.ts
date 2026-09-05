@@ -9,7 +9,7 @@ import {
   saveRois,
   visibleRois,
   type Roi,
-  type RoiState, roiPixels, moveRoi, isArea } from "./roi.ts";
+  type RoiState, roiPixels, moveRoi, isArea, linePixels } from "./roi.ts";
 
 const EMPTY: RoiState = { rois: [], selected: null, selectedIds: [], nextId: 1 };
 
@@ -302,13 +302,37 @@ test("segmentation: pixels outside the valid range are excluded from stats and c
   assert.equal(all.excluded, 6);
 });
 
-test("polyline ROI: pixels along every segment in order, no duplicated joints; movable; labelled B", () => {
+test("polyline (spline) ROI: interpolates through control points; movable; labelled B", () => {
   const pl = { id: 1, kind: "polyline" as const, points: [[0, 0], [3, 0], [3, 2]] as [number, number][] };
-  const px = roiPixels(pl, 5, 5);
-  assert.deepEqual(px, [0, 1, 2, 3, 8, 13]);  // (0..3,0) then (3,1),(3,2)
+  const px = new Set(roiPixels(pl, 8, 8));
+  for (const [x, y] of pl.points) assert.ok(px.has(y * 8 + x), `spline passes through ${x},${y}`);
   assert.deepEqual((moveRoi(pl, 1, 1) as typeof pl).points, [[1, 1], [4, 1], [4, 3]]);
   assert.equal(roiLabel(pl), "B1");
   assert.ok(isArea(pl));
+});
+
+test("spline through collinear control points is exactly the straight line", () => {
+  const pl = { id: 1, kind: "polyline" as const, points: [[0, 0], [3, 0], [6, 0]] as [number, number][] };
+  assert.deepEqual(roiPixels(pl, 8, 8), [0, 1, 2, 3, 4, 5, 6]);
+});
+
+test("spline rounds corners: it visits pixels off the straight two-segment path", () => {
+  // A wide right angle: the Catmull-Rom curve rounds the corner by >1px, so it leaves the two
+  // axis-aligned segments (offset from the edges so the overshoot stays inside the image).
+  const pl = { id: 1, kind: "polyline" as const, points: [[5, 5], [30, 5], [30, 30]] as [number, number][] };
+  const straight = new Set([...linePixels(5, 5, 30, 5), ...linePixels(30, 5, 30, 30)].map(([x, y]) => y * 48 + x));
+  const spline = roiPixels(pl, 48, 48);
+  assert.ok(spline.some((k) => !straight.has(k)), "a real spline leaves the straight corner");
+});
+
+test("spline pixels form one 8-connected path (no gaps, no duplicates)", () => {
+  const pl = { id: 1, kind: "polyline" as const, points: [[1, 1], [8, 2], [4, 9]] as [number, number][] };
+  const px = roiPixels(pl, 16, 16);
+  assert.equal(px.length, new Set(px).size, "no duplicate pixels");
+  const xy = px.map((k) => [k % 16, Math.floor(k / 16)]);
+  for (let i = 1; i < xy.length; i++) {
+    assert.ok(Math.abs(xy[i][0] - xy[i - 1][0]) <= 1 && Math.abs(xy[i][1] - xy[i - 1][1]) <= 1, `8-connected at ${i}`);
+  }
 });
 
 test("multi-select: toggleSelect adds/removes; select resets to one; selectedIds tracks selected", () => {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as RKeyboardEvent, MouseEvent as RMouseEvent, PointerEvent as RPointerEvent } from "react";
-import { roiLabel, type Roi, type RoiInput, type RoiStats } from "../lib/roi.ts";
+import { roiLabel, splineSamples, type Roi, type RoiInput, type RoiStats } from "../lib/roi.ts";
 import { roiColor, roiLeaderAnchor, type Box, vertexHandles } from "../lib/overlay.ts";
 import { layoutLabels, type LabelBox } from "../lib/labels.ts";
 import { type ChipRect, hitChip, loadOffsets, type Offsets, saveOffsets } from "../lib/labelDrag.ts";
@@ -115,8 +115,8 @@ function drawShape(ctx: CanvasRenderingContext2D, r: RoiInput, sx: number, sy: n
       return [x - r.r * sx, y - r.r * sy - 3];
     }
     case "polyline": {
-      ctx.beginPath();
-      r.points.forEach(([x, y], i) => { const px = (x + 0.5) * sx, py = (y + 0.5) * sy; if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py); });
+      ctx.beginPath();  // the smooth Catmull-Rom curve through the control points (a real spline)
+      splineSamples(r.points).forEach(([x, y], i) => { const px = (x + 0.5) * sx, py = (y + 0.5) * sy; if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py); });
       ctx.stroke();
       for (const [x, y] of r.points) { ctx.beginPath(); ctx.arc((x + 0.5) * sx, (y + 0.5) * sy, 3, 0, Math.PI * 2); ctx.stroke(); }
       return [Math.min(...r.points.map((p) => (p[0] + 0.5) * sx)), Math.min(...r.points.map((p) => (p[1] + 0.5) * sy)) - 3];

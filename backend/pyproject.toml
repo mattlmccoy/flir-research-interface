@@ -1,6 +1,6 @@
 [project]
 name = "flir-research-interface"
-version = "0.4.8"
+version = "0.4.9"
 description = "FLIR A50/A70 radiometric acquisition, recording, and analysis backend"
 requires-python = ">=3.10,<3.13"
 license = { text = "MIT" }

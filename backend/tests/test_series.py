@@ -205,21 +205,25 @@ def test_series_segmentation_excludes_pixels_outside_the_valid_range(tmp_path: P
     assert "n" in seg and seg["n"][0] < 12
 
 
-def test_polyline_roi_is_parsed_and_indexed(tmp_path: Path) -> None:
+def test_polyline_spline_passes_through_control_points_and_is_indexed(tmp_path: Path) -> None:
+    """A polyline ROI is a spline (Catmull-Rom curve) through its control points."""
     from flir_research_interface.analysis.series import parse_rois, roi_index
 
     rois = parse_rois('[{"id":1,"kind":"polyline","points":[[0,0],[3,0],[3,2]]}]')
-    ys, xs = roi_index(rois[0], 5, 5)
-    assert list(zip(ys.tolist(), xs.tolist(), strict=True)) == [
-        (0, 0),
-        (0, 1),
-        (0, 2),
-        (0, 3),
-        (1, 3),
-        (2, 3),
-    ]
+    ys, xs = roi_index(rois[0], 8, 8)
+    px = set(zip(ys.tolist(), xs.tolist(), strict=True))
+    for x, y in [(0, 0), (3, 0), (3, 2)]:
+        assert (y, x) in px, f"spline passes through control point {x},{y}"
     with pytest.raises(ValueError):
         parse_rois('[{"id":1,"kind":"polyline","points":[[0,0]]}]')
+
+
+def test_polyline_spline_collinear_points_are_the_straight_line(tmp_path: Path) -> None:
+    from flir_research_interface.analysis.series import parse_rois, roi_index
+
+    rois = parse_rois('[{"id":1,"kind":"polyline","points":[[0,0],[3,0],[6,0]]}]')
+    ys, xs = roi_index(rois[0], 8, 8)
+    assert list(zip(ys.tolist(), xs.tolist(), strict=True)) == [(0, i) for i in range(7)]
 
 
 def test_roi_series_stride_subsamples_frames_for_the_plot(tmp_path: Path) -> None:

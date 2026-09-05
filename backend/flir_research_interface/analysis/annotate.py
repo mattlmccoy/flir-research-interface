@@ -232,9 +232,13 @@ def _draw_one(
         a = ((r["x0"] + 0.5) * s, (r["y0"] + 0.5) * s)
         b = ((r["x1"] + 0.5) * s, (r["y1"] + 0.5) * s)
         d.line([a, b], fill=col, width=width)
-    else:  # polygon / polyline
+    elif k == "polyline":  # a spline: stroke the smooth Catmull-Rom curve through the vertices
+        from flir_research_interface.analysis.series import _spline_samples
+        curve = _spline_samples([(int(x), int(y)) for x, y in r["points"]])
+        d.line([((x + 0.5) * s, (y + 0.5) * s) for x, y in curve], fill=col, width=width)
+    else:  # polygon: closed straight edges
         pts = [((x + 0.5) * s, (y + 0.5) * s) for x, y in r["points"]]
-        d.line(pts + ([pts[0]] if k == "polygon" else []), fill=col, width=width)
+        d.line(pts + [pts[0]], fill=col, width=width)
 
 
 def _celsius(reader: ExperimentReader, index: int) -> npt.NDArray[np.float32]:
