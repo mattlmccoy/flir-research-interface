@@ -33,3 +33,27 @@ def load_settings(root: Path) -> RfLinkSettings:
 def save_settings(root: Path, settings: RfLinkSettings) -> None:
     Path(root).mkdir(parents=True, exist_ok=True)
     (Path(root) / CONFIG_NAME).write_text(json.dumps(asdict(settings), indent=2))
+
+
+@dataclass(frozen=True)
+class RfAction:
+    mark: bool
+    start: bool
+    stop: bool
+
+
+def plan_rf_action(*, state: str, is_recording: bool, link_owns: bool,
+                   settings: RfLinkSettings) -> RfAction:
+    """Decide what to do for an RF event. Pure; the caller performs the effects."""
+    if state == "on":
+        return RfAction(
+            mark=True,
+            start=settings.auto_start_on_rf_on and not is_recording,
+            stop=False,
+        )
+    # state == "off"
+    return RfAction(
+        mark=True,
+        start=False,
+        stop=settings.stop_on_rf_off and is_recording and link_owns,
+    )
