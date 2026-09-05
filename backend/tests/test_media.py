@@ -95,6 +95,42 @@ def test_media_export_api_job(tmp_path: Path) -> None:
         assert c.get(f"/api/experiments/{name}/exports/clips/{fname}").status_code == 200
 
 
+def test_range_compute_job_reports_progress_then_done(tmp_path: Path) -> None:
+    """The range-compute endpoint runs the whole-run scan as a job with progress, then reports done;
+    a second call is instant (persisted range.json) so the editor's progress bar shows only once."""
+    import time
+
+    from fastapi.testclient import TestClient
+
+    from flir_research_interface.api.app import create_app
+
+    with TestClient(create_app(default_backend="simulated", sim_fps=60.0,
+                               experiments_root=tmp_path, min_free_gb=0.0)) as c:
+        devs = c.get("/api/camera/devices").json()
+        c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        rec = c.post("/api/recording/start", json={"name": "clip"}).json()
+        name = Path(rec["experiment_dir"]).name
+        time.sleep(0.3)
+        c.post("/api/recording/stop")
+        c.post("/api/camera/disconnect")
+
+        started = c.post(f"/api/experiments/{name}/range/compute").json()
+        assert started["state"] in ("running", "done")
+        total = started["total"]
+        assert total > 0
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < 30:
+            job = c.get(f"/api/experiments/{name}/range/status").json()
+            if job["state"] in ("done", "error"):
+                break
+            time.sleep(0.05)
+        assert job["state"] == "done", job
+        assert job["done"] == job["total"] == total
+        # persisted → a fresh status (idempotent) still reports done with the full count
+        again = c.post(f"/api/experiments/{name}/range/compute").json()
+        assert again == {"state": "done", "done": total, "total": total, "error": None}
+
+
 @pytest.mark.skipif(not _HAVE_FFMPEG, reason="ffmpeg not installed")
 def test_media_preview_returns_png(tmp_path: Path) -> None:
     from flir_research_interface.analysis.media import MediaOptions, compose_preview
@@ -250,3 +286,24 @@ def test_plot_traces_prefer_precomputed_csv(tmp_path: Path) -> None:
     traces = _plot_traces(r2, MediaOptions(start=0, stop=20, plot_rois=(1,)))
     assert len(traces) == 1
     assert all(abs(v - 111.0) < 1e-6 for v in traces[0]["v"])  # came from the CSV
+
+
+def test_cached_range_persists_and_reloads_without_rescan(tmp_path: Path) -> None:
+    """_cached_range computes once (reporting progress), persists range.json, then reloads from disk
+    on a cold process (cleared in-memory cache) without scanning frames again."""
+    from flir_research_interface.analysis import media
+    from flir_research_interface.analysis.thermal_video import load_range
+
+    r = _make(tmp_path, n=20)
+    media._RANGE_CACHE.clear()
+    scan1: list[int] = []
+    v1 = media._cached_range(r, on_progress=lambda d, t: scan1.append(d))
+    assert scan1, "first computation scans frames and reports progress"
+    assert load_range(r) is not None, "range persisted to exports/range.json"
+
+    # Cold process: clear the in-memory cache; the disk cache must serve it with no rescan.
+    media._RANGE_CACHE.clear()
+    scan2: list[int] = []
+    v2 = media._cached_range(r, on_progress=lambda d, t: scan2.append(d))
+    assert v2 == v1
+    assert scan2 == [], "second call loads range.json — no frame scan"

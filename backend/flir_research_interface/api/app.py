@@ -274,6 +274,7 @@ def create_app(
     app.state.derived_jobs = {}  # experiment name -> progress record for on-demand regenerate
     app.state.move_jobs = {}  # experiment name -> progress record for an offload/restore move
     app.state.media_jobs = {}  # experiment name -> progress record for a media-export render
+    app.state.range_jobs = {}  # experiment name -> progress record for the display-range scan
     # one lock per experiment so the post-stop auto-render and an on-demand regenerate never write
     # that run's thermal-video files at the same time
     app.state.render_locks = KeyedLocks()
@@ -1294,6 +1295,61 @@ def create_app(
     @app.get("/api/experiments/{name}/export/media/status")
     def export_media_status(name: str) -> dict[str, Any]:
         return app.state.media_jobs.get(name) or {"state": "idle"}
+
+    def _range_ready(reader: ExperimentReader) -> bool:
+        from flir_research_interface.analysis.media import _RANGE_CACHE
+        from flir_research_interface.analysis.thermal_video import load_range
+
+        return str(reader.path) in _RANGE_CACHE or load_range(reader) is not None
+
+    @app.post("/api/experiments/{name}/range/compute")
+    async def compute_range_route(name: str) -> dict[str, Any]:
+        """Precompute the display temperature range — the whole-run frame scan that dominates a
+        preview's load time — as a background job with progress, so the editor can show a real
+        percentage. Idempotent: returns ``done`` at once when the range is already cached/persisted.
+        """
+        from flir_research_interface.analysis.media import _cached_range
+
+        reader = _open(name)
+        n = reader.n_frames
+        if _range_ready(reader):
+            return {"state": "done", "done": n, "total": n, "error": None}
+        existing = app.state.range_jobs.get(name)
+        if existing is not None and existing["state"] == "running":
+            return existing
+        job: dict[str, Any] = {"state": "running", "done": 0, "total": n, "error": None}
+        app.state.range_jobs[name] = job
+
+        def _work() -> None:
+            def _cb(done: int, total: int) -> None:
+                job["done"], job["total"] = done, total
+
+            _cached_range(_open(name), on_progress=_cb)
+
+        async def _job() -> None:
+            try:
+                async with app.state.render_locks.get(name):
+                    await run_in_threadpool(_work)
+                job["done"], job["state"] = job["total"], "done"
+            except Exception as exc:  # noqa: BLE001
+                job["state"], job["error"] = "error", str(exc)
+                logger.exception("range compute failed for %s", name)
+
+        task = asyncio.create_task(_job())
+        app.state.render_tasks.add(task)
+        task.add_done_callback(app.state.render_tasks.discard)
+        return job
+
+    @app.get("/api/experiments/{name}/range/status")
+    def range_status(name: str) -> dict[str, Any]:
+        reader = _open(name)
+        n = reader.n_frames
+        job = app.state.range_jobs.get(name)
+        if job is not None:
+            return job
+        if _range_ready(reader):
+            return {"state": "done", "done": n, "total": n, "error": None}
+        return {"state": "idle", "done": 0, "total": n, "error": None}
 
     @app.get("/api/experiments/{name}/export/media/preview")
     async def export_media_preview(

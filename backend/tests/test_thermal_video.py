@@ -125,3 +125,43 @@ def test_render_reports_monotonic_progress_up_to_the_frame_count(tmp_path: Path)
     assert all(total == 12 for _, total in seen), "total is the frame count"
     assert seen == sorted(seen), "progress is monotonic"
     assert seen[-1][0] == 12, "progress reaches every frame"
+
+
+def test_run_range_reports_progress_over_all_frames(tmp_path: Path) -> None:
+    """run_range scans every frame; it must report monotonic done→total for a progress bar."""
+    from flir_research_interface.analysis.thermal_video import run_range
+
+    d = _make_experiment(tmp_path, n=70)  # > BLOCK (64) so several blocks report progress
+    reader = ExperimentReader(d)
+    seen: list[tuple[int, int]] = []
+    run_range(reader, robust=True, on_progress=lambda done, total: seen.append((done, total)))
+    assert len(seen) >= 2, "multi-block scan reports progress more than once"
+    assert all(total == reader.n_frames for _, total in seen), "total is the frame count"
+    assert seen == sorted(seen), "progress is monotonic"
+    assert seen[-1] == (reader.n_frames, reader.n_frames), "progress reaches the last frame"
+
+
+def test_save_and_load_range_roundtrip_and_staleness(tmp_path: Path) -> None:
+    """save_range writes range.json; load_range returns it only when n_frames still matches."""
+    from flir_research_interface.analysis.thermal_video import (
+        load_range,
+        run_range,
+        save_range,
+    )
+
+    d = _make_experiment(tmp_path, n=20)
+    reader = ExperimentReader(d)
+    assert load_range(reader) is None, "no cache file yet → None"
+
+    lo, hi, units = run_range(reader, robust=True)
+    save_range(reader, lo, hi, units)
+    got = load_range(reader)
+    assert got is not None
+    assert got["vmin"] == lo and got["vmax"] == hi and got["units"] == units
+    assert got["n_frames"] == reader.n_frames
+
+    # Simulate the run growing (more frames appended): the cached range is stale, so it's ignored.
+    stale = json.loads((d / "exports" / "range.json").read_text())
+    stale["n_frames"] = reader.n_frames + 5
+    (d / "exports" / "range.json").write_text(json.dumps(stale))
+    assert load_range(reader) is None, "n_frames mismatch → stale → None"

@@ -24,7 +24,9 @@ from flir_research_interface.analysis.thermal_video import (
     FFMPEG_CANDIDATES,
     encode_command,
     label_font,
+    load_range,
     run_range,
+    save_range,
     thermal_frame_rgb,
 )
 from flir_research_interface.playback.reader import ExperimentReader
@@ -38,14 +40,32 @@ MAX_GIF_FRAMES = 300  # size guard: subsample so a GIF cannot balloon
 CLIPS_DIR = "clips"
 
 # A finished run's display range is fixed, but robust run_range scans every frame (slow on long
-# runs). Cache it per run so repeated previews/exports in one process pay the scan only once.
+# runs). Cache it three ways so the scan is paid at most once ever: an in-process dict, and a
+# persisted exports/range.json that survives operator restarts.
 _RANGE_CACHE: dict[str, tuple[float, float, str]] = {}
 
 
-def _cached_range(reader: ExperimentReader) -> tuple[float, float, str]:
+def _cached_range(
+    reader: ExperimentReader,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> tuple[float, float, str]:
+    """Display (vmin, vmax, units): in-memory cache → persisted range.json → scan (once), persist.
+
+    ``on_progress(done, total)`` is forwarded to the whole-run scan only when a scan is actually
+    needed, so a caller can show a real progress bar for the one slow path.
+    """
     key = str(reader.path)
-    if key not in _RANGE_CACHE:
-        _RANGE_CACHE[key] = run_range(reader, robust=True)
+    cached = _RANGE_CACHE.get(key)
+    if cached is not None:
+        return cached
+    doc = load_range(reader)
+    if doc is not None:
+        rng = (float(doc["vmin"]), float(doc["vmax"]), str(doc["units"]))
+        _RANGE_CACHE[key] = rng
+        return rng
+    lo, hi, units = run_range(reader, robust=True, on_progress=on_progress)
+    save_range(reader, lo, hi, units)
+    _RANGE_CACHE[key] = (lo, hi, units)
     return _RANGE_CACHE[key]
 
 

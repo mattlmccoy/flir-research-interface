@@ -58,6 +58,7 @@ export interface DerivedJob { state: "running" | "done" | "error" | "idle"; step
 export interface MediaOptions { start: number; stop: number; step?: number; scale?: number; speed?: number; fps?: number | null; fmt: "mp4" | "gif"; with_rois?: boolean; frame_stats?: boolean; timestamp?: boolean; colorbar?: boolean; title?: string | null; plot_roi?: number | null; plot_rois?: number[]; plot_stat?: string; plot_stats?: string[]; plot_series?: string[]; overlay_rois?: number[]; visible_opacity?: number; palette?: string; rois?: unknown[] | null; }
 /** Progress of a media-export render (background job). */
 export interface MediaJob { state: "running" | "done" | "error" | "idle"; step?: string; done?: number; total?: number; file?: { name: string; bytes: number; note?: string | null } | null; error?: string | null; }
+export interface RangeJob { state: "running" | "done" | "error" | "idle"; done: number; total: number; error?: string | null; }
 /** A user-selectable external drive for offload. */
 export interface Volume { label: string; mount: string; fstype: string; total_bytes: number; free_bytes: number; is_registered?: boolean; }
 /** Storage state: the local root and the registered drive (if any). */
@@ -133,6 +134,11 @@ export const api = {
     j<MediaJob>(req(`/api/experiments/${encodeURIComponent(name)}/export/media`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(opts) })),
   mediaStatus: (name: string) =>
     j<MediaJob>(req(`/api/experiments/${encodeURIComponent(name)}/export/media/status`)),
+  /** Precompute the display temperature range (the slow whole-run scan) as a job with progress. */
+  computeRange: (name: string) =>
+    j<RangeJob>(req(`/api/experiments/${encodeURIComponent(name)}/range/compute`, { method: "POST" })),
+  rangeStatus: (name: string) =>
+    j<RangeJob>(req(`/api/experiments/${encodeURIComponent(name)}/range/status`)),
   clipUrl: (name: string, file: string) =>
     u(`/api/experiments/${encodeURIComponent(name)}/exports/clips/${encodeURIComponent(file)}`),
   /** A composed preview frame (PNG) for the editor: same overlays as the export, at `index`. */

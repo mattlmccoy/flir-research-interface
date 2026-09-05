@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { NumberField } from "./NumberField.tsx";
-import { api, type MediaJob } from "../lib/api.ts";
+import { api, type MediaJob, type RangeJob } from "../lib/api.ts";
 
 interface RoiPick { id: number; name?: string; kind?: string; color?: string }
 interface Props {
@@ -91,17 +91,45 @@ export function MediaExportEditor({ name, nFrames, index, tS, rois, hasVisible, 
   const [err, setErr] = useState<string | null>(null);
   const busy = job?.state === "running";
 
-  // Debounced preview URL: recompose only after scrubbing/typing settles. The first compose on a
-  // long run is slow (range scan), so we show a "rendering" state until the image actually loads.
+  // The whole-run temperature scan (display range) is the slow part of a first preview — 30s+ on a
+  // long run, more when the files are still cold. Run it once as a job with a REAL progress bar,
+  // then gate the preview on it. range.json makes this a one-time cost per run.
+  const [range, setRange] = useState<RangeJob | null>(null);
+  const rangeReady = range?.state === "done";
+  useEffect(() => {
+    let alive = true;
+    let timer = 0;
+    setRange(null);
+    (async () => {
+      try {
+        let st = await api.rangeStatus(name);
+        if (st.state !== "done") st = await api.computeRange(name);
+        if (alive) setRange(st);
+        while (alive && st.state === "running") {
+          await new Promise<void>((r) => { timer = window.setTimeout(() => r(), 400); });
+          if (!alive) break;
+          st = await api.rangeStatus(name);
+          if (alive) setRange(st);
+        }
+      } catch (e) {
+        if (alive) setRange({ state: "error", done: 0, total: 0, error: String(e) });
+      }
+    })();
+    return () => { alive = false; window.clearTimeout(timer); };
+  }, [name]);
+
+  // Debounced preview URL: recompose only after scrubbing/typing settles. Held until the range scan
+  // finishes, so the image request never triggers its own blocking scan.
   const [previewUrl, setPreviewUrl] = useState("");
   const [previewLoading, setPreviewLoading] = useState(true);
   useEffect(() => {
+    if (!rangeReady) return;
     setPreviewLoading(true);
     const id = window.setTimeout(() => {
       setPreviewUrl(api.mediaPreviewUrl(name, scrub, { with_rois: showRois, frame_stats: frameStats, timestamp, colorbar, title: title.trim() || null, plot_series: plotSeries, overlay_rois: selIds, visible_opacity: visibleOpacity, palette, start, stop }));
     }, 120);
     return () => window.clearTimeout(id);
-  }, [name, scrub, showRois, frameStats, timestamp, colorbar, title, plotSeries.join(","), selIds.join(","), visibleOpacity, palette, start, stop]);
+  }, [rangeReady, name, scrub, showRois, frameStats, timestamp, colorbar, title, plotSeries.join(","), selIds.join(","), visibleOpacity, palette, start, stop]);
 
   const windowSecs = tS.length ? (tS[Math.min(stop, tS.length) - 1] ?? 0) - (tS[start] ?? 0) : 0;
 
@@ -128,8 +156,26 @@ export function MediaExportEditor({ name, nFrames, index, tS, rois, hasVisible, 
       <div className="media-editor-body">
         <div className="media-preview">
           <div className="media-preview-frame">
-            {previewUrl && <img src={previewUrl} alt="preview" style={{ opacity: previewLoading ? 0.25 : 1 }} onLoad={() => setPreviewLoading(false)} onError={() => setPreviewLoading(false)} />}
-            {previewLoading && <div className="media-preview-overlay"><span className="spinner" /> rendering preview…</div>}
+            {rangeReady && previewUrl && <img src={previewUrl} alt="preview" style={{ opacity: previewLoading ? 0.25 : 1 }} onLoad={() => setPreviewLoading(false)} onError={() => setPreviewLoading(false)} />}
+            {!rangeReady && (
+              <div className="media-preview-overlay range-scan">
+                {range?.state === "error" ? (
+                  <span className="bad">temperature-range scan failed: {range.error}</span>
+                ) : (() => {
+                  const total = range?.total ?? 0;
+                  const done = range?.done ?? 0;
+                  const pct = total ? Math.round((done / total) * 100) : 0;
+                  return (
+                    <>
+                      <div className="hint">Analyzing temperature range… {pct}%{total ? ` (${done.toLocaleString()} / ${total.toLocaleString()} frames)` : ""}</div>
+                      <div className="progressbar"><div className="progressbar-fill" style={{ width: `${Math.max(3, pct)}%` }} /></div>
+                      <div className="hint" style={{ opacity: 0.7 }}>one-time per run — reused on every later open</div>
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+            {rangeReady && previewLoading && <div className="media-preview-overlay"><span className="spinner" /> rendering preview…</div>}
           </div>
           <div className="hint" style={{ textAlign: "center" }}>frame {scrub} · {tS[scrub] != null ? fmtSecs(tS[scrub]) : ""}</div>
         </div>

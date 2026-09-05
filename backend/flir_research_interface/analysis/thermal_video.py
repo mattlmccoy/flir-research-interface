@@ -9,6 +9,7 @@ temperature in every frame.
 
 from __future__ import annotations
 
+import json
 import logging
 import subprocess
 from collections.abc import Callable
@@ -44,20 +45,31 @@ def _celsius_frames(reader: ExperimentReader, start: int, stop: int) -> npt.NDAr
     return block.astype(np.float32)
 
 
-def run_range(reader: ExperimentReader, *, robust: bool = False) -> tuple[float, float, str]:
+def run_range(
+    reader: ExperimentReader,
+    *,
+    robust: bool = False,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> tuple[float, float, str]:
     """(vmin, vmax, units) over the whole run, ignoring NaN; ``units`` is 'celsius' or 'counts'.
 
     ``robust`` uses the 0.5th and 99.9th percentiles of every 8th frame instead of the extremes,
     so a single hot pixel does not crush the rest of the scene to black in viewing copies.
+
+    ``on_progress(done, total)`` is called after each block so a caller can show a real progress
+    bar: this scan reads every frame and is by far the slowest part of composing a preview.
     """
+    n = reader.n_frames
     lo, hi = np.inf, -np.inf
     samples: list[npt.NDArray[np.float32]] = []
-    for s in range(0, reader.n_frames, BLOCK):
-        c = _celsius_frames(reader, s, min(s + BLOCK, reader.n_frames))
+    for s in range(0, n, BLOCK):
+        c = _celsius_frames(reader, s, min(s + BLOCK, n))
         if c.size:
             lo, hi = min(lo, float(np.nanmin(c))), max(hi, float(np.nanmax(c)))
             if robust:
                 samples.append(c[::8].reshape(-1))
+        if on_progress is not None:
+            on_progress(min(s + BLOCK, n), n)
     if robust and samples:
         allv = np.concatenate(samples)
         allv = allv[np.isfinite(allv)]
@@ -70,6 +82,47 @@ def run_range(reader: ExperimentReader, *, robust: bool = False) -> tuple[float,
     if not np.isfinite(lo):
         lo, hi = 0.0, 1.0
     return lo, hi, units
+
+
+RANGE_CACHE_NAME = "range.json"  # persisted display range so the whole-run scan is a one-time cost
+
+
+def _range_path(reader: ExperimentReader) -> Path:
+    return reader.path / "exports" / RANGE_CACHE_NAME
+
+
+def load_range(reader: ExperimentReader) -> dict[str, Any] | None:
+    """The persisted (vmin, vmax, units) for this run, or None if absent, unreadable, or stale.
+
+    Stale means the run has a different frame count than when the range was computed (e.g. more
+    frames were appended), so the cached extremes can no longer be trusted.
+    """
+    path = _range_path(reader)
+    if not path.is_file():
+        return None
+    try:
+        doc = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(doc, dict) or doc.get("n_frames") != reader.n_frames:
+        return None
+    if not all(k in doc for k in ("vmin", "vmax", "units")):
+        return None
+    return doc
+
+
+def save_range(reader: ExperimentReader, vmin: float, vmax: float, units: str) -> None:
+    """Persist the display range to ``exports/range.json`` (best-effort; failures are non-fatal)."""
+    path = _range_path(reader)
+    doc = {"vmin": float(vmin), "vmax": float(vmax), "units": units,
+           "n_frames": int(reader.n_frames)}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(doc))
+        tmp.replace(path)
+    except OSError:
+        logger.warning("could not persist display range for %s", reader.path.name)
 
 
 def label_font(size: int = 14) -> ImageFont.FreeTypeFont:
