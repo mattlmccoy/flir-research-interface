@@ -70,6 +70,7 @@ class MediaOptions:
     plot_series: tuple[tuple[int, str], ...] = ()  # per-ROI lines: (roi_id, stat) pairs
     overlay_rois: tuple[int, ...] = ()  # which ROI boxes to draw on the frame ((): all)
     visible_opacity: float = 0.0  # blend the recorded visible camera over the frame (0 = off)
+    palette: str = "inferno"  # colour palette for the thermal image + bar
 
 
 def _slug(text: str) -> str:
@@ -503,7 +504,7 @@ def _compose(reader: ExperimentReader, idx: int, vmin: float, vmax: float, scale
     # below the bar instead of having thermal_frame_rgb bake it under the title.
     rgb = thermal_frame_rgb(values, vmin, vmax, reader.t_s(idx), bar_px=bar, scale=scale,
                             rois=rois if opts.with_rois else None, reader=reader,
-                            show_time=opts.timestamp and not opts.title)
+                            show_time=opts.timestamp and not opts.title, palette=opts.palette)
     if over is not None:  # paint over-range pixels magenta, like the live display
         rgb = np.array(rgb, copy=True)  # thermal_frame_rgb may hand back a read-only view
         big = np.repeat(np.repeat(over, scale, axis=0), scale, axis=1)

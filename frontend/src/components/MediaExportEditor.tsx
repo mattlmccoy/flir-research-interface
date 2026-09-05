@@ -84,6 +84,7 @@ export function MediaExportEditor({ name, nFrames, index, tS, rois, hasVisible, 
   const [frameStats, setFrameStats] = useState(true);
   const [timestamp, setTimestamp] = useState(true);
   const [colorbar, setColorbar] = useState(true);
+  const [palette, setPalette] = useState("inferno");
   const [visibleOpacity, setVisibleOpacity] = useState(0);
   const [title, setTitle] = useState("");
   const [job, setJob] = useState<MediaJob | null>(null);
@@ -97,17 +98,17 @@ export function MediaExportEditor({ name, nFrames, index, tS, rois, hasVisible, 
   useEffect(() => {
     setPreviewLoading(true);
     const id = window.setTimeout(() => {
-      setPreviewUrl(api.mediaPreviewUrl(name, scrub, { with_rois: showRois, frame_stats: frameStats, timestamp, colorbar, title: title.trim() || null, plot_series: plotSeries, overlay_rois: selIds, visible_opacity: visibleOpacity, start, stop }));
+      setPreviewUrl(api.mediaPreviewUrl(name, scrub, { with_rois: showRois, frame_stats: frameStats, timestamp, colorbar, title: title.trim() || null, plot_series: plotSeries, overlay_rois: selIds, visible_opacity: visibleOpacity, palette, start, stop }));
     }, 120);
     return () => window.clearTimeout(id);
-  }, [name, scrub, showRois, frameStats, timestamp, colorbar, title, plotSeries.join(","), selIds.join(","), visibleOpacity, start, stop]);
+  }, [name, scrub, showRois, frameStats, timestamp, colorbar, title, plotSeries.join(","), selIds.join(","), visibleOpacity, palette, start, stop]);
 
   const windowSecs = tS.length ? (tS[Math.min(stop, tS.length) - 1] ?? 0) - (tS[start] ?? 0) : 0;
 
   async function run() {
     setErr(null); setJob({ state: "running", step: "starting", done: 0, total: 0 });
     try {
-      await api.exportMedia(name, { start, stop, step, scale, speed, fmt, with_rois: showRois, frame_stats: frameStats, timestamp, colorbar, title: title.trim() || null, plot_series: plotSeries, overlay_rois: selIds, visible_opacity: visibleOpacity });
+      await api.exportMedia(name, { start, stop, step, scale, speed, fmt, with_rois: showRois, frame_stats: frameStats, timestamp, colorbar, title: title.trim() || null, plot_series: plotSeries, overlay_rois: selIds, visible_opacity: visibleOpacity, palette });
       for (;;) {
         await new Promise((r) => setTimeout(r, 700));
         const jb = await api.mediaStatus(name);
@@ -150,6 +151,14 @@ export function MediaExportEditor({ name, nFrames, index, tS, rois, hasVisible, 
         <div className="media-opts kv">
           <span>format</span><span className="v plain"><select value={fmt} onChange={(e) => setFmt(e.target.value as "mp4" | "gif")} aria-label="format"><option value="mp4">MP4 (H.264)</option><option value="gif">Animated GIF</option></select></span>
           <span>size</span><span className="v plain"><select value={scale} onChange={(e) => setScale(Number(e.target.value))} aria-label="size"><option value={1}>1× (native)</option><option value={2}>2× (crisp)</option></select></span>
+          <span>palette</span><span className="v plain"><select value={palette} onChange={(e) => setPalette(e.target.value)} aria-label="colour palette">{["inferno", "iron", "magma", "plasma", "viridis", "turbo", "rainbow", "grayscale", "blackhot"].map((p) => <option key={p} value={p}>{p}</option>)}</select></span>
+          {hasVisible && <span title="Blend the recorded visible camera over the thermal image">visible cam</span>}
+          {hasVisible && (
+            <span className="v plain" style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "flex-end" }}>
+              <input type="range" min={0} max={1} step={0.05} value={visibleOpacity} style={{ width: 130 }} aria-label="visible camera opacity" onChange={(e) => setVisibleOpacity(Number(e.target.value))} />
+              <span style={{ minWidth: 34, textAlign: "right" }}>{visibleOpacity === 0 ? "off" : `${Math.round(visibleOpacity * 100)}%`}</span>
+            </span>
+          )}
           <span>speed</span><span className="v plain"><select value={speed} onChange={(e) => setSpeed(Number(e.target.value))} aria-label="speed">{[0.5, 1, 2, 4, 8].map((s) => <option key={s} value={s}>{s}×</option>)}</select></span>
           <span title="Keep every Nth frame — fewer frames = smaller/faster file (handy for GIFs)">keep every</span>
           <span className="v plain" style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -190,14 +199,6 @@ export function MediaExportEditor({ name, nFrames, index, tS, rois, hasVisible, 
           <label><input type="checkbox" checked={timestamp} onChange={(e) => setTimestamp(e.target.checked)} /> timestamp</label>
           <label><input type="checkbox" checked={colorbar} onChange={(e) => setColorbar(e.target.checked)} /> colour bar</label>
         </div>
-        {hasVisible && (
-          <label className="row" style={{ alignItems: "center", gap: 8 }}>
-            <span className="hint" style={{ minWidth: 96 }}>visible camera</span>
-            <input type="range" min={0} max={1} step={0.05} value={visibleOpacity} style={{ flex: 1, maxWidth: 260 }}
-              aria-label="visible camera opacity" onChange={(e) => setVisibleOpacity(Number(e.target.value))} />
-            <span className="v" style={{ minWidth: 44, textAlign: "right" }}>{visibleOpacity === 0 ? "off" : `${Math.round(visibleOpacity * 100)}%`}</span>
-          </label>
-        )}
 
         <div className="media-actions">
           <button className="primary" disabled={busy || nFrames === 0} onClick={run}>{busy ? "rendering…" : `Export ${fmt.toUpperCase()}`}</button>

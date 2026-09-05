@@ -108,6 +108,7 @@ def thermal_frame_rgb(
     rois: list[dict[str, Any]] | None = None,
     reader: ExperimentReader | None = None,
     show_time: bool = True,
+    palette: str | None = None,
 ) -> npt.NDArray[np.uint8]:
     """Colourised frame plus a vertical colour bar (vmax at the top) and labels: (h, w+bar, 3).
 
@@ -119,10 +120,15 @@ def thermal_frame_rgb(
     h0, w0 = values.shape
     h, w = h0 * scale, w0 * scale
     img = np.zeros((h, w + bar_px, 3), dtype=np.uint8)
-    body = colorize(values, vmin, vmax) if scale > 1 or rois else _colorize(values, vmin, vmax)
-    img[:, :w] = np.repeat(np.repeat(body, scale, axis=0), scale, axis=1) if scale > 1 else body
     ramp = np.linspace(255, 0, h).astype(np.uint8)  # top = hot
-    lut = INFERNO_LUT if (scale > 1 or rois) else IRON_LUT
+    if palette:  # explicit palette selection (export/media): same LUT for the body and the bar
+        from flir_research_interface.analysis.palettes import apply_lut, palette_lut
+        lut = palette_lut(palette)
+        body = apply_lut(values, vmin, vmax, lut)
+    else:
+        body = colorize(values, vmin, vmax) if scale > 1 or rois else _colorize(values, vmin, vmax)
+        lut = INFERNO_LUT if (scale > 1 or rois) else IRON_LUT
+    img[:, :w] = np.repeat(np.repeat(body, scale, axis=0), scale, axis=1) if scale > 1 else body
     img[:, w:] = lut[ramp][:, None, :]
     pil = Image.fromarray(img)
     if rois and reader is not None:
