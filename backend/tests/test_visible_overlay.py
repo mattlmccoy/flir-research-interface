@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from flir_research_interface.analysis.visible_overlay import blend_visible, ir_to_visible_coeffs
-
 import numpy as np
+
+from flir_research_interface.analysis.visible_overlay import blend_visible, ir_to_visible_coeffs
 
 # The stored visible→IR homography (normalised) and one calibration pair from a real run.
 _H = [[1.3745810579148645, -0.026240839260570817, -0.16781215289651508],

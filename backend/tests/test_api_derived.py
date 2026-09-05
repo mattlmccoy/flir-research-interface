@@ -120,8 +120,8 @@ def test_derived_skip_video_regenerates_series_without_touching_the_video(tmp_pa
         job = _wait_derived(c, name)
         assert job["state"] == "done", job
         # roi_series reflects the new rect ROI
-        head = [ln for ln in (tmp_path / name / "exports" / "roi_series.csv").read_text().splitlines()
-                if not ln.startswith("#")][0]
+        csv_path = tmp_path / name / "exports" / "roi_series.csv"
+        head = [ln for ln in csv_path.read_text().splitlines() if not ln.startswith("#")][0]
         assert "R2_mean" in head
         # the ROI video was not re-rendered (unchanged, or still absent)
         after = video.stat().st_mtime_ns if video.is_file() else None

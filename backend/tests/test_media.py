@@ -150,7 +150,9 @@ def test_live_plot_panel_extends_frame_height(tmp_path: Path) -> None:
     from flir_research_interface.analysis.media import MediaOptions, compose_preview
     r = _make(tmp_path)
     meta = json.loads((r.path / "metadata.json").read_text())
-    meta["rois"] = [{"id": 1, "kind": "rect", "x0": 20, "y0": 10, "x1": 44, "y1": 30, "name": "box"}]
+    meta["rois"] = [
+        {"id": 1, "kind": "rect", "x0": 20, "y0": 10, "x1": 44, "y1": 30, "name": "box"}
+    ]
     (r.path / "metadata.json").write_text(json.dumps(meta))
     r2 = ExperimentReader(r.path)
     plain = compose_preview(r2, MediaOptions(start=0, stop=20), 10)
@@ -230,8 +232,12 @@ def test_title_does_not_cover_the_timestamp(tmp_path: Path) -> None:
     """A title caption must not paint over the elapsed-time label (they shared the top-left)."""
     from flir_research_interface.analysis.media import MediaOptions, compose_preview
     r = _make(tmp_path)
-    with_ts = compose_preview(r, MediaOptions(start=0, stop=20, title="Run A", timestamp=True, colorbar=False), 5)
-    no_ts = compose_preview(r, MediaOptions(start=0, stop=20, title="Run A", timestamp=False, colorbar=False), 5)
+    with_ts = compose_preview(
+        r, MediaOptions(start=0, stop=20, title="Run A", timestamp=True, colorbar=False), 5
+    )
+    no_ts = compose_preview(
+        r, MediaOptions(start=0, stop=20, title="Run A", timestamp=False, colorbar=False), 5
+    )
     assert with_ts != no_ts  # the timestamp is still visible when a title is present
 
 
@@ -265,7 +271,9 @@ def test_plot_roi_singular_still_supported(tmp_path: Path) -> None:
     from flir_research_interface.analysis.media import MediaOptions, _plot_traces
     r = _make(tmp_path)
     meta = json.loads((r.path / "metadata.json").read_text())
-    meta["rois"] = [{"id": 1, "kind": "rect", "x0": 20, "y0": 10, "x1": 44, "y1": 30, "name": "hot"}]
+    meta["rois"] = [
+        {"id": 1, "kind": "rect", "x0": 20, "y0": 10, "x1": 44, "y1": 30, "name": "hot"}
+    ]
     (r.path / "metadata.json").write_text(json.dumps(meta))
     r2 = ExperimentReader(r.path)
     traces = _plot_traces(r2, MediaOptions(start=0, stop=20, plot_roi=1))
