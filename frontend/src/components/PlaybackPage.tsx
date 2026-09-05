@@ -222,9 +222,8 @@ export function PlaybackPage(p: Props) {
     if (v) saveSnapshot(v, snapshotFilename(p.name, index, t), snapshotFooter({ name: p.name, tS: t, index, range: shown, palette: p.palette, rois: p.rois.rois.length, reference: !!reference }));
   }
   function toggleVisibleOverlay(): void {
-    const turningOn = p.layout.visibleMode !== "overlay";
-    p.dispatch({ type: "setVisibleMode", mode: turningOn ? "overlay" : "rail" });
-    if (turningOn) p.dispatch({ type: "openSection", section: "visible" });  // reveal the opacity slider
+    // toggle the overlay on the image; its opacity slider pops up next to the button (below)
+    p.dispatch({ type: "setVisibleMode", mode: p.layout.visibleMode === "overlay" ? "rail" : "overlay" });
   }
   // Quick "update derived to the current ROIs" (plot + CSV + preview video); the export rail
   // section has the full options. Runs in the background — poll to completion, then refresh.
@@ -254,7 +253,16 @@ export function PlaybackPage(p: Props) {
           <button aria-label="Media export (clip / GIF)" data-tip="Media export — MP4/GIF of a chosen window with overlays" disabled={n === 0} onClick={() => setShowMedia(true)}><IconClip /></button>
           <button aria-label="Save image" data-tip="Save image — PNG snapshot of this frame with overlays" disabled={n === 0} onClick={saveImage}><IconSaveImage /></button>
           <button aria-label={p.layout.roisHidden ? "Show ROIs" : "Hide ROIs"} aria-pressed={p.layout.roisHidden} className={p.layout.roisHidden ? "active" : ""} data-tip={p.layout.roisHidden ? "Show ROI overlays" : "Hide ROI overlays (measurements keep running)"} onClick={() => p.dispatch({ type: "toggleRois" })}><IconEye off={p.layout.roisHidden} /></button>
-          <button aria-label="Visible-camera overlay" aria-pressed={p.layout.visibleMode === "overlay"} className={p.layout.visibleMode === "overlay" ? "active" : ""} data-tip={hasVideo ? "Overlay the recorded visible camera (opens the opacity slider)" : "This recording has no visible video"} disabled={!hasVideo} onClick={toggleVisibleOverlay}><IconLayers /></button>
+          <span className="strip-pop-anchor">
+            <button aria-label="Visible-camera overlay" aria-pressed={p.layout.visibleMode === "overlay"} className={p.layout.visibleMode === "overlay" ? "active" : ""} data-tip={hasVideo ? "Overlay the recorded visible camera (opacity slider)" : "This recording has no visible video"} disabled={!hasVideo} onClick={toggleVisibleOverlay}><IconLayers /></button>
+            {hasVideo && p.layout.visibleMode === "overlay" && (
+              <span className="strip-popover" role="group" aria-label="Visible overlay opacity">
+                <input type="range" min={0} max={1} step={0.05} value={p.layout.overlay.opacity} aria-label="visible camera opacity"
+                  onChange={(e) => p.dispatch({ type: "setOverlay", patch: { opacity: Number(e.target.value) } })} />
+                <span className="v">{Math.round(p.layout.overlay.opacity * 100)}%</span>
+              </span>
+            )}
+          </span>
           <button aria-label="Regenerate derived exports" data-tip="Regenerate derived exports (plot + CSV + preview) — asks first" disabled={n === 0 || regenBusy} onClick={quickRegenerate}>{regenBusy ? <span className="spinner" /> : <IconRefresh />}</button>
         </>} />}
       center={

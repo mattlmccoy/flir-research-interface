@@ -63,6 +63,13 @@ input[type=range] { accent-color: var(--accent); }
 .strip button[aria-disabled="true"], .strip button:disabled { opacity: 0.35; cursor: default; }
 .strip .spacer { flex: 1; }
 .strip .divider { width: 18px; height: 1px; background: var(--line-control); margin: 3px 0; flex: none; }
+/* A flyout (e.g. the visible-overlay opacity slider) anchored to the right of a strip button. */
+.strip .strip-pop-anchor { position: relative; display: flex; }
+.strip .strip-popover { position: absolute; left: calc(100% + 8px); top: 50%; transform: translateY(-50%);
+  display: flex; align-items: center; gap: 8px; background: var(--bg-deep); border: 1px solid var(--line-control);
+  border-radius: var(--radius); padding: 6px 10px; z-index: 60; white-space: nowrap; box-shadow: 0 3px 12px var(--scrim); }
+.strip .strip-popover input[type=range] { width: 120px; }
+.strip .strip-popover .v { min-width: 34px; text-align: right; font-family: var(--font-mono); font-size: 11px; color: var(--accent); }
 /* Hover tooltip: a flat description to the right of each strip symbol. */
 .strip button[data-tip]:hover::after {
   content: attr(data-tip); position: absolute; left: calc(100% + 9px); top: 50%; transform: translateY(-50%);
