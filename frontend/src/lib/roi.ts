@@ -30,7 +30,7 @@ export interface Ellipse extends Meta { id: number; kind: "ellipse"; cx: number;
 export interface Line extends Meta { id: number; kind: "line"; x0: number; y0: number; x1: number; y1: number; }
 /** Closed polygon through `points` (≥ 3); pixels inside (even-odd) or on the boundary belong. */
 export interface Polygon extends Meta { id: number; kind: "polygon"; points: [number, number][]; }
-/** Open multi-segment line (ResearchIR "bendable line"); pixels along every segment. */
+/** Open multi-segment line ("spline"; ResearchIR calls it a bendable line); pixels along every segment. */
 export interface Polyline extends Meta { id: number; kind: "polyline"; points: [number, number][]; }
 export type Roi = Spot | Rect | Circle | Ellipse | Line | Polygon | Polyline;
 export type RoiInput = Omit<Spot, "id"> | Omit<Rect, "id"> | Omit<Circle, "id"> | Omit<Ellipse, "id"> | Omit<Line, "id"> | Omit<Polygon, "id"> | Omit<Polyline, "id">;

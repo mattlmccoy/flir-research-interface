@@ -55,7 +55,7 @@ function labelContent(r: Roi, s: RoiStats | undefined): ChipContent {
   const name = roiLabel(r);
   if (!s || s.n === 0 || s.mean === null) return { name, value: s ? "n/a" : "", range: null };
   const range = r.kind !== "spot" && s.min != null && s.max != null
-    ? `${s.min.toFixed(1)}…${s.max.toFixed(1)}` : null;
+    ? `${s.min.toFixed(1)}–${s.max.toFixed(1)}` : null;
   return { name, value: `${s.mean.toFixed(1)}°`, range };
 }
 

@@ -41,7 +41,7 @@ function where(r: Roi): string {
     case "ellipse": return `ellipse centre (${r.cx}, ${r.cy}) rx ${r.rx} ry ${r.ry} px`;
     case "line": return `line (${r.x0}, ${r.y0}) → (${r.x1}, ${r.y1})`;
     case "polygon": return `polygon with ${r.points.length} vertices`;
-    case "polyline": return `bendable line with ${r.points.length} vertices`;
+    case "polyline": return `spline with ${r.points.length} vertices`;
   }
 }
 
@@ -100,8 +100,8 @@ export function RoiRows({ rois, stats, selected, selectedIds, dispatch, extremes
         <li>▭ Rectangle: drag corner to corner.</li>
         <li>◯ Circle: drag from the centre outwards. ⬭ Ellipse: drag its bounding box corner to corner.</li>
         <li>╱ Line: drag from one end to the other; the pixels along it are measured.</li>
-        <li>⬠ Polygon: click each vertex; double-click places the last one and closes the shape (Enter closes, Esc cancels, Backspace undoes a vertex). ⌇ Bendable line: the same, but open. ✎ Freehand: hold the mouse and draw; releasing closes the shape.</li>
-        <li>↖ Select: click an ROI, then drag to move it; Delete removes it. Shift-click to select several and drag them together. When a polygon, bendable line or line is selected, drag its square handles to edit individual vertices.</li>
+        <li>⬠ Polygon: click each vertex; double-click places the last one and closes the shape (Enter closes, Esc cancels, Backspace undoes a vertex). ⌇ Spline: the same, but open. ✎ Freehand: hold the mouse and draw; releasing closes the shape.</li>
+        <li>↖ Select: click an ROI, then drag to move it; Delete removes it. Shift-click to select several and drag them together. When a polygon, spline or line is selected, drag its square handles to edit individual vertices.</li>
         <li>Click the color square to recolor, set a per-ROI emissivity and reflected temperature (values are re-corrected from the camera's setting); double-click the name to rename; ◉ hides an ROI on the image and plot without removing it.</li>
       </ul>
     </Disclosure>
