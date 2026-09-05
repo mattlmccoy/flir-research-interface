@@ -1,8 +1,11 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as RKeyboardEvent, MouseEvent as RMouseEvent, PointerEvent as RPointerEvent } from "react";
 import { roiLabel, type Roi, type RoiInput, type RoiStats } from "../lib/roi.ts";
 import { roiColor, type Box, vertexHandles } from "../lib/overlay.ts";
 import { layoutLabels, type LabelBox } from "../lib/labels.ts";
+import { type ChipRect, hitChip, loadOffsets, type Offsets, saveOffsets } from "../lib/labelDrag.ts";
+
+const storage = (() => { try { return typeof localStorage !== "undefined" ? localStorage : null; } catch { return null; } })();
 
 /** In-progress shape while the pointer is down / vertices are being placed. */
 export type Draft = RoiInput;
@@ -16,6 +19,10 @@ interface Props {
   /** Mirror the geometry to match a flipped image; labels stay readable. */
   flipH?: boolean; flipV?: boolean;
   cursor: string;
+  /** Active drawing tool; label dragging is only armed on the "select" tool. */
+  tool?: string;
+  /** localStorage scope for label-position nudges (live vs a specific experiment). */
+  labelScope?: string;
   onPointerDown: (e: PE) => void; onPointerMove: (e: PE) => void; onPointerUp: (e: PE) => void;
   onPointerLeave: () => void; onKeyDown: (e: RKeyboardEvent<HTMLCanvasElement>) => void;
   onDoubleClick?: (e: RMouseEvent<HTMLCanvasElement>) => void;
@@ -147,6 +154,64 @@ function drawMarker(ctx: CanvasRenderingContext2D, x: number, y: number, kind: "
 
 export function RoiOverlay(p: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const scope = p.labelScope ?? "live";
+  const [offsets, setOffsets] = useState<Offsets>(() => loadOffsets(storage, scope));
+  const scopeRef = useRef(scope);
+  useEffect(() => { if (scopeRef.current !== scope) { scopeRef.current = scope; setOffsets(loadOffsets(storage, scope)); } }, [scope]);
+  // Chip rectangles from the last draw (screen px), for hit-testing a label drag.
+  const chipRects = useRef<ChipRect[]>([]);
+  const drag = useRef<{ id: number; startX: number; startY: number; dx0: number; dy0: number; moved: boolean } | null>(null);
+
+  const localXY = (e: PE): [number, number] => {
+    const r = (e.currentTarget as HTMLCanvasElement).getBoundingClientRect();
+    return [e.clientX - r.left, e.clientY - r.top];
+  };
+  const onDown = (e: PE) => {
+    if ((p.tool ?? "select") === "select") {
+      const [x, y] = localXY(e);
+      const id = hitChip(chipRects.current, x, y);
+      if (id !== null) {
+        const o = offsets[id] ?? { dx: 0, dy: 0 };
+        drag.current = { id, startX: x, startY: y, dx0: o.dx, dy0: o.dy, moved: false };
+        (e.currentTarget as HTMLCanvasElement).setPointerCapture?.(e.pointerId);
+        e.preventDefault();
+        return; // do NOT start an ROI draw/selection under the label
+      }
+    }
+    p.onPointerDown(e);
+  };
+  const onMove = (e: PE) => {
+    const d = drag.current;
+    if (d) {
+      const [x, y] = localXY(e);
+      if (Math.abs(x - d.startX) > 2 || Math.abs(y - d.startY) > 2) d.moved = true;
+      (e.currentTarget as HTMLCanvasElement).style.cursor = "grabbing";
+      setOffsets((cur) => ({ ...cur, [d.id]: { dx: d.dx0 + (x - d.startX), dy: d.dy0 + (y - d.startY) } }));
+      return;
+    }
+    if ((p.tool ?? "select") === "select") {  // show a grab cursor over a draggable label
+      const [x, y] = localXY(e);
+      (e.currentTarget as HTMLCanvasElement).style.cursor = hitChip(chipRects.current, x, y) !== null ? "grab" : p.cursor;
+    }
+    p.onPointerMove(e);
+  };
+  const endDrag = (): boolean => {
+    const d = drag.current;
+    if (!d) return false;
+    drag.current = null;
+    setOffsets((cur) => { saveOffsets(storage, scope, cur); return cur; });
+    return true;
+  };
+  const onUp = (e: PE) => { if (endDrag()) return; p.onPointerUp(e); };
+  const onDbl = (e: RMouseEvent<HTMLCanvasElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const id = hitChip(chipRects.current, e.clientX - r.left, e.clientY - r.top);
+    if (id !== null && offsets[id]) {  // double-click a moved label snaps it back to auto
+      setOffsets((cur) => { const next = { ...cur }; delete next[id]; saveOffsets(storage, scope, next); return next; });
+      return;
+    }
+    p.onDoubleClick?.(e);
+  };
 
   useEffect(() => {
     const c = ref.current;
@@ -204,7 +269,16 @@ export function RoiOverlay(p: Props) {
     // selected ROI's label keeps its anchor (listed first); the rest flow around it, top-down
     const order = [...labels].sort((a, b) => (b.selected ? 1 : 0) - (a.selected ? 1 : 0) || a.ay - b.ay);
     const items: LabelBox[] = order.map((l) => { const s = chipSize(ctx, l.content); return { id: l.id, ax: l.ax, ay: l.ay - s.h + 3, w: s.w, h: s.h }; });
-    const placed = layoutLabels(items, { width: p.box.width, height: p.box.height });
+    const natural = new Map(items.map((it) => [it.id, { x: it.ax, y: it.ay, w: it.w, h: it.h }]));
+    const auto = layoutLabels(items, { width: p.box.width, height: p.box.height });
+    // A user-dragged label sits at its natural anchor + saved offset (and gets a leader line);
+    // the rest keep the automatic collision-avoiding placement.
+    const placed = auto.map((pl) => {
+      const off = offsets[pl.id];
+      if (!off) return pl;
+      const nat = natural.get(pl.id)!;
+      return { ...pl, x: nat.x + off.dx, y: nat.y + off.dy, displaced: true };
+    });
     for (const pl of placed) { // leader lines first, under the chips
       if (!pl.displaced) continue;
       const l = meta.get(pl.id)!;
@@ -217,13 +291,14 @@ export function RoiOverlay(p: Props) {
       const l = meta.get(pl.id)!;
       drawChip(ctx, pl.x, pl.y, l.content, l.color);
     }
+    chipRects.current = placed.map((pl) => { const s = natural.get(pl.id)!; return { id: pl.id, x: pl.x, y: pl.y, w: s.w, h: s.h }; });
     ctx.restore();
   });
 
   return (
     <canvas ref={ref} className="overlay" tabIndex={0} aria-label="regions of interest"
       style={{ left: p.box.left, top: p.box.top, width: p.box.width, height: p.box.height, cursor: p.cursor }}
-      onPointerDown={p.onPointerDown} onPointerMove={p.onPointerMove} onPointerUp={p.onPointerUp}
-      onPointerLeave={p.onPointerLeave} onKeyDown={p.onKeyDown} onDoubleClick={p.onDoubleClick} />
+      onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp}
+      onPointerLeave={p.onPointerLeave} onKeyDown={p.onKeyDown} onDoubleClick={onDbl} />
   );
 }
