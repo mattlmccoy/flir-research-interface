@@ -128,7 +128,7 @@ export function MediaExportEditor({ name, nFrames, index, tS, rois, onClose }: P
             <NumberField min={1} max={100} value={step} style={{ width: 64 }} aria-label="keep every Nth frame" onChange={(f) => setStep(Math.max(1, Math.floor(f)))} />
             <span className="hint">frame{step === 1 ? "" : "s"} → {Math.ceil((stop - start) / step)} out{fmt === "gif" ? ` @ ${Math.min(20, (30 * speed) / step).toFixed(0)} fps` : ""}</span>
           </span>
-          <span title="Draw a small graph in the corner that grows the ROI's temperature over time">live plot</span>
+          <span title="Add a graph strip below the frame that grows the ROI's temperature over time">live plot</span>
           <span className="v plain" style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <select value={plotRoi ?? ""} onChange={(e) => setPlotRoi(e.target.value === "" ? null : Number(e.target.value))} aria-label="live plot ROI">
               <option value="">off</option>

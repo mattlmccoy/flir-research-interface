@@ -79,39 +79,57 @@ def _plot_trace(
         opts.plot_stat if opts.plot_stat in ser else "mean")
     arr = ser.get(key) or ser.get("mean") or []
     vals = [float(arr[i]) if i < len(arr) and arr[i] is not None else float("nan") for i in indices]
-    label = str(roi.get("name") or f"ROI {roi['id']}")
-    return {"v": vals, "label": label}
+    name = str(roi.get("name") or f"ROI {roi['id']}")
+    label = name if roi.get("kind") == "spot" else f"{name} · {key}"
+    ts = [float(reader.t_s(i)) for i in indices]
+    return {"v": vals, "t": ts, "label": label}
 
 
-def _draw_inset(d: ImageDraw.ImageDraw, trace: dict[str, Any], pos: int, w: int, h: int,
-                font: ImageFont.FreeTypeFont) -> None:
-    """A small line plot of ``trace`` grown to ``pos``, bottom-right corner, with a playhead dot."""
+_PANEL_H = 96  # height of the live-plot strip appended below the frame
+
+
+def _draw_panel(d: ImageDraw.ImageDraw, trace: dict[str, Any], pos: int, x0: int, y0: int,
+                w: int, h: int, font: ImageFont.FreeTypeFont) -> None:
+    """A full-width line plot of ``trace`` grown to ``pos``, in the strip at (x0, y0, w, h)."""
     v = [x for x in trace["v"] if x == x]  # finite values for the y-range
     if not v:
         return
     lo, hi = min(v), max(v)
     if hi - lo < 1e-6:
         lo, hi = lo - 0.5, hi + 0.5
-    pw, ph = min(240, w // 2), min(120, h // 3)
-    x0, y0 = w - pw - 8, h - ph - 8
-    d.rectangle((x0, y0, x0 + pw, y0 + ph), fill=(0, 0, 0, 200), outline=(150, 150, 150))
+    pad_l, pad_r, pad_t, pad_b = 6, 8, font.size + 6, font.size + 4
+    ax0, ay0 = x0 + pad_l, y0 + pad_t
+    aw, ah = w - pad_l - pad_r, h - pad_t - pad_b
+    d.rectangle((ax0, ay0, ax0 + aw, ay0 + ah), outline=(90, 90, 96))
     n = len(trace["v"])
 
     def px(i: float) -> float:
-        return x0 + 6 + (pw - 12) * (i / max(1, n - 1))
+        return ax0 + aw * (i / max(1, n - 1))
 
     def py(val: float) -> float:
-        return y0 + ph - 6 - (ph - 12) * (val - lo) / (hi - lo)
+        return ay0 + ah - ah * (val - lo) / (hi - lo)
     pts = [(px(i), py(trace["v"][i])) for i in range(min(pos + 1, n))
            if trace["v"][i] == trace["v"][i]]
     if len(pts) >= 2:
         d.line(pts, fill=(255, 210, 90), width=2)
     if pts:
         cx, cy = pts[-1]
+        d.line((cx, ay0, cx, ay0 + ah), fill=(120, 120, 128))  # playhead rule
         d.ellipse((cx - 3, cy - 3, cx + 3, cy + 3), fill=(255, 255, 255))
-    d.text((x0 + 6, y0 + 2), trace["label"], fill=(255, 255, 255), font=font)
-    d.text((x0 + 6, y0 + ph - font.size - 2), f"{lo:.1f}", fill=(200, 200, 200), font=font)
-    d.text((x0 + pw - 44, y0 + 2), f"{hi:.1f}", fill=(200, 200, 200), font=font)
+    d.text((x0 + pad_l, y0 + 2), trace["label"], fill=(255, 255, 255), font=font)
+    cur = next((trace["v"][i] for i in range(min(pos, n - 1), -1, -1)
+                if trace["v"][i] == trace["v"][i]), None)
+    if cur is not None:
+        s = f"{cur:.1f} °C"
+        d.text((x0 + w - pad_r - d.textlength(s, font=font), y0 + 2), s,
+               fill=(255, 210, 90), font=font)
+    d.text((ax0 + 2, ay0), f"{hi:.1f}", fill=(170, 170, 176), font=font)
+    d.text((ax0 + 2, ay0 + ah - font.size), f"{lo:.1f}", fill=(170, 170, 176), font=font)
+    ts = trace.get("t") or []
+    if ts:
+        t1 = f"{ts[-1]:.1f} s"
+        d.text((ax0 + aw - d.textlength(t1, font=font) - 2, ay0 + ah - font.size),
+               t1, fill=(170, 170, 176), font=font)
 
 
 def _celsius(reader: ExperimentReader, idx: int) -> tuple[np.ndarray, np.ndarray]:
@@ -209,13 +227,19 @@ def _compose(reader: ExperimentReader, idx: int, vmin: float, vmax: float, scale
         lo, hi, mean = np.nanmin(stats_vals), np.nanmax(stats_vals), np.nanmean(stats_vals)
         txt = f"min {lo:.1f}  max {hi:.1f}  mean {mean:.1f} °C"
         d.text((4, rgb.shape[0] - 2 * font.size - 8), txt, fill=(255, 255, 255), font=font)
-    if plot is not None:
-        _draw_inset(d, plot, plot_pos, rgb.shape[1], rgb.shape[0], font)
     if opts.title:
         tw = d.textlength(opts.title, font=font)
         d.rectangle((0, 0, rgb.shape[1], font.size + 8), fill=(0, 0, 0))
         d.text(((rgb.shape[1] - tw) / 2, 3), opts.title, fill=(255, 255, 255), font=font)
-    return np.asarray(pil, dtype=np.uint8)
+    if plot is None:
+        return np.asarray(pil, dtype=np.uint8)
+    # append a full-width live-plot strip below the frame (taller output, no overlay)
+    panel = _PANEL_H * scale
+    canvas = Image.new("RGB", (rgb.shape[1], rgb.shape[0] + panel), (14, 14, 16))
+    canvas.paste(pil, (0, 0))
+    dp = ImageDraw.Draw(canvas, "RGBA")
+    _draw_panel(dp, plot, plot_pos, 0, rgb.shape[0], rgb.shape[1], panel, font)
+    return np.asarray(canvas, dtype=np.uint8)
 
 
 def _fps(reader: ExperimentReader) -> float:

@@ -104,8 +104,12 @@ def test_media_preview_returns_png(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(not _HAVE_FFMPEG, reason="ffmpeg not installed")
-def test_live_plot_inset_draws_when_a_roi_is_chosen(tmp_path: Path) -> None:
+def test_live_plot_panel_extends_frame_height(tmp_path: Path) -> None:
+    """The live plot is a full-width strip appended below the frame, not an overlay inset."""
     import json
+    from io import BytesIO
+
+    from PIL import Image
 
     from flir_research_interface.analysis.media import MediaOptions, compose_preview
     r = _make(tmp_path)
@@ -116,4 +120,7 @@ def test_live_plot_inset_draws_when_a_roi_is_chosen(tmp_path: Path) -> None:
     plain = compose_preview(r2, MediaOptions(start=0, stop=20), 10)
     with_plot = compose_preview(r2, MediaOptions(start=0, stop=20, plot_roi=1), 10)
     assert plain[:8] == b"\x89PNG\r\n\x1a\n" and with_plot[:8] == b"\x89PNG\r\n\x1a\n"
-    assert with_plot != plain  # the inset changed the frame
+    pw, ph = Image.open(BytesIO(plain)).size
+    ww, wh = Image.open(BytesIO(with_plot)).size
+    assert ww == pw  # same width
+    assert wh > ph  # taller: the plot panel is appended below the image
