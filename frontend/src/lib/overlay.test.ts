@@ -45,7 +45,7 @@ test("hitTest handles circles (inside), lines and polylines (within tolerance of
 });
 
 
-test("roiColor: explicit colour wins, otherwise the trace token by index; presets are 9 hex colours", () => {
+test("roiColor: explicit color wins, otherwise the trace token by index; presets are 9 hex colors", () => {
   assert.equal(roiColor({ id: 1, kind: "spot", x: 0, y: 0, color: "#123456" }, 3), "#123456");
   assert.equal(roiColor({ id: 1, kind: "spot", x: 0, y: 0 }, 1), "var(--accent)");
   assert.equal(COLOR_PRESETS.length, 9);

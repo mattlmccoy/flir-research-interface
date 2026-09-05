@@ -193,7 +193,7 @@ def _two_rect_reader(tmp_path: Path) -> ExperimentReader:
 
 
 def test_plot_traces_multi_roi_distinct_colors_and_labels(tmp_path: Path) -> None:
-    """Several selected ROIs each get their own series and a distinct colour."""
+    """Several selected ROIs each get their own series and a distinct color."""
     from flir_research_interface.analysis.media import MediaOptions, _plot_traces
     r2 = _two_rect_reader(tmp_path)
     traces = _plot_traces(r2, MediaOptions(start=0, stop=20, plot_rois=(1, 2)))
@@ -247,14 +247,14 @@ def test_plot_series_gives_each_roi_its_own_stats(tmp_path: Path) -> None:
 
 
 def test_overlay_rois_filters_which_boxes_draw(tmp_path: Path) -> None:
-    """overlay_rois limits the ROI boxes drawn on the frame; colours stay index-stable."""
+    """overlay_rois limits the ROI boxes drawn on the frame; colors stay index-stable."""
     from flir_research_interface.analysis.media import MediaOptions, _overlay_rois
     r2 = _two_rect_reader(tmp_path)
     all_boxes = _overlay_rois(r2, MediaOptions())
     assert {b["id"] for b in all_boxes} == {1, 2}  # default: all
     one = _overlay_rois(r2, MediaOptions(overlay_rois=(2,)))
     assert [b["id"] for b in one] == [2]
-    # ROI 2's colour is the same whether or not ROI 1 is also drawn (explicit colour, not by index)
+    # ROI 2's color is the same whether or not ROI 1 is also drawn (explicit color, not by index)
     assert one[0]["color"] == next(b["color"] for b in all_boxes if b["id"] == 2)
 
 

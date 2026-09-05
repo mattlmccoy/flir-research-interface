@@ -11,7 +11,7 @@ export const PALETTE_NOTES: Record<PaletteName, string> = {
   inferno: "perceptually uniform, black→yellow; best general thermal choice",
   magma: "perceptually uniform, black→pale; softer than inferno",
   plasma: "perceptually uniform, blue→yellow",
-  viridis: "perceptually uniform, blue→green→yellow; colour-blind safe",
+  viridis: "perceptually uniform, blue→green→yellow; color-blind safe",
   cividis: "perceptually uniform, optimised for deuteranopia",
   turbo: "high-contrast rainbow with near-uniform lightness ramp (Google)",
   "rainbow-hc": "FLIR-style high-contrast rainbow: hue cycles fast, small differences pop; NOT uniform",
@@ -101,6 +101,17 @@ export function buildLut(name: PaletteName): Uint8ClampedArray {
     case "diverging": // blue − neutral − red, for reference-frame subtraction
       return interpolate([[0, 40, 90, 220], [0.5, 235, 235, 235], [1, 220, 50, 40]]);
   }
+}
+
+/** A CSS `linear-gradient(...)` preview of a palette, sampled at `steps` stops — for swatches. */
+export function paletteGradient(name: PaletteName, steps = 8): string {
+  const lut = buildLut(name);
+  const stops: string[] = [];
+  for (let s = 0; s < steps; s++) {
+    const i = Math.round((s / (steps - 1)) * 255) * 4;
+    stops.push(`rgb(${lut[i]},${lut[i + 1]},${lut[i + 2]}) ${Math.round((s / (steps - 1)) * 100)}%`);
+  }
+  return `linear-gradient(to right, ${stops.join(", ")})`;
 }
 
 /**

@@ -48,12 +48,12 @@ function where(r: Roi): string {
 function ColorPicker({ r, i, dispatch, onDone }: { r: Roi; i: number; dispatch: (a: RoiAction) => void; onDone: () => void }) {
   const current = roiColor(r, i);
   return (
-    <div className="swatches" role="group" aria-label={`colour of ${roiLabel(r)}`}>
+    <div className="swatches" role="group" aria-label={`color of ${roiLabel(r)}`}>
       {COLOR_PRESETS.map((c) => (
         <button key={c} type="button" className={current.toLowerCase() === c ? "on" : ""} style={{ background: c }} title={c}
           onClick={() => { dispatch({ type: "recolor", id: r.id, color: c }); onDone(); }} />
       ))}
-      <input type="color" aria-label="custom colour" value={r.color ?? "#ffffff"} title="any colour"
+      <input type="color" aria-label="custom color" value={r.color ?? "#ffffff"} title="any color"
         onChange={(e) => dispatch({ type: "recolor", id: r.id, color: e.target.value })} />
       {r.kind === "spot" && (
         <label className="hint" style={{ flexBasis: "100%", marginTop: 4 }} title="Measurement cursor: report the mean of the 3×3 pixels around the spot (standard thermography practice) instead of the single pixel">
@@ -87,7 +87,7 @@ function OpticsEditor({ r, dispatch }: { r: Roi; dispatch: (a: RoiAction) => voi
   );
 }
 
-/** One row per ROI: colour swatch (click to change), editable name, current values, remove. */
+/** One row per ROI: color swatch (click to change), editable name, current values, remove. */
 export function RoiRows({ rois, stats, selected, selectedIds, dispatch, extremes, onExtremes, units = "C", conv = null }: Props) {
   const isSel = (id: number) => (selectedIds ? selectedIds.includes(id) : selected === id);
   const [editing, setEditing] = useState<number | null>(null);
@@ -102,7 +102,7 @@ export function RoiRows({ rois, stats, selected, selectedIds, dispatch, extremes
         <li>╱ Line: drag from one end to the other; the pixels along it are measured.</li>
         <li>⬠ Polygon: click each vertex; double-click places the last one and closes the shape (Enter closes, Esc cancels, Backspace undoes a vertex). ⌇ Bendable line: the same, but open. ✎ Freehand: hold the mouse and draw; releasing closes the shape.</li>
         <li>↖ Select: click an ROI, then drag to move it; Delete removes it. Shift-click to select several and drag them together. When a polygon, bendable line or line is selected, drag its square handles to edit individual vertices.</li>
-        <li>Click the colour square to recolour, set a per-ROI emissivity and reflected temperature (values are re-corrected from the camera's setting); double-click the name to rename; ◉ hides an ROI on the image and plot without removing it.</li>
+        <li>Click the color square to recolor, set a per-ROI emissivity and reflected temperature (values are re-corrected from the camera's setting); double-click the name to rename; ◉ hides an ROI on the image and plot without removing it.</li>
       </ul>
     </Disclosure>
   );
@@ -113,7 +113,7 @@ export function RoiRows({ rois, stats, selected, selectedIds, dispatch, extremes
         {rois.map((r, i) => (
           [
             <span key={`l${r.id}`} className={`lbl ${isSel(r.id) ? "sel" : ""}`} title={where(r)}>
-              <button type="button" className="sw" style={{ background: roiColor(r, i), border: "none" }} aria-label={`colour of ${roiLabel(r)}`}
+              <button type="button" className="sw" style={{ background: roiColor(r, i), border: "none" }} aria-label={`color of ${roiLabel(r)}`}
                 onClick={() => setPicking(picking === r.id ? null : r.id)} />
               {editing === r.id ? (
                 <input autoFocus type="text" defaultValue={r.name ?? ""} placeholder={roiId(r)} aria-label="ROI name" maxLength={40}

@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import type { Dispatch, ReactNode } from "react";
 import { api, type ExperimentInfo, type RecordingStatus, type RoiSeries, type Status, type Timeline } from "../lib/api.ts";
 import { type FrameMessage, decodeFrameBlock } from "../lib/protocol.ts";
-import type { PaletteName } from "../lib/palette.ts";
+import { PALETTE_NAMES, paletteGradient, type PaletteName } from "../lib/palette.ts";
 import type { Range, ScaleMode } from "../lib/scale.ts";
 import type { LayoutAction, LayoutState } from "../lib/layout.ts";
 import { SPEEDS, clampIndex, nextFrameDelayMs, speedLabel } from "../lib/playback.ts";
@@ -20,7 +20,7 @@ function storedToRois(rois: unknown): Roi[] {
   return loadRois({ getItem: () => JSON.stringify({ rois, nextId: 1 }), setItem: () => undefined } as unknown as Storage).rois;
 }
 import { roiColor } from "../lib/overlay.ts";
-import { eventsToMarkers, nearestIndex, nextMarkerTime } from "../lib/events.ts";
+import { eventsToMarkers, markColor, nearestIndex, nextMarkerTime } from "../lib/events.ts";
 import { fmtAny, fmtCelsius } from "../lib/format.ts";
 import { ThermalView, type StatsMap } from "./ThermalView.tsx";
 import { DisplayControls } from "./DisplayControls.tsx";
@@ -33,7 +33,7 @@ import { loadAlignment, parseAlignment } from "../lib/alignment.ts";
 import { TimePlot, type Trace } from "./TimePlot.tsx";
 import { StudioFrame } from "./studio/StudioFrame.tsx";
 import { ToolStrip } from "./studio/ToolStrip.tsx";
-import { IconClip, IconEye, IconLayers, IconRefresh, IconSaveImage } from "./studio/StripIcons.tsx";
+import { IconClip, IconEye, IconLayers, IconPalette, IconRefresh, IconSaveImage } from "./studio/StripIcons.tsx";
 import { Rail } from "./studio/Rail.tsx";
 import { RailSection } from "./studio/RailSection.tsx";
 import { PlotDock } from "./studio/PlotDock.tsx";
@@ -61,15 +61,7 @@ function seriesTraces(series: RoiSeries | null, rois: RoiState): Trace[] {
   });
 }
 
-/** Colour a timeline event tick by kind, so RF ON/OFF, NUC and gaps read apart on the scrubber. */
-function markColor(label: string): string {
-  const l = label.toUpperCase();
-  if (l.includes("RF") && l.includes("ON")) return "var(--live)";     // RF on → green
-  if (l.includes("RF") && l.includes("OFF")) return "var(--warn)";    // RF off → amber
-  if (l.includes("NUC")) return "var(--accent)";
-  if (l.includes("GAP")) return "var(--err)";
-  return "var(--fg-strong)";
-}
+/** Color a timeline event tick by kind, so RF ON/OFF, NUC and gaps read apart on the scrubber. */
 
 export function PlaybackPage(p: Props) {
   const [info, setInfo] = useState<ExperimentInfo | null>(null);
@@ -84,6 +76,7 @@ export function PlaybackPage(p: Props) {
   const [series, setSeries] = useState<RoiSeries | null>(null);
   const [showMedia, setShowMedia] = useState(false);
   const [regenBusy, setRegenBusy] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const cache = useRef(new Map<number, FrameMessage>());
   const inflight = useRef(new Map<number, Promise<void>>());
   const BLOCK = 60;
@@ -267,7 +260,7 @@ export function PlaybackPage(p: Props) {
 
   return (
     <>
-    {showMedia && tl && <MediaExportEditor name={p.name} nFrames={n} index={index} tS={tl.t_s} rois={(info?.rois ?? []).map((r) => ({ id: Number(r.id), name: typeof r.name === "string" ? r.name : undefined, kind: typeof r.kind === "string" ? r.kind : undefined, color: typeof r.color === "string" ? r.color : undefined }))} hasVisible={hasVideo && !!info?.visible_alignment} onClose={() => setShowMedia(false)} />}
+    {showMedia && tl && <MediaExportEditor name={p.name} nFrames={n} index={index} tS={tl.t_s} markers={markers} rois={(info?.rois ?? []).map((r) => ({ id: Number(r.id), name: typeof r.name === "string" ? r.name : undefined, kind: typeof r.kind === "string" ? r.kind : undefined, color: typeof r.color === "string" ? r.color : undefined }))} hasVisible={hasVideo && !!info?.visible_alignment} onClose={() => setShowMedia(false)} />}
     <StudioFrame layout={p.layout} topbar={p.topbar} dispatch={p.dispatch} dockFoot={transport}
       strip={<ToolStrip tool={p.layout.tool} onTool={(tool) => p.dispatch({ type: "setTool", tool })} onCollapseAll={() => p.dispatch({ type: !p.layout.rail && !p.layout.dock ? "restoreAll" : "collapseAll" })} collapsed={!p.layout.rail && !p.layout.dock} zoom={p.layout.zoom} onZoom={(z) => p.dispatch({ type: "setZoom", zoom: z })}
         extras={<>
@@ -281,6 +274,20 @@ export function PlaybackPage(p: Props) {
                 <input type="range" min={0} max={1} step={0.05} value={p.layout.overlay.opacity} aria-label="visible camera opacity"
                   onChange={(e) => p.dispatch({ type: "setOverlay", patch: { opacity: Number(e.target.value) } })} />
                 <span className="v">{Math.round(p.layout.overlay.opacity * 100)}%</span>
+              </span>
+            )}
+          </span>
+          <span className="strip-pop-anchor">
+            <button aria-label="Color palette" aria-pressed={paletteOpen} className={paletteOpen ? "active" : ""} data-tip={paletteOpen ? undefined : `Color palette — ${p.palette}`} onClick={() => setPaletteOpen((v) => !v)}><IconPalette /></button>
+            {paletteOpen && (
+              <span className="strip-popover palette-pop" role="listbox" aria-label="Color palette">
+                {PALETTE_NAMES.map((name) => (
+                  <button key={name} role="option" aria-selected={p.palette === name} className={`palette-opt${p.palette === name ? " active" : ""}`}
+                    onClick={() => { p.setPalette(name); setPaletteOpen(false); }} title={name}>
+                    <span className="sw" style={{ background: paletteGradient(name) }} />
+                    <span className="nm">{name}</span>
+                  </button>
+                ))}
               </span>
             )}
           </span>

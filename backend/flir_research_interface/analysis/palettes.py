@@ -2,7 +2,7 @@
 
 The live viewer offers many palettes; the export compositor mirrors the common ones here. ``iron``
 and ``inferno`` use the exact tables already in the codebase; the others are built by interpolating
-a handful of colour stops (close enough for a thermal viewing palette). ``palette_lut(name)`` always
+a handful of color stops (close enough for a thermal viewing palette). ``palette_lut(name)`` always
 returns a (256, 3) uint8 LUT, falling back to inferno for an unknown name.
 """
 

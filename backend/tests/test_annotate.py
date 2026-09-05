@@ -1,5 +1,5 @@
 """Publication-grade derived images per run: native-resolution frames (upscaled 2x) with and
-without ROI annotations, a colour bar and a caption; the same overlay drawn into the video."""
+without ROI annotations, a color bar and a caption; the same overlay drawn into the video."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from flir_research_interface.playback.reader import ExperimentReader
 from tests.test_run_summary import _exp
 
 
-def test_draw_rois_outlines_in_the_roi_colour_with_label(tmp_path: Path) -> None:
+def test_draw_rois_outlines_in_the_roi_color_with_label(tmp_path: Path) -> None:
     img = Image.new("RGB", (64, 48), (0, 0, 0))
     rois = [
         {
@@ -33,7 +33,7 @@ def test_draw_rois_outlines_in_the_roi_colour_with_label(tmp_path: Path) -> None
     ]
     draw_rois(img, rois, scale=1, values={2: "31.2 °C"})
     a = np.asarray(img)
-    assert tuple(a[4, 10]) == (0xFF, 0x8A, 0xD8), "top edge drawn in the ROI colour"
+    assert tuple(a[4, 10]) == (0xFF, 0x8A, 0xD8), "top edge drawn in the ROI color"
     assert a[6:14, 6:18, :].sum() > 0, "label text drawn (inside the box, which is otherwise black)"
 
 
@@ -41,7 +41,7 @@ def test_annotated_frame_is_2x_native_with_bar_and_caption_and_rois(tmp_path: Pa
     r = _exp(tmp_path)  # 16x16 frames, 2 ROIs stored in metadata
     clean = annotated_frame(r, index=5, scale=2, with_rois=False)
     ann = annotated_frame(r, index=5, scale=2, with_rois=True)
-    assert clean.width >= 32 + 40 and clean.height >= 32 + 20  # 2x image + colour bar + caption
+    assert clean.width >= 32 + 40 and clean.height >= 32 + 20  # 2x image + color bar + caption
     assert ann.size == clean.size
     assert np.asarray(ann).astype(int).sum() != np.asarray(clean).astype(int).sum(), (
         "ROIs change pixels"

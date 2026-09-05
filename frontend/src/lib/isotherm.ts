@@ -1,6 +1,6 @@
 /**
  * Isotherms (Research Studio style): paint every pixel above, below or between temperature
- * limits a solid colour on top of the palette. Pure function over the °C field so live and
+ * limits a solid color on top of the palette. Pure function over the °C field so live and
  * playback share it; NaN never matches.
  */
 export type IsothermMode = "off" | "above" | "below" | "between";

@@ -1,8 +1,8 @@
 """Media export: render a chosen time window of a run to MP4 or GIF with optional overlays.
 
-Builds on the thermal-video frame compositor (palette + colour bar + elapsed time + ROIs) and adds
+Builds on the thermal-video frame compositor (palette + color bar + elapsed time + ROIs) and adds
 a title caption, a whole-frame min/max/mean readout, and — for GIF — a two-pass palette for clean
-colours with a frame-count guard. See the media-export design spec under docs/superpowers/specs/.
+colors with a frame-count guard. See the media-export design spec under docs/superpowers/specs/.
 """
 
 from __future__ import annotations
@@ -22,6 +22,8 @@ from PIL import Image, ImageDraw, ImageFont
 
 from flir_research_interface.analysis.thermal_video import (
     FFMPEG_CANDIDATES,
+    _encode_tmp,
+    _finalize_encode,
     encode_command,
     label_font,
     load_range,
@@ -90,7 +92,7 @@ class MediaOptions:
     plot_series: tuple[tuple[int, str], ...] = ()  # per-ROI lines: (roi_id, stat) pairs
     overlay_rois: tuple[int, ...] = ()  # which ROI boxes to draw on the frame ((): all)
     visible_opacity: float = 0.0  # blend the recorded visible camera over the frame (0 = off)
-    palette: str = "inferno"  # colour palette for the thermal image + bar
+    palette: str = "inferno"  # color palette for the thermal image + bar
 
 
 def _slug(text: str) -> str:
@@ -129,8 +131,8 @@ def _plot_pairs(opts: MediaOptions) -> list[tuple[int, str]]:
 def _overlay_rois(reader: ExperimentReader, opts: MediaOptions) -> list[dict[str, Any]]:
     """The ROI boxes to draw on the frame. ``overlay_rois`` limits them; empty means all.
 
-    Each ROI gets its overlay palette colour resolved from its *original* index, so filtering the
-    list never shifts a ROI's colour (and the box matches its plot line).
+    Each ROI gets its overlay palette color resolved from its *original* index, so filtering the
+    list never shifts a ROI's color (and the box matches its plot line).
     """
     if not opts.with_rois:
         return []
@@ -198,8 +200,8 @@ def _plot_traces(reader: ExperimentReader, opts: MediaOptions) -> list[dict[str,
     """One trace per (chosen ROI × chosen stat) over the window, for the live-plot strip.
 
     Reads the precomputed ``exports/roi_series.csv`` when present (instant); otherwise falls back
-    to computing the series from the store. Colours match the on-frame ROI overlay, which assigns
-    ``DEFAULT_COLORS`` by list order when a ROI has no explicit colour.
+    to computing the series from the store. Colors match the on-frame ROI overlay, which assigns
+    ``DEFAULT_COLORS`` by list order when a ROI has no explicit color.
     """
     pairs = _plot_pairs(opts)
     if not pairs:
@@ -234,7 +236,7 @@ def _plot_traces(reader: ExperimentReader, opts: MediaOptions) -> list[dict[str,
         base = _rgb(roi.get("color") or DEFAULT_COLORS[idx_of[rid] % len(DEFAULT_COLORS)])
         name = str(roi.get("name") or f"ROI {rid}")
         label = name if is_spot else f"{name} · {key}"
-        # keep the ROI's own colour for every stat; the stat is shown by line style + marker.
+        # keep the ROI's own color for every stat; the stat is shown by line style + marker.
         out.append({"v": v_ds, "t": t_ds, "label": label, "color": base, "stat": key})
     return out
 
@@ -279,7 +281,7 @@ def _nice_ticks(lo: float, hi: float, target: int = 4) -> list[float]:
     return ticks or [lo, hi]
 
 
-# Each stat gets a distinct line style + marker so several stats of one ROI (same colour) read
+# Each stat gets a distinct line style + marker so several stats of one ROI (same color) read
 # apart: mean = solid + circle, max = dashed + up-triangle, min = dotted + down-triangle.
 _STAT_STYLE = {
     "mean": {"dash": None, "marker": "o"},
@@ -403,7 +405,7 @@ def _draw_panel(d: ImageDraw.ImageDraw, traces: list[dict[str, Any]], cur_t: flo
             d.text((gx - d.textlength(lbl, font=font) / 2, ay0 + ah + 4), lbl,
                    fill=_MUTE, font=font)
 
-    for tr in traces:  # one line per (ROI, stat): ROI colour, stat = style + periodic marker
+    for tr in traces:  # one line per (ROI, stat): ROI color, stat = style + periodic marker
         col = tuple(tr["color"])
         st = _STAT_STYLE.get(tr.get("stat", "mean"), _STAT_STYLE["mean"])
         ts, v = tr["t"], tr["v"]
@@ -591,7 +593,7 @@ def _pump(proc: subprocess.Popen[bytes], frames: Any, total: int,
 def _encode_mp4(  # type: ignore[no-untyped-def]
     ffmpeg, width, height, fps, out, frames, total, on_progress
 ) -> dict[str, Any]:
-    tmp = out.with_suffix(".part.mp4")
+    tmp = _encode_tmp(".mp4")  # encode in the system temp dir, not the Dropbox-synced exports/
     proc = subprocess.Popen(encode_command(ffmpeg, width, height, fps, tmp),
                             stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     _pump(proc, frames, total, on_progress)
@@ -600,14 +602,14 @@ def _encode_mp4(  # type: ignore[no-untyped-def]
         tmp.unlink(missing_ok=True)
         tail = err.decode(errors="replace")[-400:]
         raise RuntimeError(f"ffmpeg failed (rc {proc.returncode}): {tail}")
-    tmp.replace(out)
+    _finalize_encode(tmp, out)
     return {}
 
 
 def _encode_gif(  # type: ignore[no-untyped-def]
     ffmpeg, width, height, fps, out, frames, total, on_progress
 ) -> dict[str, Any]:
-    # write raw frames once, then two-pass palettegen/paletteuse for clean colours
+    # write raw frames once, then two-pass palettegen/paletteuse for clean colors
     with tempfile.TemporaryDirectory() as td:
         raw = Path(td) / "frames.rgb"
         with raw.open("wb") as f:
@@ -620,14 +622,14 @@ def _encode_gif(  # type: ignore[no-untyped-def]
                 "-pix_fmt", "rgb24", "-s", f"{width}x{height}", "-r", f"{fps:g}", "-i", str(raw)]
         subprocess.run([*base, "-vf", "palettegen=stats_mode=diff", str(pal)], check=True,
                        capture_output=True, timeout=600)
-        tmp = out.with_suffix(".part.gif")
+        tmp = Path(td) / "out.gif"  # build the GIF in the temp dir, then move it into exports/
         r = subprocess.run([*base, "-i", str(pal), "-lavfi",
                             "paletteuse=dither=bayer:bayer_scale=3", str(tmp)],
                            capture_output=True, timeout=600)
         if r.returncode != 0 or not tmp.is_file():
             tmp.unlink(missing_ok=True)
             raise RuntimeError(f"gif encode failed: {r.stderr.decode(errors='replace')[-400:]}")
-        tmp.replace(out)
+        _finalize_encode(tmp, out)
     return {}
 
 

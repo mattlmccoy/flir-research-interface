@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { NumberField } from "./NumberField.tsx";
 import { api, type MediaJob, type RangeJob } from "../lib/api.ts";
+import { markColor } from "../lib/events.ts";
+import type { Marker } from "./TimePlot.tsx";
 
 interface RoiPick { id: number; name?: string; kind?: string; color?: string }
 interface Props {
@@ -8,12 +10,13 @@ interface Props {
   nFrames: number;
   index: number; // current playhead in playback, seeds the scrubber
   tS: number[]; // timeline seconds per frame
+  markers: Marker[]; // RF on/off, NUC, gap event marks, shown as ticks on the trim bar
   rois: RoiPick[]; // stored ROIs, for the ROI picker
   hasVisible?: boolean; // the run has an aligned visible-camera recording
   onClose: () => void;
 }
 
-// Matches the backend overlay palette (annotate.DEFAULT_COLORS), so a picker dot shows the colour
+// Matches the backend overlay palette (annotate.DEFAULT_COLORS), so a picker dot shows the color
 // the ROI's box and plot line will actually have in the export.
 const MEDIA_PALETTE = ["#ffb000", "#4cc9f0", "#ff8ad8", "#7cff6b", "#ff6b6b", "#c8a2ff", "#ffffff"];
 function dotColor(r: RoiPick, i: number): string { return r.color ?? MEDIA_PALETTE[i % MEDIA_PALETTE.length]; }
@@ -21,9 +24,11 @@ function dotColor(r: RoiPick, i: number): string { return r.color ?? MEDIA_PALET
 function fmtSecs(s: number): string { return `${s.toFixed(2)} s`; }
 function fmtBytes(n: number): string { return n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${(n / 1e3).toFixed(0)} kB`; }
 
-/** A video-style crop bar: draggable in/out handles plus a scrub playhead over the whole run. */
-function TrimBar({ n, start, stop, scrub, onStart, onStop, onScrub }: {
+/** A video-style crop bar: draggable in/out handles plus a scrub playhead over the whole run,
+ *  with event ticks (RF on/off, NUC, gap) at their fraction of the run. */
+function TrimBar({ n, start, stop, scrub, marks, onStart, onStop, onScrub }: {
   n: number; start: number; stop: number; scrub: number;
+  marks: { pct: number; label: string }[];
   onStart: (f: number) => void; onStop: (f: number) => void; onScrub: (f: number) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -48,6 +53,9 @@ function TrimBar({ n, start, stop, scrub, onStart, onStop, onScrub }: {
   return (
     <div className="trimbar" ref={ref} onPointerDown={drag("scrub")}>
       <div className="trim-sel" style={{ left: pct(start), right: `calc(100% - ${pct(stop - 1)})` }} />
+      {marks.map((m, i) => (
+        <span key={i} className="trim-mark" title={m.label} style={{ left: `${m.pct}%`, background: markColor(m.label) }} />
+      ))}
       <div className="trim-handle in" style={{ left: pct(start) }} onPointerDown={(e) => { e.stopPropagation(); drag("start")(e); }} title="Start" />
       <div className="trim-handle out" style={{ left: pct(stop - 1) }} onPointerDown={(e) => { e.stopPropagation(); drag("stop")(e); }} title="End" />
       <div className="trim-playhead" style={{ left: pct(scrub) }} />
@@ -56,7 +64,7 @@ function TrimBar({ n, start, stop, scrub, onStart, onStop, onScrub }: {
 }
 
 /** Full-screen editor: scrub a live preview and set an in/out window, then export MP4 or GIF. */
-export function MediaExportEditor({ name, nFrames, index, tS, rois, hasVisible, onClose }: Props) {
+export function MediaExportEditor({ name, nFrames, index, tS, markers, rois, hasVisible, onClose }: Props) {
   const [start, setStart] = useState(0);
   const [stop, setStop] = useState(nFrames);
   const [scrub, setScrub] = useState(Math.min(index, nFrames - 1));
@@ -132,6 +140,12 @@ export function MediaExportEditor({ name, nFrames, index, tS, rois, hasVisible, 
   }, [rangeReady, name, scrub, showRois, frameStats, timestamp, colorbar, title, plotSeries.join(","), selIds.join(","), visibleOpacity, palette, start, stop]);
 
   const windowSecs = tS.length ? (tS[Math.min(stop, tS.length) - 1] ?? 0) - (tS[start] ?? 0) : 0;
+  // Event ticks (RF on/off, NUC, gap) placed at each marker's fraction of the whole run, matching
+  // the playback scrubber. The trim bar spans the whole recording, so use the run's full duration.
+  const runSecs = tS.length ? (tS[tS.length - 1] ?? 0) : 0;
+  const trimMarks = runSecs > 0
+    ? markers.map((m) => ({ pct: Math.max(0, Math.min(100, (m.t / runSecs) * 100)), label: m.label }))
+    : [];
 
   async function run() {
     setErr(null); setJob({ state: "running", step: "starting", done: 0, total: 0 });
@@ -180,7 +194,7 @@ export function MediaExportEditor({ name, nFrames, index, tS, rois, hasVisible, 
           <div className="hint" style={{ textAlign: "center" }}>frame {scrub} · {tS[scrub] != null ? fmtSecs(tS[scrub]) : ""}</div>
         </div>
 
-        <TrimBar n={nFrames} start={start} stop={stop} scrub={scrub}
+        <TrimBar n={nFrames} start={start} stop={stop} scrub={scrub} marks={trimMarks}
           onStart={(f) => { setStart(f); setScrub(f); }} onStop={(f) => { setStop(f); setScrub(f - 1); }} onScrub={setScrub} />
         <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 6 }}>
           <span className="hint" style={{ display: "flex", gap: 6, alignItems: "center" }}>in
@@ -197,7 +211,7 @@ export function MediaExportEditor({ name, nFrames, index, tS, rois, hasVisible, 
         <div className="media-opts kv">
           <span>format</span><span className="v plain"><select value={fmt} onChange={(e) => setFmt(e.target.value as "mp4" | "gif")} aria-label="format"><option value="mp4">MP4 (H.264)</option><option value="gif">Animated GIF</option></select></span>
           <span>size</span><span className="v plain"><select value={scale} onChange={(e) => setScale(Number(e.target.value))} aria-label="size"><option value={1}>1× (native)</option><option value={2}>2× (crisp)</option></select></span>
-          <span>palette</span><span className="v plain"><select value={palette} onChange={(e) => setPalette(e.target.value)} aria-label="colour palette">{["inferno", "iron", "magma", "plasma", "viridis", "turbo", "rainbow", "grayscale", "blackhot"].map((p) => <option key={p} value={p}>{p}</option>)}</select></span>
+          <span>palette</span><span className="v plain"><select value={palette} onChange={(e) => setPalette(e.target.value)} aria-label="color palette">{["inferno", "iron", "magma", "plasma", "viridis", "turbo", "rainbow", "grayscale", "blackhot"].map((p) => <option key={p} value={p}>{p}</option>)}</select></span>
           {hasVisible && <span title="Blend the recorded visible camera over the thermal image">visible cam</span>}
           {hasVisible && (
             <span className="v plain" style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "flex-end" }}>
@@ -243,7 +257,7 @@ export function MediaExportEditor({ name, nFrames, index, tS, rois, hasVisible, 
           <label><input type="checkbox" checked={showRois} onChange={(e) => setShowRois(e.target.checked)} /> ROIs + values</label>
           <label><input type="checkbox" checked={frameStats} onChange={(e) => setFrameStats(e.target.checked)} /> frame min/max/mean</label>
           <label><input type="checkbox" checked={timestamp} onChange={(e) => setTimestamp(e.target.checked)} /> timestamp</label>
-          <label><input type="checkbox" checked={colorbar} onChange={(e) => setColorbar(e.target.checked)} /> colour bar</label>
+          <label><input type="checkbox" checked={colorbar} onChange={(e) => setColorbar(e.target.checked)} /> color bar</label>
         </div>
 
         <div className="media-actions">

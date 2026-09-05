@@ -1,4 +1,4 @@
-/** Pure geometry for the ROI overlay: client→image mapping, hit testing, trace colours. */
+/** Pure geometry for the ROI overlay: client→image mapping, hit testing, trace colors. */
 import type { Roi } from "./roi.ts";
 
 export interface Box { left: number; top: number; width: number; height: number; }
@@ -51,15 +51,15 @@ export function pointInPolygon(x: number, y: number, pts: [number, number][]): b
   return inside;
 }
 
-/** Nine preset ROI colours (phosphor, amber, sky, pink, lime, violet, white, coral, cyan). */
+/** Nine preset ROI colors (phosphor, amber, sky, pink, lime, violet, white, coral, cyan). */
 export const COLOR_PRESETS = ["#5cff8a", "#ffb454", "#6ec3ff", "#ff8ad8", "#c9d64f", "#b48cff", "#f5f7fa", "#ff5f56", "#3ee6d6"] as const;
 
-/** The ROI's own colour when set, else its trace token by index. */
+/** The ROI's own color when set, else its trace token by index. */
 export function roiColor(roi: Roi, index: number): string {
   return roi.color ?? traceColor(index);
 }
 
-/** Trace colours as CSS variables from theme.css; the first trace is phosphor green (spec §2). */
+/** Trace colors as CSS variables from theme.css; the first trace is phosphor green (spec §2). */
 export const TRACE_TOKENS = ["--live", "--accent", "--trace-3", "--trace-4", "--trace-5", "--trace-6"] as const;
 
 export function traceColor(i: number): string {

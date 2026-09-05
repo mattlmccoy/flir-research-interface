@@ -1,7 +1,7 @@
 /**
  * Flat line-icons for the tool-strip *action* shortcuts. Drawn as SVG (not unicode glyphs) so they
  * read as commands and never resemble the geometric ROI drawing tools (circle/rect/ellipse/…).
- * All use `currentColor`, so they follow the button's normal/active colour like the glyph tools.
+ * All use `currentColor`, so they follow the button's normal/active color like the glyph tools.
  */
 import type { SVGProps } from "react";
 
@@ -50,6 +50,18 @@ export function IconLayers() {
     <svg {...base}>
       <rect x="2.2" y="2.2" width="8" height="8" rx="1.4" />
       <path d="M5.8 13.8 h6 A1.6 1.6 0 0 0 13.4 12.2 v-6" />
+    </svg>
+  );
+}
+
+/** Palette — an artist's paint palette (pick the thermal color map). */
+export function IconPalette() {
+  return (
+    <svg {...base}>
+      <path d="M8 1.6 A6.4 6.4 0 1 0 8 14.4 C9 14.4 9.3 13.6 8.9 13 C8.3 12.1 8.9 11 10 11 h1.4 A3 3 0 0 0 14.4 8 A6.4 6.4 0 0 0 8 1.6 Z" />
+      <circle cx="5.3" cy="6.2" r="0.95" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="4.9" r="0.95" fill="currentColor" stroke="none" />
+      <circle cx="10.8" cy="6.4" r="0.95" fill="currentColor" stroke="none" />
     </svg>
   );
 }

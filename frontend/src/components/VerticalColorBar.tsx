@@ -14,7 +14,7 @@ interface Props {
   box?: { top: number; height: number } | null;
 }
 
-/** Vertical colour scale beside the thermal image: max at the top, ticks in the chosen unit,
+/** Vertical color scale beside the thermal image: max at the top, ticks in the chosen unit,
  * with optional editable min/max and a lock toggle (the same controls as the display panel). */
 export function VerticalColorBar({ palette, range, units = "C", conv = null, scaleMode, manual, setManual, setScaleMode, box }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);

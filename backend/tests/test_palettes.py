@@ -1,4 +1,4 @@
-"""Export/media colour palettes."""
+"""Export/media color palettes."""
 
 from __future__ import annotations
 

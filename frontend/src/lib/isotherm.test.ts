@@ -4,7 +4,7 @@ import { applyIsotherm, DEFAULT_ISOTHERM, parseIsotherm, type Isotherm } from ".
 
 const px = (rgba: Uint8ClampedArray, i: number) => Array.from(rgba.slice(i * 4, i * 4 + 4));
 
-test("above / below / between paint matching pixels a solid colour and leave the rest", () => {
+test("above / below / between paint matching pixels a solid color and leave the rest", () => {
   const c = new Float32Array([10, 20, 30, NaN]);
   const base = () => new Uint8ClampedArray([1, 1, 1, 255, 2, 2, 2, 255, 3, 3, 3, 255, 4, 4, 4, 255]);
   let rgba = base();

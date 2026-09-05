@@ -138,7 +138,7 @@ def readme_text(reader: ExperimentReader) -> str:
     lines.append("  visible.mp4/.json      visible camera (H.264) with host-clock timing")
     lines.append("  exports/roi_series.csv every ROI above on every frame, in °C")
     lines.append("  exports/roi_plot.png   the same series drawn against time with the marks")
-    lines.append("  exports/thermal_preview.mp4  colourised viewing copy (not radiometric)")
+    lines.append("  exports/thermal_preview.mp4  colorised viewing copy (not radiometric)")
     lines.append("  preview.png, keyframes.png   thumbnails")
     lines.append("")
     lines.append("Load in Python: zarr.open_group('thermal.zarr')['counts'] then apply the rule.")

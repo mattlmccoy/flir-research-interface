@@ -2,7 +2,7 @@
 
 When a scene exceeds the camera's range the hottest counts saturate at the 16-bit ceiling or wrap
 around and read as extreme cold. Such pixels carry no valid temperature; excluding them keeps
-whole-frame and ROI statistics (and the auto colour range) from being poisoned by false values.
+whole-frame and ROI statistics (and the auto color range) from being poisoned by false values.
 Mirrors ``frontend/src/lib/overrange.ts``.
 """
 

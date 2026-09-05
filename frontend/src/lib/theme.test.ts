@@ -27,7 +27,7 @@ const rootBlock = extractRootBlock(css);
 // The full token set theme.css must define on :root: the 27 base design tokens, the 3
 // additions Task 3 needed (--line-control, --focus, --live-glow-dim), and the 4 additions
 // from the Task 3 fix-up review (--image-bg, --scrim, --live-bg, --danger-ink) so styles.css
-// never hardcodes a colour literal.
+// never hardcodes a color literal.
 const REQUIRED_TOKENS = [
   "--bg", "--bg-deep", "--panel", "--line", "--line-strong", "--line-control",
   "--fg", "--fg-strong", "--muted",
@@ -85,8 +85,8 @@ test("styles.css defines no :root block (theme.css is the only source of tokens)
   assert.doesNotMatch(styles, /:root\s*{/, "styles.css must not re-declare :root — it would shadow theme.css's tokens");
 });
 
-test("styles.css carries no colour literals — every colour goes through a theme.css token", () => {
+test("styles.css carries no color literals — every color goes through a theme.css token", () => {
   const styles = readFileSync(stylesPath, "utf8");
-  assert.doesNotMatch(styles, /#[0-9a-fA-F]{3,8}\b/, "found a hex colour literal in styles.css — use a var(--token) instead");
+  assert.doesNotMatch(styles, /#[0-9a-fA-F]{3,8}\b/, "found a hex color literal in styles.css — use a var(--token) instead");
   assert.doesNotMatch(styles, /\b(rgba?|hsla?)\(/i, "found an rgb()/rgba()/hsl()/hsla() literal in styles.css — use a var(--token) instead");
 });

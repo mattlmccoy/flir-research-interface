@@ -99,7 +99,7 @@ def test_roi_plot_is_a_png_with_one_trace_per_roi_and_the_marks(tmp_path: Path) 
     pink = (
         (abs(a[..., 0] - 0xFF) < 40) & (abs(a[..., 1] - 0x8A) < 40) & (abs(a[..., 2] - 0xD8) < 40)
     ).sum()
-    assert pink > 50  # rect ROI drawn in its own colour
+    assert pink > 50  # rect ROI drawn in its own color
 
 
 def test_write_run_summary_puts_both_files_in_exports_and_skips_plot_without_rois(

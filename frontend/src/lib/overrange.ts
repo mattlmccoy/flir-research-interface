@@ -6,7 +6,7 @@
  *     (the "hot region shows as cold" artefact). Wrapped pixels are only flagged when the frame is
  *     clearly hot (its peak is well into the upper range), so a genuinely cold scene is never
  *     touched. The true temperature of these pixels is unrecoverable — flagging keeps them from
- *     rendering as false cold and from poisoning ROI statistics and the auto colour range.
+ *     rendering as false cold and from poisoning ROI statistics and the auto color range.
  */
 export const SAT_HI = 65000; // near uint16 max
 const FLOOR = 26000; // ~ -13 °C in 10 mK counts: implausibly cold in a hot scene → wrapped

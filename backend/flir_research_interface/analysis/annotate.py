@@ -1,6 +1,6 @@
 """Publication-grade derived images: a frame rendered at 2x native resolution with the inferno
 palette on a fixed run-wide scale, optionally with the stored ROIs drawn and labelled with their
-value at that frame, plus a colour bar and a caption. Used for ``exports/peak_frame*.png`` and,
+value at that frame, plus a color bar and a caption. Used for ``exports/peak_frame*.png`` and,
 per frame, for the annotated thermal video. Nothing here touches the store."""
 
 from __future__ import annotations
@@ -117,7 +117,7 @@ def draw_rois(
     values: dict[int, str] | None = None,
     width: int = 2,
 ) -> None:
-    """Outline every ROI (sensor coordinates x ``scale``) in its colour, with a label placed to
+    """Outline every ROI (sensor coordinates x ``scale``) in its color, with a label placed to
     avoid overlapping the other labels; a leader line ties a moved label back to its ROI so the
     labels do not sit on top of the shapes when there is room beside them."""
     d = ImageDraw.Draw(img, "RGBA")
@@ -213,7 +213,7 @@ def _draw_one(
     width: int,
     outline: bool = True,
 ) -> None:
-    """Stroke one ROI's outline in its colour (labels are placed separately by draw_rois)."""
+    """Stroke one ROI's outline in its color (labels are placed separately by draw_rois)."""
     col = _rgb(r.get("color") or DEFAULT_COLORS[i % len(DEFAULT_COLORS)])
     k = r["kind"]
     if k == "spot":
@@ -280,7 +280,7 @@ def annotated_frame(
     vrange: tuple[float, float] | None = None,
     caption: str | None = None,
 ) -> Image.Image:
-    """One frame at ``scale``x native resolution with colour bar and caption; ROIs optional."""
+    """One frame at ``scale``x native resolution with color bar and caption; ROIs optional."""
     c = _celsius(reader, index)
     if vrange is not None:
         vmin, vmax = vrange
@@ -298,7 +298,7 @@ def annotated_frame(
     rois = reader.metadata.get("rois") or []
     if with_rois and rois:
         draw_rois(img, rois, scale=scale, values=roi_values_at(reader, c, rois))
-    # colour bar
+    # color bar
     bar_h = h * scale
     ramp = np.linspace(255, 0, bar_h).astype(np.uint8)
     bar = Image.fromarray(np.repeat(INFERNO_LUT[ramp][:, None, :], BAR_W, axis=1))

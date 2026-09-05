@@ -61,6 +61,17 @@ export function eventsToMarkers(events: ExperimentEvent[], tl: Timeline, started
   return out;
 }
 
+/** Theme-token color for an event marker by its label (RF on/off, NUC, gap). Shared by the
+ *  playback scrubber and the media-export trim bar so a tick means the same thing in both. */
+export function markColor(label: string): string {
+  const l = label.toUpperCase();
+  if (l.includes("RF") && l.includes("ON")) return "var(--live)";   // RF on → green
+  if (l.includes("RF") && l.includes("OFF")) return "var(--warn)";  // RF off → amber
+  if (l.includes("NUC")) return "var(--accent)";
+  if (l.includes("GAP")) return "var(--err)";
+  return "var(--fg-strong)";
+}
+
 /** Time of the next (dir = 1) or previous (dir = -1) marker strictly beyond `t`, or null. */
 export function nextMarkerTime(markers: Marker[], t: number, dir: 1 | -1): number | null {
   const eps = 1e-6;

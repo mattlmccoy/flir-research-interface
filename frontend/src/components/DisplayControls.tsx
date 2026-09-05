@@ -35,7 +35,7 @@ export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, 
   const iso = isotherm ?? DEFAULT_ISOTHERM;
   const upd = (patch: Partial<Isotherm>) => setIsotherm?.({ ...iso, ...patch });
   const isoRow = setIsotherm && (
-    <div className="row" aria-label="isotherm" title="Paint every pixel above / below / between the limits a solid colour on top of the palette (visualisation only; nothing is written to the data)">
+    <div className="row" aria-label="isotherm" title="Paint every pixel above / below / between the limits a solid color on top of the palette (visualisation only; nothing is written to the data)">
       <span className="hint">isotherm</span>
       <select value={iso.mode} onChange={(e) => upd({ mode: e.target.value as Isotherm["mode"] })} aria-label="isotherm mode">
         <option value="off">off</option><option value="above">above</option><option value="below">below</option><option value="between">between</option>
@@ -43,7 +43,7 @@ export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, 
       {iso.mode !== "off" && <NumberField step={0.5} value={iso.lo} style={{ width: 64 }} aria-label={iso.mode === "between" ? "isotherm low limit °C" : "isotherm limit °C"} onChange={(n) => upd({ lo: n })} />}
       {iso.mode === "between" && <NumberField step={0.5} value={iso.hi} style={{ width: 64 }} aria-label="isotherm high limit °C" onChange={(n) => upd({ hi: n })} />}
       {iso.mode !== "off" && <span className="hint">°C</span>}
-      {iso.mode !== "off" && <input type="color" value={iso.color} aria-label="isotherm colour" onChange={(e) => upd({ color: e.target.value })} />}
+      {iso.mode !== "off" && <input type="color" value={iso.color} aria-label="isotherm color" onChange={(e) => upd({ color: e.target.value })} />}
     </div>
   );
   const refRow = onSetReference && (
@@ -58,7 +58,7 @@ export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, 
       {setUnits && (
         <div className="row" aria-label="units">
           <span className="hint">units</span>
-          <select value={units} onChange={(e) => setUnits(e.target.value as Units)} aria-label="display units" title="Units for every temperature readout (values, ROI rows, colour bar). Inputs such as range limits stay in °C. Counts = the camera's raw 16-bit value.">
+          <select value={units} onChange={(e) => setUnits(e.target.value as Units)} aria-label="display units" title="Units for every temperature readout (values, ROI rows, color bar). Inputs such as range limits stay in °C. Counts = the camera's raw 16-bit value.">
             {UNITS.map((u) => <option key={u} value={u}>{UNIT_LABEL[u]}</option>)}
           </select>
         </div>
@@ -70,7 +70,7 @@ export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, 
       )}
       {(setHold || setFlip || onRangeFromRoi !== undefined) && (
         <div className="row" aria-label="enhancement">
-          {onRangeFromRoi !== undefined && <button className="secondary" disabled={!onRangeFromRoi} onClick={() => onRangeFromRoi?.()} title="Lock the colour range to the selected ROI's min and max (select an area ROI first)">range ← ROI</button>}
+          {onRangeFromRoi !== undefined && <button className="secondary" disabled={!onRangeFromRoi} onClick={() => onRangeFromRoi?.()} title="Lock the color range to the selected ROI's min and max (select an area ROI first)">range ← ROI</button>}
           {setHold && (
             <select value={hold} onChange={(e) => setHold(e.target.value as "off" | "max" | "min")} aria-label="temporal hold" title="Show the hottest (or coldest) value each pixel has reached since you switched this on — a peak-temperature map. Measurements stay live.">
               <option value="off">live frame</option><option value="max">max hold</option><option value="min">min hold</option>
@@ -87,7 +87,7 @@ export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, 
         </div>
       )}
       {setAgc && agc && (
-        <div className="row" aria-label="AGC" title="How the palette is spread over the range. Linear: even. Plateau equalisation: bands where most pixels sit get more colours (ResearchIR's PE); the colour bar is then non-linear.">
+        <div className="row" aria-label="AGC" title="How the palette is spread over the range. Linear: even. Plateau equalisation: bands where most pixels sit get more colors (ResearchIR's PE); the color bar is then non-linear.">
           <span className="hint">AGC</span>
           <select value={agc.mode} onChange={(e) => setAgc({ ...agc, mode: e.target.value as Agc["mode"] })} aria-label="AGC mode"><option value="linear">linear</option><option value="plateau">plateau equalisation</option></select>
           {agc.mode === "plateau" && <input type="range" min={0} max={1} step={0.05} value={agc.plateau} aria-label="plateau strength" style={{ width: 110 }} onChange={(e) => setAgc({ ...agc, plateau: Number(e.target.value) })} />}
@@ -125,7 +125,7 @@ export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, 
         <label>max <NumberField step={0.5} aria-label="range maximum °C" value={scaleMode === "manual" ? manual.max : Math.round(shown.max * 10) / 10}
           onChange={(n) => { const base = scaleMode === "manual" ? manual : { min: Math.round(shown.min * 10) / 10, max: shown.max }; setManual({ ...base, max: n }); setScaleMode("manual"); }} /> °C</label>
       </div>
-      <div className="hint">{scaleMode === "auto" ? "Auto: the range follows each frame's min and max. Type a limit to lock it." : "Locked: colours stay fixed at these limits; values outside clip. \"Auto range\" returns to per-frame scaling."}</div>
+      <div className="hint">{scaleMode === "auto" ? "Auto: the range follows each frame's min and max. Type a limit to lock it." : "Locked: colors stay fixed at these limits; values outside clip. \"Auto range\" returns to per-frame scaling."}</div>
       <ColorBar palette={palette} range={shown} units={units} conv={conv} />
     </>
   );

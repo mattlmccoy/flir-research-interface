@@ -160,7 +160,7 @@ class MediaRequest(BaseModel):
     plot_series: list[str] = Field(default_factory=list)  # per-ROI lines as "<roi_id>:<stat>"
     overlay_rois: list[int] = Field(default_factory=list)  # ROI boxes to draw ([]=all)
     visible_opacity: float = Field(default=0.0, ge=0.0, le=1.0)  # blend visible camera (0 = off)
-    palette: str = "inferno"  # colour palette for the thermal frame
+    palette: str = "inferno"  # color palette for the thermal frame
     rois: list[dict[str, Any]] | None = None  # when given, persist first (on-screen ROIs)
 
 
@@ -645,7 +645,7 @@ def create_app(
         return extra
 
     def _rois_with_labels(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Validate ROI geometry/optics (parse_rois) and re-attach the operator's names/colours."""
+        """Validate ROI geometry/optics (parse_rois) and re-attach the operator's names/colors."""
         from flir_research_interface.analysis.series import parse_rois
 
         try:

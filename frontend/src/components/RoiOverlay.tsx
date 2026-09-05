@@ -33,7 +33,7 @@ interface Props {
 function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || "#ffffff";
 }
-/** Resolves "var(--x)" to its value; plain colours pass through. */
+/** Resolves "var(--x)" to its value; plain colors pass through. */
 function resolve(color: string): string {
   const m = /^var\((--[a-z0-9-]+)\)$/i.exec(color);
   return m ? cssVar(m[1]) : color;
@@ -59,7 +59,7 @@ function labelContent(r: Roi, s: RoiStats | undefined): ChipContent {
   return { name, value: `${s.mean.toFixed(1)}°`, range };
 }
 
-const nameX = PAD + DOTR * 2 + 5; // where text starts, right of the colour dot
+const nameX = PAD + DOTR * 2 + 5; // where text starts, right of the color dot
 
 function chipSize(ctx: CanvasRenderingContext2D, c: ChipContent): { w: number; h: number } {
   const line1 = nameX + ctx.measureText(c.name).width + (c.value ? SEGGAP + ctx.measureText(c.value).width : 0);
@@ -74,7 +74,7 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
 }
 
-/** Dark rounded chip: colour dot + name + mean on line 1, min…max on line 2. */
+/** Dark rounded chip: color dot + name + mean on line 1, min…max on line 2. */
 function drawChip(ctx: CanvasRenderingContext2D, x: number, y: number, c: ChipContent, dotColor: string): void {
   const { w, h } = chipSize(ctx, c);
   roundRect(ctx, x, y, w, h, 4);
@@ -140,7 +140,7 @@ function drawShape(ctx: CanvasRenderingContext2D, r: RoiInput, sx: number, sy: n
 }
 
 /** Canvas layer over the image: ROI shapes and value labels in image-pixel coordinates. */
-/** Hot (▲, warm colour) / cold (▽, cool colour) pixel markers, Research Studio style. */
+/** Hot (▲, warm color) / cold (▽, cool color) pixel markers, Research Studio style. */
 function drawMarker(ctx: CanvasRenderingContext2D, x: number, y: number, kind: "hot" | "cold", scrim: string): void {
   const s = 5;
   ctx.save();
@@ -239,7 +239,7 @@ export function RoiOverlay(p: Props) {
     const labels: { id: number; content: ChipContent; color: string; ax: number; ay: number;
       cx: number; cy: number; reach: number; selected: boolean }[] = [];
     p.rois.forEach((r, i) => {
-      if (r.hidden) return; // keep i so default colours match the rows
+      if (r.hidden) return; // keep i so default colors match the rows
       const color = resolve(roiColor(r, i));
       const sel = p.selectedIds ? p.selectedIds.includes(r.id) : r.id === p.selected;
       ctx.strokeStyle = color;
@@ -289,7 +289,7 @@ export function RoiOverlay(p: Props) {
     for (const pl of placed) { // leader lines first, under the chips
       if (!pl.displaced) continue;
       const l = meta.get(pl.id)!;
-      // connect the chip's colour dot to the ROI itself: the point on its edge facing the chip
+      // connect the chip's color dot to the ROI itself: the point on its edge facing the chip
       // (ring edge for circles/ellipses; the centre for spots/rects/polygons where reach == 0).
       const dotX = pl.x + PAD + DOTR, dotY = pl.y + LINE1_H / 2;
       let tx = l.cx, ty = l.cy;

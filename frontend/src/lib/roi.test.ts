@@ -169,7 +169,7 @@ test("loadRois accepts the new kinds and rejects malformed ones", () => {
   const got = loadRois(storage).rois;
   assert.deepEqual(got.map((r) => r.id), [1, 3, 4, 6]);
   assert.equal(got[2].name, "n"); assert.equal(got[2].color, "#ff0000");
-  assert.equal(got[3].color, undefined); // only #rrggbb colours survive
+  assert.equal(got[3].color, undefined); // only #rrggbb colors survive
 });
 
 

@@ -1,4 +1,4 @@
-"""Perceptually uniform colour map for derived images: inferno, sampled at 256 steps from
+"""Perceptually uniform color map for derived images: inferno, sampled at 256 steps from
 matplotlib's reference table (van der Walt & Smith). Generated; do not edit by hand. The same
 table drives the browser palette (frontend lib/colormaps.ts)."""
 

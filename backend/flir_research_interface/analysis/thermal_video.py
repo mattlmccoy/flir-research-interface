@@ -1,9 +1,9 @@
 """Derived thermal preview video: ``exports/thermal_preview.mp4``.
 
-A small H.264 rendering of the whole run (iron palette, fixed °C scale for the run, colour bar and
+A small H.264 rendering of the whole run (iron palette, fixed °C scale for the run, color bar and
 elapsed-time label) so a recording can be opened, scrubbed and shared without any tool. It is a
 *visualization*: the lossless record stays in ``thermal.zarr`` and this file can be regenerated
-from it at any time. The colour scale is fixed to the run's min/max so brightness means the same
+from it at any time. The color scale is fixed to the run's min/max so brightness means the same
 temperature in every frame.
 """
 
@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import shutil
 import subprocess
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -33,8 +36,26 @@ OUT_NAME = "thermal_preview.mp4"
 ROIS_OUT_NAME = "thermal_preview_rois.mp4"
 BLOCK = 64  # frames per read from the store
 MAX_FPS = 30.0
-BAR_PX = 24  # width of the colour bar strip appended on the right
+BAR_PX = 24  # width of the color bar strip appended on the right
 CRF = 27  # 2x-upscaled thermal noise compresses poorly; 27 keeps a 40 s run near 10 MB
+
+
+def _encode_tmp(suffix: str) -> Path:
+    """A scratch path in the system temp dir for a partial encode.
+
+    The output ``exports/`` folder is often inside a synced folder (e.g. Dropbox); writing the
+    growing ``.part`` file there made the sync client race the encoder — ffmpeg's faststart pass
+    then failed with 'unable to re-open output file for shifting data' and left orphaned .part
+    files. Encoding to the system temp dir and moving the finished file into place avoids that.
+    """
+    fd, name = tempfile.mkstemp(suffix=suffix, prefix="fri_encode_")
+    os.close(fd)
+    return Path(name)
+
+
+def _finalize_encode(tmp: Path, out: Path) -> None:
+    """Move a finished encode into exports/ (shutil.move handles a cross-filesystem temp)."""
+    shutil.move(str(tmp), str(out))
 
 
 def _celsius_frames(reader: ExperimentReader, start: int, stop: int) -> npt.NDArray[np.float32]:
@@ -163,7 +184,7 @@ def thermal_frame_rgb(
     show_time: bool = True,
     palette: str | None = None,
 ) -> npt.NDArray[np.uint8]:
-    """Colourised frame plus a vertical colour bar (vmax at the top) and labels: (h, w+bar, 3).
+    """Colorised frame plus a vertical color bar (vmax at the top) and labels: (h, w+bar, 3).
 
     ``show_time`` draws the elapsed-time label at top-left (media export gates it on its own
     timestamp toggle); the derived preview video always shows it.
@@ -191,7 +212,7 @@ def thermal_frame_rgb(
     if show_time:
         d.text((4, 2), f"{t_s:.2f} s", fill=(255, 255, 255), font=font)
     d.text((4, h - font.size - 4), f"{vmin:.1f} to {vmax:.1f} °C", fill=(255, 255, 255), font=font)
-    if bar_px >= 12 and vmax > vmin:  # temperature tick labels beside the colour bar
+    if bar_px >= 12 and vmax > vmin:  # temperature tick labels beside the color bar
         for tv in _bar_ticks(vmin, vmax):
             ty = min(max(0.0, h * (vmax - tv) / (vmax - vmin)), h - 1.0)
             d.line((w, ty, w + 5, ty), fill=(255, 255, 255))  # tick into the bar
@@ -280,7 +301,7 @@ def render_thermal_video(
     out_dir = reader.path / "exports"
     out_dir.mkdir(exist_ok=True)
     out = out_dir / (out_name or (ROIS_OUT_NAME if with_rois else OUT_NAME))
-    tmp = out.with_suffix(".part.mp4")
+    tmp = _encode_tmp(".mp4")  # encode in the system temp dir, not the Dropbox-synced exports/
     cmd = encode_command(ffmpeg, width, height, fps, tmp)
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     assert proc.stdin is not None
@@ -305,7 +326,7 @@ def render_thermal_video(
         tmp.unlink(missing_ok=True)
         tail = err.decode(errors="replace")[-400:]
         raise RuntimeError(f"ffmpeg failed (rc {proc.returncode}): {tail}")
-    tmp.replace(out)
+    _finalize_encode(tmp, out)
     info = {
         "path": str(out),
         "frames": reader.n_frames,

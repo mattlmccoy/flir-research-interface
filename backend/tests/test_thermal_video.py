@@ -1,4 +1,4 @@
-"""Derived thermal preview video (exports/thermal_preview.mp4): colourised, for viewing only."""
+"""Derived thermal preview video (exports/thermal_preview.mp4): colorised, for viewing only."""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def _make_experiment(root: Path, n: int = 12) -> Path:
     return d
 
 
-def test_thermal_frame_rgb_paints_hot_bright_with_a_colourbar_and_label() -> None:
+def test_thermal_frame_rgb_paints_hot_bright_with_a_colorbar_and_label() -> None:
     celsius = np.full((H, W), 25.0, dtype=np.float32)
     celsius[10:30, 20:44] = 80.0
     rgb = thermal_frame_rgb(celsius, vmin=20.0, vmax=90.0, t_s=1.5, bar_px=16)
@@ -165,3 +165,19 @@ def test_save_and_load_range_roundtrip_and_staleness(tmp_path: Path) -> None:
     stale["n_frames"] = reader.n_frames + 5
     (d / "exports" / "range.json").write_text(json.dumps(stale))
     assert load_range(reader) is None, "n_frames mismatch → stale → None"
+
+
+def test_encode_temp_lives_outside_the_experiment_dir() -> None:
+    """Partial encodes must NOT be written inside exports/ (which may be a Dropbox-synced folder):
+    Dropbox racing the .part file mid-encode caused ffmpeg 'unable to re-open output' failures and
+    orphaned .part.mp4 files. The temp must live in the system temp dir instead."""
+    import tempfile as _t
+
+    from flir_research_interface.analysis.thermal_video import _encode_tmp
+
+    p = _encode_tmp(".mp4")
+    try:
+        assert p.suffix == ".mp4"
+        assert str(p).startswith(str(_t.gettempdir())), f"{p} is not under the system temp dir"
+    finally:
+        p.unlink(missing_ok=True)

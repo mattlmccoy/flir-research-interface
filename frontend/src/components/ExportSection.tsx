@@ -177,7 +177,7 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
         </span>
         <span>thermal video</span>
         <span className="v plain" style={{ textAlign: "right", display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
-          {haveVideo && <a className="dl" href={api.thermalVideoUrl(name)} download={`${name}_thermal_preview.mp4`} title="exports/thermal_preview.mp4: iron palette, fixed °C scale for the run, colour bar + time label. A viewing copy only; the raw counts stay in thermal.zarr">MP4{fmtBytes(tv?.bytes ?? thermalPreview?.bytes ?? 0) !== "0 kB" ? ` · ${fmtBytes(tv?.bytes ?? thermalPreview?.bytes ?? 0)}` : ""}</a>}
+          {haveVideo && <a className="dl" href={api.thermalVideoUrl(name)} download={`${name}_thermal_preview.mp4`} title="exports/thermal_preview.mp4: iron palette, fixed °C scale for the run, color bar + time label. A viewing copy only; the raw counts stay in thermal.zarr">MP4{fmtBytes(tv?.bytes ?? thermalPreview?.bytes ?? 0) !== "0 kB" ? ` · ${fmtBytes(tv?.bytes ?? thermalPreview?.bytes ?? 0)}` : ""}</a>}
           <button className="secondary" disabled={tvBusy || nFrames === 0} onClick={renderThermalVideo} title="Render (or re-render) the small H.264 viewing copy of the thermal run">{tvBusy ? <><Spinner />rendering…</> : haveVideo ? "re-render" : "render"}</button>
         </span>
       </div>

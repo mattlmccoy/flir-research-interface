@@ -8,7 +8,7 @@ export interface Range {
 const ROBUST_MIN_N = 1024, ROBUST_BINS = 1024, P_LO = 0.005, P_HI = 0.995;
 
 /**
- * Auto colour range for a frame. On a real-size frame it uses robust 0.5/99.5 percentiles so a
+ * Auto color range for a frame. On a real-size frame it uses robust 0.5/99.5 percentiles so a
  * handful of over-range pixels — saturated (scene hotter than the camera's range) or wrapped
  * (a count that overflowed 16 bits and reads as extreme cold) — cannot blow the scale out. Small
  * frames fall back to exact min/max. NaN pixels are ignored; an all-NaN frame is null.
