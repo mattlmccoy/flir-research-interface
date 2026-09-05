@@ -61,6 +61,16 @@ function seriesTraces(series: RoiSeries | null, rois: RoiState): Trace[] {
   });
 }
 
+/** Colour a timeline event tick by kind, so RF ON/OFF, NUC and gaps read apart on the scrubber. */
+function markColor(label: string): string {
+  const l = label.toUpperCase();
+  if (l.includes("RF") && l.includes("ON")) return "var(--live)";     // RF on → green
+  if (l.includes("RF") && l.includes("OFF")) return "var(--warn)";    // RF off → amber
+  if (l.includes("NUC")) return "var(--accent)";
+  if (l.includes("GAP")) return "var(--err)";
+  return "var(--fg-strong)";
+}
+
 export function PlaybackPage(p: Props) {
   const [info, setInfo] = useState<ExperimentInfo | null>(null);
   const [tl, setTl] = useState<Timeline | null>(null);
@@ -163,12 +173,17 @@ export function PlaybackPage(p: Props) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target;
-      if (el instanceof HTMLElement && el.closest("input, select, textarea, button, canvas, [contenteditable]")) return;
+      // only bail out when the user is actually typing (text field / contenteditable) — buttons,
+      // sliders and the image should NOT swallow the transport keys.
+      const typing = el instanceof HTMLElement && (
+        !!el.closest("textarea, [contenteditable='true'], [contenteditable='']")
+        || (el instanceof HTMLInputElement && !["range", "checkbox", "radio", "button"].includes(el.type)));
+      if (typing) return;
       if (e.key === " ") { e.preventDefault(); setPlaying((v) => !v); }
-      if (e.key === "ArrowRight") setIndex((i) => clampIndex(i + 1, n));
-      if (e.key === "ArrowLeft") setIndex((i) => clampIndex(i - 1, n));
-      if (e.key === "Home") setIndex(0);
-      if (e.key === "End") setIndex(clampIndex(n - 1, n));
+      else if (e.key === "ArrowRight") { e.preventDefault(); setIndex((i) => clampIndex(i + 1, n)); }
+      else if (e.key === "ArrowLeft") { e.preventDefault(); setIndex((i) => clampIndex(i - 1, n)); }
+      else if (e.key === "Home") { e.preventDefault(); setIndex(0); }
+      else if (e.key === "End") { e.preventDefault(); setIndex(clampIndex(n - 1, n)); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -210,9 +225,15 @@ export function PlaybackPage(p: Props) {
       <select value={String(speed)} onChange={(e) => setSpeed(Number(e.target.value))} aria-label="Playback speed">
         {SPEEDS.map((s) => <option key={String(s)} value={String(s)}>{speedLabel(s)}</option>)}
       </select>
-      <input type="range" min={0} max={Math.max(n - 1, 0)} value={index} style={{ flex: "1 1 60px", minWidth: 60 }} aria-label="Timeline"
-        aria-valuetext={`${t.toFixed(3)} s, frame ${index + 1} of ${n}`}
-        onChange={(e) => { setPlaying(false); setIndex(Number(e.target.value)); }} />
+      <span className="timeline-wrap" style={{ flex: "1 1 60px", minWidth: 60 }}>
+        <input type="range" min={0} max={Math.max(n - 1, 0)} value={index} style={{ width: "100%" }} aria-label="Timeline"
+          aria-valuetext={`${t.toFixed(3)} s, frame ${index + 1} of ${n}`}
+          onChange={(e) => { setPlaying(false); setIndex(Number(e.target.value)); }} />
+        {tl && (tl.t_s[n - 1] || 0) > 0 && markers.map((m, i) => (
+          <span key={i} className="tl-mark" title={`${m.label} · ${m.t.toFixed(1)} s`}
+            style={{ left: `${Math.max(0, Math.min(100, (m.t / tl.t_s[n - 1]) * 100))}%`, background: markColor(m.label) }} />
+        ))}
+      </span>
       <b style={{ whiteSpace: "nowrap", textAlign: "right" }}>{t.toFixed(3)} s · {index + 1}/{n}</b>
     </span>
   );

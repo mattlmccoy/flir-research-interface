@@ -82,6 +82,10 @@ input[type=range] { accent-color: var(--accent); }
   width: 8px; height: 8px; background: var(--bg-deep); border-left: 1px solid var(--line-control); border-bottom: 1px solid var(--line-control); z-index: 61; pointer-events: none;
 }
 
+/* ---- Playback timeline with event ticks -------------------------------------- */
+.timeline-wrap { position: relative; display: flex; align-items: center; }
+.timeline-wrap .tl-mark { position: absolute; top: 1px; bottom: 1px; width: 2px; margin-left: -1px; border-radius: 1px; pointer-events: none; opacity: 0.9; box-shadow: 0 0 0 1px var(--scrim); }
+
 /* ---- Center / image ---------------------------------------------------------- */
 .view { position: relative; display: flex; flex: 1; align-items: center; justify-content: center; background: var(--image-bg); min-width: 0; min-height: 0; overflow: hidden; }
 .view.scroll { overflow: auto; justify-content: flex-start; align-items: flex-start; }

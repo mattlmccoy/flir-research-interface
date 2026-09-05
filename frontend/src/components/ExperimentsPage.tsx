@@ -7,23 +7,24 @@ type Sort = "newest" | "name" | "duration";
 export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) {
   const [items, setItems] = useState<Experiment[] | null>(null);
   const [driveConnected, setDriveConnected] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    const tick = () => { api.storage().then((s) => { if (alive) setDriveConnected(!!s.drive?.connected); }).catch(() => undefined); };
-    tick();
-    const id = setInterval(tick, 5000);
-    return () => { alive = false; clearInterval(id); };
-  }, []);
-  const totalBytes = items ? items.reduce((a, e) => a + (e.size_bytes ?? 0), 0) : 0;
   const [err, setErr] = useState<string | null>(null);
   const [sort, setSort] = useState<Sort>("newest");
   const [q, setQ] = useState("");
   const load = useCallback(() => {
     api.experiments().then(setItems).catch((e) => setErr(String(e)));
   }, []);
+  // Refresh the list (and the on-disk sizes) live, so exports/deletes elsewhere show up here.
   useEffect(() => {
-    load();
+    let alive = true;
+    const tick = () => {
+      api.storage().then((s) => { if (alive) setDriveConnected(!!s.drive?.connected); }).catch(() => undefined);
+      load();
+    };
+    tick();
+    const id = setInterval(tick, 5000);
+    return () => { alive = false; clearInterval(id); };
   }, [load]);
+  const totalBytes = items ? items.reduce((a, e) => a + (e.size_bytes ?? 0), 0) : 0;
 
   const shown = useMemo(() => {
     if (!items) return [];
