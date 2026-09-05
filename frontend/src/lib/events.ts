@@ -2,7 +2,9 @@
 import type { ExperimentEvent, Timeline } from "./api.ts";
 import type { Marker } from "../components/TimePlot.tsx";
 
-const BOOKKEEPING = new Set(["recording_started", "recording_stopped"]);
+// Internal bookkeeping events, not things that "happened" on the timeline: the start/stop records
+// and the camera_state snapshot written at stop (device temperature, NUC count). No tick, no legend.
+const BOOKKEEPING = new Set(["recording_started", "recording_stopped", "camera_state"]);
 /** Frozen runs at least this long are shown as a NUC marker. */
 export const NUC_MIN_REPEATS = 10;
 

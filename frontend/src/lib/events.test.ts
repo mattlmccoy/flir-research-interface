@@ -85,3 +85,13 @@ test("markerLegend is empty with no markers and matches markColor for each categ
     assert.equal(c.color, markColor(sampleLabel));
   }
 });
+
+test("camera_state snapshots are bookkeeping, not timeline events (no marker, no legend entry)", () => {
+  const evs = [
+    { type: "annotation", name: "RF ON", frame_id: 101 },
+    { type: "camera_state", frame_id: 105 },   // stop-time snapshot: not a real event
+  ];
+  const m = eventsToMarkers(evs, TL, START);
+  assert.deepEqual(m.map((x) => x.label), ["RF ON"], "camera_state must not become a marker");
+  assert.deepEqual(markerLegend(m).map((c) => c.label), ["RF on"], "no generic 'event' entry");
+});
