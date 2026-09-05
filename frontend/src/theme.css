@@ -5,6 +5,9 @@
 @font-face { font-family: "IBM Plex Mono"; font-weight: 400; font-display: swap; src: url("/fonts/IBMPlexMono-400.woff2") format("woff2"); }
 @font-face { font-family: "IBM Plex Mono"; font-weight: 500; font-display: swap; src: url("/fonts/IBMPlexMono-500.woff2") format("woff2"); }
 @font-face { font-family: "IBM Plex Mono"; font-weight: 600; font-display: swap; src: url("/fonts/IBMPlexMono-600.woff2") format("woff2"); }
+/* Space Mono (OFL) — the monospace face; weights 400 + 700 (500/600 map to the nearest). */
+@font-face { font-family: "Space Mono"; font-weight: 400; font-display: swap; src: url("/fonts/SpaceMono-400.woff2") format("woff2"); }
+@font-face { font-family: "Space Mono"; font-weight: 700; font-display: swap; src: url("/fonts/SpaceMono-700.woff2") format("woff2"); }
 
 :root {
   color-scheme: dark;
@@ -37,7 +40,7 @@
   --scrim: rgba(11, 14, 18, 0.85);
   --danger-ink: #ffffff;
   --font-ui: "IBM Plex Sans", system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-mono: "Space Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --fs: 13px;
   --space: 4px;
   --radius: 3px;
