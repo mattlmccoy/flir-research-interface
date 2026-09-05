@@ -124,3 +124,86 @@ def test_live_plot_panel_extends_frame_height(tmp_path: Path) -> None:
     ww, wh = Image.open(BytesIO(with_plot)).size
     assert ww == pw  # same width
     assert wh > ph  # taller: the plot panel is appended below the image
+
+
+@pytest.mark.skipif(not _HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_compose_handles_over_range_frames(tmp_path: Path) -> None:
+    """Over-range (saturated) pixels get painted magenta without a read-only-array crash."""
+    from flir_research_interface.analysis.media import MediaOptions, compose_preview
+    rec = Recorder(None, experiments_root=tmp_path, chunk_frames=4, min_free_gb=0.0)
+    d = rec.start(name="hot", metadata={},
+                  camera_info={"ir_format": "TemperatureLinear10mK", "model": "Sim"})
+    for i in range(8):
+        counts = np.full((H, W), 29815, dtype=np.uint16)
+        counts[10:30, 20:44] = 65535  # saturated -> over-range mask flags these
+        rec.submit(Frame(frame_id=i, device_timestamp_ns=i * 33_333_333, host_timestamp_ns=i,
+                         pixel_format="Mono16", ir_format="TemperatureLinear10mK",
+                         counts=counts, incomplete=False))
+    rec.stop()
+    png = compose_preview(ExperimentReader(d), MediaOptions(start=0, stop=8, scale=2), 4)
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def _two_rect_reader(tmp_path: Path) -> ExperimentReader:
+    import json
+    r = _make(tmp_path)
+    meta = json.loads((r.path / "metadata.json").read_text())
+    meta["rois"] = [
+        {"id": 1, "kind": "rect", "x0": 20, "y0": 10, "x1": 44, "y1": 30, "name": "hot"},
+        {"id": 2, "kind": "rect", "x0": 0, "y0": 0, "x1": 10, "y1": 10, "name": "cool"},
+    ]
+    (r.path / "metadata.json").write_text(json.dumps(meta))
+    return ExperimentReader(r.path)
+
+
+def test_plot_traces_multi_roi_distinct_colors_and_labels(tmp_path: Path) -> None:
+    """Several selected ROIs each get their own series and a distinct colour."""
+    from flir_research_interface.analysis.media import MediaOptions, _plot_traces
+    r2 = _two_rect_reader(tmp_path)
+    traces = _plot_traces(r2, MediaOptions(start=0, stop=20, plot_rois=(1, 2)))
+    assert len(traces) == 2
+    labels = [t["label"] for t in traces]
+    assert any("hot" in x for x in labels) and any("cool" in x for x in labels)
+    assert traces[0]["color"] != traces[1]["color"]  # matches the overlay palette by index
+    assert len(traces[0]["v"]) == len(traces[0]["t"]) > 0
+
+
+def test_plot_stats_min_max_mean_each_make_a_line(tmp_path: Path) -> None:
+    """Selecting several stats draws one line per (ROI, stat)."""
+    from flir_research_interface.analysis.media import MediaOptions, _plot_traces
+    r2 = _two_rect_reader(tmp_path)
+    traces = _plot_traces(r2, MediaOptions(start=0, stop=20, plot_rois=(1,),
+                                           plot_stats=("mean", "min", "max")))
+    assert len(traces) == 3
+    joined = " ".join(t["label"] for t in traces)
+    assert "mean" in joined and "min" in joined and "max" in joined
+
+
+def test_plot_roi_singular_still_supported(tmp_path: Path) -> None:
+    """The legacy single ``plot_roi``/``plot_stat`` still yields one trace (backward compatible)."""
+    import json
+
+    from flir_research_interface.analysis.media import MediaOptions, _plot_traces
+    r = _make(tmp_path)
+    meta = json.loads((r.path / "metadata.json").read_text())
+    meta["rois"] = [{"id": 1, "kind": "rect", "x0": 20, "y0": 10, "x1": 44, "y1": 30, "name": "hot"}]
+    (r.path / "metadata.json").write_text(json.dumps(meta))
+    r2 = ExperimentReader(r.path)
+    traces = _plot_traces(r2, MediaOptions(start=0, stop=20, plot_roi=1))
+    assert len(traces) == 1 and "hot" in traces[0]["label"]
+
+
+def test_plot_traces_prefer_precomputed_csv(tmp_path: Path) -> None:
+    """When exports/roi_series.csv exists, the trace is read from it (fast path)."""
+    from flir_research_interface.analysis.media import MediaOptions, _plot_traces
+    r2 = _two_rect_reader(tmp_path)
+    exports = r2.path / "exports"
+    exports.mkdir(exist_ok=True)
+    # a sentinel CSV: constant mean=111 for R1 so we can tell the CSV was used, not recomputed
+    rows = ["# ROI series", "# units: celsius",
+            "t_s,frame_id,R1_mean,R1_min,R1_max,R1_std,R1_n"]
+    rows += [f"{i * 0.1:.3f},{i},111.0,110.0,112.0,0.5,10" for i in range(20)]
+    (exports / "roi_series.csv").write_text("\n".join(rows) + "\n")
+    traces = _plot_traces(r2, MediaOptions(start=0, stop=20, plot_rois=(1,)))
+    assert len(traces) == 1
+    assert all(abs(v - 111.0) < 1e-6 for v in traces[0]["v"])  # came from the CSV

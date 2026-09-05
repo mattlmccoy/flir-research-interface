@@ -57,8 +57,12 @@ export function MediaExportEditor({ name, nFrames, index, tS, rois, onClose }: P
   const [scale, setScale] = useState(2);
   const [speed, setSpeed] = useState(1);
   const [step, setStep] = useState(1);
-  const [plotRoi, setPlotRoi] = useState<number | null>(null);
-  const [plotStat, setPlotStat] = useState("mean");
+  const [plotRois, setPlotRois] = useState<number[]>([]);
+  const [plotStats, setPlotStats] = useState<string[]>(["mean"]);
+  const togglePlotRoi = (id: number) =>
+    setPlotRois((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+  const togglePlotStat = (s: string) =>
+    setPlotStats((cur) => (cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s]));
   const [showRois, setShowRois] = useState(true);
   const [frameStats, setFrameStats] = useState(true);
   const [timestamp, setTimestamp] = useState(true);
@@ -72,17 +76,17 @@ export function MediaExportEditor({ name, nFrames, index, tS, rois, onClose }: P
   const [previewUrl, setPreviewUrl] = useState("");
   useEffect(() => {
     const id = window.setTimeout(() => {
-      setPreviewUrl(api.mediaPreviewUrl(name, scrub, { with_rois: showRois, frame_stats: frameStats, timestamp, colorbar, title: title.trim() || null, plot_roi: plotRoi, plot_stat: plotStat, start, stop }));
+      setPreviewUrl(api.mediaPreviewUrl(name, scrub, { with_rois: showRois, frame_stats: frameStats, timestamp, colorbar, title: title.trim() || null, plot_rois: plotRois, plot_stats: plotStats, start, stop }));
     }, 120);
     return () => window.clearTimeout(id);
-  }, [name, scrub, showRois, frameStats, timestamp, colorbar, title, plotRoi, plotStat, start, stop]);
+  }, [name, scrub, showRois, frameStats, timestamp, colorbar, title, plotRois, plotStats, start, stop]);
 
   const windowSecs = tS.length ? (tS[Math.min(stop, tS.length) - 1] ?? 0) - (tS[start] ?? 0) : 0;
 
   async function run() {
     setErr(null); setJob({ state: "running", step: "starting", done: 0, total: 0 });
     try {
-      await api.exportMedia(name, { start, stop, step, scale, speed, fmt, with_rois: showRois, frame_stats: frameStats, timestamp, colorbar, title: title.trim() || null, plot_roi: plotRoi, plot_stat: plotStat });
+      await api.exportMedia(name, { start, stop, step, scale, speed, fmt, with_rois: showRois, frame_stats: frameStats, timestamp, colorbar, title: title.trim() || null, plot_rois: plotRois, plot_stats: plotStats });
       for (;;) {
         await new Promise((r) => setTimeout(r, 700));
         const jb = await api.mediaStatus(name);
@@ -128,14 +132,25 @@ export function MediaExportEditor({ name, nFrames, index, tS, rois, onClose }: P
             <NumberField min={1} max={100} value={step} style={{ width: 64 }} aria-label="keep every Nth frame" onChange={(f) => setStep(Math.max(1, Math.floor(f)))} />
             <span className="hint">frame{step === 1 ? "" : "s"} → {Math.ceil((stop - start) / step)} out{fmt === "gif" ? ` @ ${Math.min(20, (30 * speed) / step).toFixed(0)} fps` : ""}</span>
           </span>
-          <span title="Add a graph strip below the frame that grows the ROI's temperature over time">live plot</span>
-          <span className="v plain" style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <select value={plotRoi ?? ""} onChange={(e) => setPlotRoi(e.target.value === "" ? null : Number(e.target.value))} aria-label="live plot ROI">
-              <option value="">off</option>
-              {rois.map((r) => <option key={r.id} value={r.id}>{r.name ?? `ROI ${r.id}`}</option>)}
-            </select>
-            {plotRoi != null && <select value={plotStat} onChange={(e) => setPlotStat(e.target.value)} aria-label="live plot stat"><option value="mean">mean</option><option value="min">min</option><option value="max">max</option></select>}
+          <span title="Add a graph strip below the frame that grows each chosen ROI's temperature over time">live plot</span>
+          <span className="v plain" style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            {rois.length === 0 && <span className="hint">no ROIs on this run</span>}
+            {rois.map((r) => (
+              <button key={r.id} type="button" className={`chip${plotRois.includes(r.id) ? " on" : ""}`}
+                aria-pressed={plotRois.includes(r.id)} onClick={() => togglePlotRoi(r.id)}>
+                {r.name ?? `ROI ${r.id}`}
+              </button>
+            ))}
           </span>
+          {plotRois.length > 0 && <span title="Which temperatures to plot for each area ROI">stats</span>}
+          {plotRois.length > 0 && (
+            <span className="v plain" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              {["mean", "min", "max"].map((s) => (
+                <button key={s} type="button" className={`chip${plotStats.includes(s) ? " on" : ""}`}
+                  aria-pressed={plotStats.includes(s)} onClick={() => togglePlotStat(s)}>{s}</button>
+              ))}
+            </span>
+          )}
         </div>
         <label className="hint">Title / caption <input type="text" value={title} maxLength={80} placeholder="(optional, baked into the frame)" style={{ width: "100%" }} onChange={(e) => setTitle(e.target.value)} /></label>
         <div className="media-overlays">

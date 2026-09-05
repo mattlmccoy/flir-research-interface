@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 import subprocess
 import tempfile
 from collections.abc import Callable
@@ -36,6 +37,17 @@ logger = logging.getLogger(__name__)
 MAX_GIF_FRAMES = 300  # size guard: subsample so a GIF cannot balloon
 CLIPS_DIR = "clips"
 
+# A finished run's display range is fixed, but robust run_range scans every frame (slow on long
+# runs). Cache it per run so repeated previews/exports in one process pay the scan only once.
+_RANGE_CACHE: dict[str, tuple[float, float, str]] = {}
+
+
+def _cached_range(reader: ExperimentReader) -> tuple[float, float, str]:
+    key = str(reader.path)
+    if key not in _RANGE_CACHE:
+        _RANGE_CACHE[key] = run_range(reader, robust=True)
+    return _RANGE_CACHE[key]
+
 
 @dataclass(frozen=True)
 class MediaOptions:
@@ -51,8 +63,10 @@ class MediaOptions:
     timestamp: bool = True
     colorbar: bool = True
     title: str | None = None
-    plot_roi: int | None = None  # draw an animated live-plot inset of this ROI's temperature
-    plot_stat: str = "mean"  # which stat to plot for an area ROI (mean/min/max)
+    plot_roi: int | None = None  # legacy single-ROI live plot (kept for compatibility)
+    plot_rois: tuple[int, ...] = ()  # ROIs to draw on the live-plot strip below the frame
+    plot_stat: str = "mean"  # legacy single stat (kept for compatibility)
+    plot_stats: tuple[str, ...] = ()  # which stats to draw per area ROI (mean/min/max)
 
 
 def _slug(text: str) -> str:
@@ -60,76 +74,218 @@ def _slug(text: str) -> str:
     return keep[:48] or "clip"
 
 
-def _plot_trace(
-    reader: ExperimentReader, opts: MediaOptions, indices: list[int]
-) -> dict[str, Any] | None:
-    """The chosen ROI's temperature aligned to the export frame ``indices`` (for the live-plot)."""
-    if opts.plot_roi is None:
+_MAX_PLOT_PTS = 1200  # cap the drawn samples; the strip is only ~1200px wide anyway
+
+
+def _plot_ids(opts: MediaOptions) -> list[int]:
+    """The ROI ids to draw, from ``plot_rois`` (preferred) or the legacy ``plot_roi``."""
+    if opts.plot_rois:
+        return list(dict.fromkeys(opts.plot_rois))  # de-dupe, keep order
+    return [opts.plot_roi] if opts.plot_roi is not None else []
+
+
+def _plot_stats(opts: MediaOptions) -> list[str]:
+    """The stats to draw per area ROI, from ``plot_stats`` or the legacy single ``plot_stat``."""
+    stats = [s for s in (opts.plot_stats or (opts.plot_stat,)) if s in ("mean", "min", "max")]
+    return list(dict.fromkeys(stats)) or ["mean"]
+
+
+def _shade(color: tuple[int, int, int], stat: str) -> tuple[int, int, int]:
+    """Same hue as the ROI box; brighten for max, dim for min, so stacked lines stay legible."""
+    f = {"max": 1.0, "mean": 0.82, "min": 0.6}.get(stat, 0.82)
+    if stat == "max":  # lift toward white so the top line reads brightest
+        return tuple(int(c + (255 - c) * 0.25) for c in color)
+    return tuple(int(c * f) for c in color)
+
+
+def _read_series_csv(reader: ExperimentReader) -> dict[str, Any] | None:
+    """Parse a precomputed ``exports/roi_series.csv`` (fast path: no per-frame recompute).
+
+    Columns are ``<Kind><id>_<stat>`` (e.g. ``C7_mean``, ``R36_max``, ``S43_value``); we key them
+    by the numeric id so the ROI's kind letter does not matter. Returns None when absent/unusable.
+    """
+    import csv
+
+    path = reader.path / "exports" / "roi_series.csv"
+    if not path.is_file():
         return None
-    from flir_research_interface.analysis.series import roi_series
+    try:
+        with path.open(newline="") as f:
+            reader_csv = csv.reader(row for row in f if not row.startswith("#"))
+            header = next(reader_csv, None)
+            if not header:
+                return None
+            cols: dict[tuple[int, str], int] = {}
+            t_col = header.index("t_s") if "t_s" in header else None
+            for j, name in enumerate(header):
+                m = re.match(r"^[A-Za-z]+(\d+)_(mean|min|max|value)$", name)
+                if m:
+                    cols[(int(m.group(1)), m.group(2))] = j
+            ts: list[float] = []
+            data: dict[tuple[int, str], list[float]] = {k: [] for k in cols}
+            for row in reader_csv:
+                if not row:
+                    continue
+                ts.append(float(row[t_col]) if t_col is not None else float(len(ts)))
+                for k, j in cols.items():
+                    try:
+                        data[k].append(float(row[j]))
+                    except (ValueError, IndexError):
+                        data[k].append(float("nan"))
+        return {"t_s": ts, "data": data}
+    except (OSError, ValueError, StopIteration):
+        return None
+
+
+def _downsample(t: list[float], v: list[float]) -> tuple[list[float], list[float]]:
+    if len(t) <= _MAX_PLOT_PTS:
+        return t, v
+    stride = math.ceil(len(t) / _MAX_PLOT_PTS)
+    return t[::stride], v[::stride]
+
+
+def _plot_traces(reader: ExperimentReader, opts: MediaOptions) -> list[dict[str, Any]]:
+    """One trace per (chosen ROI × chosen stat) over the window, for the live-plot strip.
+
+    Reads the precomputed ``exports/roi_series.csv`` when present (instant); otherwise falls back
+    to computing the series from the store. Colours match the on-frame ROI overlay, which assigns
+    ``DEFAULT_COLORS`` by list order when a ROI has no explicit colour.
+    """
+    ids = _plot_ids(opts)
+    if not ids:
+        return []
+    from flir_research_interface.analysis.annotate import DEFAULT_COLORS, _rgb
 
     stored = reader.metadata.get("rois") or []
-    roi = next((r for r in stored if r.get("id") == opts.plot_roi), None)
-    if roi is None:
-        return None
-    ser = roi_series(reader, [roi])["series"].get(str(roi["id"]))
+    stats = _plot_stats(opts)
+    lo, hi = opts.start, (opts.stop or reader.n_frames)
+    csv_series = _read_series_csv(reader)
+    out: list[dict[str, Any]] = []
+    for i, roi in enumerate(stored):
+        rid = roi.get("id")
+        if rid not in ids:
+            continue
+        base = _rgb(roi.get("color") or DEFAULT_COLORS[i % len(DEFAULT_COLORS)])
+        name = str(roi.get("name") or f"ROI {rid}")
+        is_spot = roi.get("kind") == "spot"
+        want = ["value"] if is_spot else stats
+        series = _roi_values(reader, roi, csv_series)
+        if series is None:
+            continue
+        t_all, by_stat = series
+        t_win = [t for k, t in enumerate(t_all) if lo <= k < hi]
+        for stat in want:
+            arr = by_stat.get(stat) or by_stat.get("mean") or by_stat.get("value")
+            if not arr:
+                continue
+            v_win = [arr[k] for k in range(len(arr)) if lo <= k < hi]
+            t_ds, v_ds = _downsample(t_win, v_win)
+            label = name if is_spot else f"{name} · {stat}"
+            color = base if is_spot else _shade(base, stat)
+            out.append({"v": v_ds, "t": t_ds, "label": label, "color": color})
+    return out
+
+
+def _roi_values(
+    reader: ExperimentReader, roi: dict[str, Any], csv_series: dict[str, Any] | None
+) -> tuple[list[float], dict[str, list[float]]] | None:
+    """(t_s, {stat: values}) for one ROI — from the CSV if it has this ROI, else recomputed."""
+    rid = roi["id"]
+    if csv_series is not None:
+        keys = {s for (cid, s) in csv_series["data"] if cid == rid}
+        if keys:
+            return csv_series["t_s"], {s: csv_series["data"][(rid, s)] for s in keys}
+    from flir_research_interface.analysis.series import roi_series
+
+    res = roi_series(reader, [roi])
+    ser = res["series"].get(str(rid))
     if not ser:
         return None
-    key = "value" if roi.get("kind") == "spot" else (
-        opts.plot_stat if opts.plot_stat in ser else "mean")
-    arr = ser.get(key) or ser.get("mean") or []
-    vals = [float(arr[i]) if i < len(arr) and arr[i] is not None else float("nan") for i in indices]
-    name = str(roi.get("name") or f"ROI {roi['id']}")
-    label = name if roi.get("kind") == "spot" else f"{name} · {key}"
-    ts = [float(reader.t_s(i)) for i in indices]
-    return {"v": vals, "t": ts, "label": label}
+    return [float(x) for x in res["t_s"]], {k: [float(x) for x in v] for k, v in ser.items()}
 
 
-_PANEL_H = 96  # height of the live-plot strip appended below the frame
+_PANEL_H = 120  # height of the live-plot strip appended below the frame
+_AXIS = (150, 150, 156)
+_GRID = (60, 60, 66)
+_MUTE = (180, 180, 186)
 
 
-def _draw_panel(d: ImageDraw.ImageDraw, trace: dict[str, Any], pos: int, x0: int, y0: int,
-                w: int, h: int, font: ImageFont.FreeTypeFont) -> None:
-    """A full-width line plot of ``trace`` grown to ``pos``, in the strip at (x0, y0, w, h)."""
-    v = [x for x in trace["v"] if x == x]  # finite values for the y-range
-    if not v:
+def _nice_ticks(lo: float, hi: float, target: int = 4) -> list[float]:
+    """A short list of round tick values spanning [lo, hi] (1/2/5 × 10^k spacing)."""
+    span = hi - lo
+    if span <= 0:
+        return [lo]
+    raw = span / max(1, target)
+    mag = 10.0 ** math.floor(math.log10(raw))
+    step = next((m * mag for m in (1, 2, 5, 10) if m * mag >= raw), 10 * mag)
+    start = math.ceil(lo / step) * step
+    ticks, t = [], start
+    while t <= hi + step * 1e-6:
+        ticks.append(round(t, 6))
+        t += step
+    return ticks or [lo, hi]
+
+
+def _draw_panel(d: ImageDraw.ImageDraw, traces: list[dict[str, Any]], cur_t: float, x0: int,
+                y0: int, w: int, h: int, font: ImageFont.FreeTypeFont) -> None:
+    """A full-width, multi-line plot over time, drawn up to ``cur_t`` (seconds), with °C y-ticks."""
+    finite = [x for tr in traces for x in tr["v"] if x == x]
+    all_t = [t for tr in traces for t in tr["t"]]
+    if not finite or not all_t:
         return
-    lo, hi = min(v), max(v)
+    lo, hi = min(finite), max(finite)
     if hi - lo < 1e-6:
         lo, hi = lo - 0.5, hi + 0.5
-    pad_l, pad_r, pad_t, pad_b = 6, 8, font.size + 6, font.size + 4
-    ax0, ay0 = x0 + pad_l, y0 + pad_t
-    aw, ah = w - pad_l - pad_r, h - pad_t - pad_b
-    d.rectangle((ax0, ay0, ax0 + aw, ay0 + ah), outline=(90, 90, 96))
-    n = len(trace["v"])
+    t0, t1 = min(all_t), max(all_t)
+    pad = max(4, font.size // 3)
+    yticks = _nice_ticks(lo, hi)
+    gutter = int(max(d.textlength(f"{t:.0f}", font=font) for t in yticks)) + 8
+    legend_h = font.size + 6
+    ax0, ay0 = x0 + gutter, y0 + legend_h + pad
+    aw = w - gutter - pad - 6
+    ah = h - legend_h - pad - (font.size + 6)  # room for x-tick labels at the bottom
 
-    def px(i: float) -> float:
-        return ax0 + aw * (i / max(1, n - 1))
+    def px(t: float) -> float:
+        return ax0 + aw * (t - t0) / max(1e-6, t1 - t0)
 
     def py(val: float) -> float:
         return ay0 + ah - ah * (val - lo) / (hi - lo)
-    pts = [(px(i), py(trace["v"][i])) for i in range(min(pos + 1, n))
-           if trace["v"][i] == trace["v"][i]]
-    if len(pts) >= 2:
-        d.line(pts, fill=(255, 210, 90), width=2)
-    if pts:
-        cx, cy = pts[-1]
-        d.line((cx, ay0, cx, ay0 + ah), fill=(120, 120, 128))  # playhead rule
-        d.ellipse((cx - 3, cy - 3, cx + 3, cy + 3), fill=(255, 255, 255))
-    d.text((x0 + pad_l, y0 + 2), trace["label"], fill=(255, 255, 255), font=font)
-    cur = next((trace["v"][i] for i in range(min(pos, n - 1), -1, -1)
-                if trace["v"][i] == trace["v"][i]), None)
-    if cur is not None:
-        s = f"{cur:.1f} °C"
-        d.text((x0 + w - pad_r - d.textlength(s, font=font), y0 + 2), s,
-               fill=(255, 210, 90), font=font)
-    d.text((ax0 + 2, ay0), f"{hi:.1f}", fill=(170, 170, 176), font=font)
-    d.text((ax0 + 2, ay0 + ah - font.size), f"{lo:.1f}", fill=(170, 170, 176), font=font)
-    ts = trace.get("t") or []
-    if ts:
-        t1 = f"{ts[-1]:.1f} s"
-        d.text((ax0 + aw - d.textlength(t1, font=font) - 2, ay0 + ah - font.size),
-               t1, fill=(170, 170, 176), font=font)
+
+    for tv in yticks:  # y grid + tick marks + °C unit
+        gy = py(tv)
+        d.line((ax0, gy, ax0 + aw, gy), fill=_GRID)
+        d.line((ax0 - 4, gy, ax0, gy), fill=_AXIS)
+        d.text((x0 + 2, gy - font.size / 2), f"{tv:.0f}", fill=_MUTE, font=font)
+    d.rectangle((ax0, ay0, ax0 + aw, ay0 + ah), outline=_AXIS)
+    d.text((x0 + 2, y0 + 2), "°C", fill=_MUTE, font=font)
+
+    if t1 - t0 > 1e-6:  # x tick marks along the time axis
+        for tt in _nice_ticks(t0, t1, 5):
+            gx = px(tt)
+            d.line((gx, ay0 + ah, gx, ay0 + ah + 4), fill=_AXIS)
+            lbl = f"{tt:.0f}s"
+            d.text((gx - d.textlength(lbl, font=font) / 2, ay0 + ah + 4), lbl,
+                   fill=_MUTE, font=font)
+
+    lx = ax0
+    for tr in traces:  # one line per (ROI, stat), coloured like its box; legend shows live value
+        col = tuple(tr["color"])
+        ts, v = tr["t"], tr["v"]
+        drawn = [(px(ts[k]), py(v[k])) for k in range(len(v))
+                 if v[k] == v[k] and ts[k] <= cur_t + 1e-6]
+        if len(drawn) >= 2:
+            d.line(drawn, fill=col, width=2)
+        if drawn:
+            cx, cy = drawn[-1]
+            d.ellipse((cx - 3, cy - 3, cx + 3, cy + 3), fill=col)
+        cur = next((v[k] for k in range(len(v) - 1, -1, -1)
+                    if v[k] == v[k] and ts[k] <= cur_t + 1e-6), None)
+        chip = f"{tr['label']}  {cur:.1f}°" if cur is not None else str(tr["label"])
+        d.rectangle((lx, y0 + 2, lx + 12, y0 + 2 + font.size), fill=col)
+        d.text((lx + 16, y0 + 2), chip, fill=(235, 235, 240), font=font)
+        lx += 16 + int(d.textlength(chip, font=font)) + 16
+    hx = px(max(t0, min(t1, cur_t)))  # playhead rule shared by all lines
+    d.line((hx, ay0, hx, ay0 + ah), fill=(120, 120, 128))
 
 
 def _celsius(reader: ExperimentReader, idx: int) -> tuple[np.ndarray, np.ndarray]:
@@ -163,14 +319,15 @@ def render_clip(
         indices = indices[::stride]
         guard_note = f"subsampled to {len(indices)} frames to keep the GIF small"
 
-    vmin, vmax, _units = run_range(reader, robust=True)
+    vmin, vmax, _units = _cached_range(reader)
     _, h0, w0 = reader.counts_block(0, 1).shape
     scale = max(1, opts.scale)
     rois = (reader.metadata.get("rois") or []) if opts.with_rois else []
-    trace = _plot_trace(reader, opts, indices)
+    traces = _plot_traces(reader, opts)
 
     # size the first frame to fix the encoder geometry
-    first = _compose(reader, indices[0], vmin, vmax, scale, rois, opts, trace, 0)
+    first = _compose(reader, indices[0], vmin, vmax, scale, rois, opts, traces,
+                     float(reader.t_s(indices[0])))
     height, width = first.shape[0], first.shape[1]
     if width % 2 or height % 2:
         width += width % 2
@@ -189,7 +346,8 @@ def render_clip(
     def _frames() -> np.ndarray:
         for k, idx in enumerate(indices):
             rgb = (first if k == 0 else
-                   _compose(reader, idx, vmin, vmax, scale, rois, opts, trace, k))
+                   _compose(reader, idx, vmin, vmax, scale, rois, opts, traces,
+                            float(reader.t_s(idx))))
             if rgb.shape[0] != height or rgb.shape[1] != width:
                 pad = np.zeros((height, width, 3), dtype=np.uint8)
                 pad[: rgb.shape[0], : rgb.shape[1]] = rgb
@@ -210,7 +368,7 @@ def render_clip(
 
 def _compose(reader: ExperimentReader, idx: int, vmin: float, vmax: float, scale: int,
              rois: list[dict[str, Any]], opts: MediaOptions,
-             plot: dict[str, Any] | None = None, plot_pos: int = 0) -> np.ndarray:
+             plot: list[dict[str, Any]] | None = None, cur_t: float = 0.0) -> np.ndarray:
     values, counts = _celsius(reader, idx)
     over = over_range_mask(counts)
     stats_vals = values if over is None else np.where(over, np.nan, values)
@@ -218,6 +376,7 @@ def _compose(reader: ExperimentReader, idx: int, vmin: float, vmax: float, scale
     rgb = thermal_frame_rgb(values, vmin, vmax, reader.t_s(idx), bar_px=bar, scale=scale,
                             rois=rois if opts.with_rois else None, reader=reader)
     if over is not None:  # paint over-range pixels magenta, like the live display
+        rgb = np.array(rgb, copy=True)  # thermal_frame_rgb may hand back a read-only view
         big = np.repeat(np.repeat(over, scale, axis=0), scale, axis=1)
         rgb[: big.shape[0], : big.shape[1]][big] = (255, 0, 255)
     pil = Image.fromarray(rgb).convert("RGB")
@@ -231,14 +390,15 @@ def _compose(reader: ExperimentReader, idx: int, vmin: float, vmax: float, scale
         tw = d.textlength(opts.title, font=font)
         d.rectangle((0, 0, rgb.shape[1], font.size + 8), fill=(0, 0, 0))
         d.text(((rgb.shape[1] - tw) / 2, 3), opts.title, fill=(255, 255, 255), font=font)
-    if plot is None:
+    if not plot:
         return np.asarray(pil, dtype=np.uint8)
     # append a full-width live-plot strip below the frame (taller output, no overlay)
     panel = _PANEL_H * scale
     canvas = Image.new("RGB", (rgb.shape[1], rgb.shape[0] + panel), (14, 14, 16))
     canvas.paste(pil, (0, 0))
     dp = ImageDraw.Draw(canvas, "RGBA")
-    _draw_panel(dp, plot, plot_pos, 0, rgb.shape[0], rgb.shape[1], panel, font)
+    pfont = label_font(max(11, min(18, panel // 8)))
+    _draw_panel(dp, plot, cur_t, 0, rgb.shape[0], rgb.shape[1], panel, pfont)
     return np.asarray(canvas, dtype=np.uint8)
 
 
@@ -312,14 +472,11 @@ def compose_preview(reader: ExperimentReader, opts: MediaOptions, index: int) ->
     """One composed frame (same overlays as the export) as PNG bytes for the live preview."""
     if not (0 <= index < reader.n_frames):
         raise ValueError(f"index out of range 0..{reader.n_frames - 1}")
-    vmin, vmax, _ = run_range(reader, robust=True)
+    vmin, vmax, _ = _cached_range(reader)
     rois = (reader.metadata.get("rois") or []) if opts.with_rois else []
-    # trace over the window so the inset preview grows correctly as you scrub
-    stop = opts.stop or reader.n_frames
-    win = list(range(opts.start, stop, opts.step)) if opts.stop else list(range(reader.n_frames))
-    trace = _plot_trace(reader, opts, win)
-    pos = max(0, min(len(win) - 1, index - opts.start))
-    rgb = _compose(reader, index, vmin, vmax, max(1, opts.scale), rois, opts, trace, pos)
+    traces = _plot_traces(reader, opts)  # covers the window; grows to the current time as you scrub
+    rgb = _compose(reader, index, vmin, vmax, max(1, opts.scale), rois, opts, traces,
+                   float(reader.t_s(index)))
     from io import BytesIO
 
     buf = BytesIO()

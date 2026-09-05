@@ -19,7 +19,7 @@ import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
@@ -153,8 +153,10 @@ class MediaRequest(BaseModel):
     timestamp: bool = True
     colorbar: bool = True
     title: str | None = None
-    plot_roi: int | None = None
-    plot_stat: str = "mean"
+    plot_roi: int | None = None  # legacy single-ROI live plot
+    plot_rois: list[int] = Field(default_factory=list)  # ROIs to draw on the live-plot strip
+    plot_stat: str = "mean"  # legacy single stat
+    plot_stats: list[str] = Field(default_factory=list)  # mean/min/max lines per area ROI
     rois: list[dict[str, Any]] | None = None  # when given, persist first (on-screen ROIs)
 
 
@@ -1245,7 +1247,8 @@ def create_app(
             start=req.start, stop=req.stop, step=req.step, scale=req.scale, speed=req.speed,
             fps=req.fps, fmt=req.fmt, with_rois=req.with_rois, frame_stats=req.frame_stats,
             timestamp=req.timestamp, colorbar=req.colorbar, title=req.title,
-            plot_roi=req.plot_roi, plot_stat=req.plot_stat,
+            plot_roi=req.plot_roi, plot_rois=tuple(req.plot_rois), plot_stat=req.plot_stat,
+            plot_stats=tuple(req.plot_stats),
         )
 
         def _work() -> dict[str, Any]:
@@ -1281,14 +1284,19 @@ def create_app(
         name: str, index: int, scale: int = Query(default=1, ge=1, le=4),
         with_rois: bool = True, frame_stats: bool = False, timestamp: bool = True,
         colorbar: bool = True, title: str | None = None,
-        plot_roi: int | None = None, plot_stat: str = "mean", start: int = 0, stop: int = 0,
+        plot_roi: int | None = None,
+        plot_rois: Annotated[list[int] | None, Query()] = None,
+        plot_stats: Annotated[list[str] | None, Query()] = None,
+        plot_stat: str = "mean", start: int = 0, stop: int = 0,
     ) -> Response:
         """One composed frame (same overlays as the export) as PNG for the editor preview."""
         from flir_research_interface.analysis.media import MediaOptions, compose_preview
 
         opts = MediaOptions(scale=scale, with_rois=with_rois, frame_stats=frame_stats,
                             timestamp=timestamp, colorbar=colorbar, title=title,
-                            plot_roi=plot_roi, plot_stat=plot_stat, start=start, stop=stop)
+                            plot_roi=plot_roi, plot_rois=tuple(plot_rois or ()),
+                            plot_stat=plot_stat, plot_stats=tuple(plot_stats or ()),
+                            start=start, stop=stop)
         try:
             png = await run_in_threadpool(compose_preview, _open(name), opts, index)
         except ValueError as exc:
