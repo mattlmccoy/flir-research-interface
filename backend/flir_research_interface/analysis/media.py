@@ -609,15 +609,38 @@ def _target_bitrate_bps(max_bytes: int, duration_s: float, margin: float = 0.92)
     return max(int(max_bytes * 8 * margin / duration_s), 64_000)
 
 
-def _fit_dims(width: int, height: int, actual_bytes: int, target_bytes: int) -> tuple[int, int]:
-    """Even (w, h) downscaled so a re-encode fits ``target_bytes``: GIF size ≈ area × frames, so
-    scale each side by √(target/actual). Never upscales; keeps aspect; floors at 2 px."""
-    if target_bytes <= 0 or actual_bytes <= target_bytes:
-        return width, height
-    factor = math.sqrt(target_bytes / actual_bytes)
-    nw = max(2, int(width * factor) // 2 * 2)
-    nh = max(2, int(height * factor) // 2 * 2)
+def _scaled_even(width: int, height: int, s: float) -> tuple[int, int]:
+    """Even (w, h) at scale ``s`` of full size, clamped to [2 px, full size] (never upscales)."""
+    s = min(1.0, max(0.0, s))
+    nw = max(2, min(width, int(round(width * s)) // 2 * 2))
+    nh = max(2, min(height, int(round(height * s)) // 2 * 2))
     return nw, nh
+
+
+def _best_scale(
+    measure: Callable[[float], int], target: int, seed: float, passes: int = 6
+) -> float:
+    """Largest scale ``s`` in (0, 1] whose ``measure(s)`` bytes stay within ``target`` — found by
+    monotone bisection (output bytes rise with scale). Fills the budget: it climbs toward the cap
+    from ``seed`` instead of stopping at the first fit. Returns the best under-cap scale (or the
+    smallest tried if nothing fit). Bounded to ``passes`` measurements so it can't run away.
+    """
+    lo, hi = 0.02, 1.0
+    s = min(max(seed, lo), hi)
+    best: float | None = None
+    for _ in range(passes):
+        if measure(s) <= target:
+            best = s if best is None else max(best, s)
+            lo = s
+            if s >= 0.999:
+                break
+        else:
+            hi = s
+        nxt = (lo + hi) / 2
+        if abs(nxt - s) < 0.01:  # converged on the boundary
+            break
+        s = nxt
+    return best if best is not None else lo
 
 
 def _encode_mp4(  # type: ignore[no-untyped-def]
@@ -640,27 +663,26 @@ def _encode_mp4(  # type: ignore[no-untyped-def]
 _GIF_BPP = 0.3  # rough GIF bytes/pixel/frame; used only to pick a starting scale under a size cap
 
 
-def _gif_pass(base: list[str], td: str, ow: int, oh: int) -> Path:
+def _gif_pass(base: list[str], pal: Path, out_path: Path, ow: int, oh: int) -> Path:
     """One palettegen→paletteuse GIF encode of the already-written raw frames, scaled to ow×oh."""
     scale = f"scale={ow}:{oh}:flags=lanczos"
-    pal = Path(td) / "pal.png"
     subprocess.run([*base, "-vf", f"{scale},palettegen=stats_mode=diff", str(pal)],
                    check=True, capture_output=True, timeout=600)
-    gif = Path(td) / "out.gif"
     r = subprocess.run([*base, "-i", str(pal), "-lavfi",
-                        f"{scale}[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3", str(gif)],
+                        f"{scale}[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3", str(out_path)],
                        capture_output=True, timeout=600)
-    if r.returncode != 0 or not gif.is_file():
-        gif.unlink(missing_ok=True)
+    if r.returncode != 0 or not out_path.is_file():
+        out_path.unlink(missing_ok=True)
         raise RuntimeError(f"gif encode failed: {r.stderr.decode(errors='replace')[-400:]}")
-    return gif
+    return out_path
 
 
 def _encode_gif(  # type: ignore[no-untyped-def]
     ffmpeg, width, height, fps, out, frames, total, on_progress, max_bytes=0
 ) -> dict[str, Any]:
-    # Write the raw frames once (the slow part), then run the cheap palette passes; a GIF has no
-    # bitrate, so to fit a size cap we downscale and re-run the passes until it fits.
+    # Write the raw frames once (the slow part), then run the cheap palette passes. A GIF has no
+    # bitrate, so to hit a size cap we search for the LARGEST downscale that still fits — filling
+    # the budget for the best resolution — by bisection over the scale (bytes rise with scale).
     with tempfile.TemporaryDirectory() as td:
         raw = Path(td) / "frames.rgb"
         with raw.open("wb") as f:
@@ -670,22 +692,29 @@ def _encode_gif(  # type: ignore[no-untyped-def]
                     on_progress(k + 1, total)
         base = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "rawvideo",
                 "-pix_fmt", "rgb24", "-s", f"{width}x{height}", "-r", f"{fps:g}", "-i", str(raw)]
-        ow, oh = width, height
-        if max_bytes > 0:  # start near the cap instead of encoding the full-size GIF first
-            est = int(_GIF_BPP * width * height * max(total, 1))
-            ow, oh = _fit_dims(width, height, est, int(max_bytes * 0.9))
-        tmp = _gif_pass(base, td, ow, oh)
-        for _ in range(2):  # correct the scale from the measured size (bytes ≈ area)
-            if max_bytes <= 0 or tmp.stat().st_size <= max_bytes:
-                break
-            nw, nh = _fit_dims(ow, oh, tmp.stat().st_size, int(max_bytes * 0.9))
-            if (nw, nh) == (ow, oh):
-                break
-            ow, oh = nw, nh
-            tmp = _gif_pass(base, td, ow, oh)
+        pal = Path(td) / "pal.png"
+        cache: dict[tuple[int, int], tuple[Path, int]] = {}
+
+        def measure(s: float) -> int:
+            ow, oh = _scaled_even(width, height, s)
+            if (ow, oh) not in cache:
+                gif = _gif_pass(base, pal, Path(td) / f"g_{ow}x{oh}.gif", ow, oh)
+                cache[(ow, oh)] = (gif, gif.stat().st_size)
+            return cache[(ow, oh)][1]
+
+        if max_bytes <= 0:
+            ow, oh = width, height
+        else:
+            target = int(max_bytes * 0.97)  # leave a little headroom under the cap
+            est = _GIF_BPP * width * height * max(total, 1)
+            seed = 1.0 if est <= target else math.sqrt(target / est)  # avoid a huge first pass
+            ow, oh = _scaled_even(width, height, _best_scale(measure, target, seed))
+        if (ow, oh) not in cache:  # ensure the chosen size is encoded (usually a cache hit)
+            gif = _gif_pass(base, pal, Path(td) / f"g_{ow}x{oh}.gif", ow, oh)
+            cache[(ow, oh)] = (gif, gif.stat().st_size)
         note = f"downscaled to {ow}×{oh} to fit {max_bytes / 1_000_000:.0f} MB" \
             if (ow, oh) != (width, height) else None
-        _finalize_encode(tmp, out)
+        _finalize_encode(cache[(ow, oh)][0], out)
     return {"note": note, "width": ow, "height": oh}
 
 

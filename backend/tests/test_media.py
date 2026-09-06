@@ -328,15 +328,28 @@ def test_target_bitrate_bps_hits_the_size_budget() -> None:
     assert _target_bitrate_bps(1_000, 3600.0) == 64_000  # tiny budget → the 64 kbps floor
 
 
-def test_fit_dims_shrinks_by_area_ratio_and_never_upscales() -> None:
-    from flir_research_interface.analysis.media import _fit_dims
+def test_scaled_even_clamps_and_never_upscales() -> None:
+    from flir_research_interface.analysis.media import _scaled_even
 
-    assert _fit_dims(1000, 800, actual_bytes=50, target_bytes=100) == (1000, 800)  # already under
-    # 4x too big → halve each dimension (area ¼), rounded to even
-    assert _fit_dims(1000, 800, actual_bytes=100, target_bytes=25) == (500, 400)
-    w, h = _fit_dims(1304, 1100, actual_bytes=170_000_000, target_bytes=50_000_000)
-    assert w < 1304 and h < 1100 and w % 2 == 0 and h % 2 == 0
-    assert w >= 2 and h >= 2
+    assert _scaled_even(1000, 800, 0.5) == (500, 400)
+    assert _scaled_even(1000, 800, 2.0) == (1000, 800)  # never upscales past full size
+    w, h = _scaled_even(1000, 800, 0.001)
+    assert w >= 2 and h >= 2 and w % 2 == 0 and h % 2 == 0
+
+
+def test_best_scale_fills_toward_the_cap() -> None:
+    from flir_research_interface.analysis.media import _best_scale
+
+    # bytes ∝ area: full size = 10 MB; the largest scale under a 4 MB cap is √(4/10) ≈ 0.632
+    def measure(s: float) -> int:
+        return int(10_000_000 * s * s)
+
+    target = 4_000_000
+    s = _best_scale(measure, target, seed=1.0)
+    assert measure(s) <= target and s >= 0.55  # under the cap AND near the boundary (not tiny)
+    s2 = _best_scale(measure, target, seed=0.1)  # a small seed must still climb toward the cap
+    assert measure(s2) <= target and s2 >= 0.55
+    assert _best_scale(lambda s: int(1000 * s), target=5000, seed=1.0) == 1.0  # full res fits
 
 
 def test_encode_command_adds_a_bitrate_cap_only_when_requested() -> None:
