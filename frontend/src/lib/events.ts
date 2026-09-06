@@ -91,6 +91,27 @@ export function markerLegend(markers: Marker[]): { label: string; color: string 
   return out;
 }
 
+/**
+ * Assign each label a stacking row so labels that would overlap horizontally don't collide. Items
+ * are `{x, width}` in pixels (x = left edge); returns a row index per item, in the SAME order as the
+ * input. Greedy left-to-right: a label takes the lowest row whose last label ends before it (minus
+ * `gap`), else a new row. Non-overlapping labels all stay on row 0.
+ */
+export function assignLabelRows(items: { x: number; width: number }[], gap = 4): number[] {
+  const order = items.map((_, i) => i).sort((a, b) => items[a].x - items[b].x);
+  const rowEnd: number[] = [];  // rightmost occupied x per row
+  const rows = new Array<number>(items.length).fill(0);
+  for (const i of order) {
+    const { x, width } = items[i];
+    let r = 0;
+    while (r < rowEnd.length && rowEnd[r] > x - gap) r++;
+    if (r === rowEnd.length) rowEnd.push(0);
+    rowEnd[r] = x + width + gap;
+    rows[i] = r;
+  }
+  return rows;
+}
+
 /** Time of the next (dir = 1) or previous (dir = -1) marker strictly beyond `t`, or null. */
 export function nextMarkerTime(markers: Marker[], t: number, dir: 1 | -1): number | null {
   const eps = 1e-6;

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { eventsToMarkers, markColor, markerLegend, nearestIndex, nextMarkerTime } from "./events.ts";
+import { assignLabelRows, eventsToMarkers, markColor, markerLegend, nearestIndex, nextMarkerTime } from "./events.ts";
 
 const TL = { t_s: [0, 0.1, 0.2, 0.3, 0.4], frame_id: [100, 101, 103, 104, 105] };
 const START = "2026-09-02T10:00:00.000+00:00";
@@ -94,4 +94,14 @@ test("camera_state snapshots are bookkeeping, not timeline events (no marker, no
   const m = eventsToMarkers(evs, TL, START);
   assert.deepEqual(m.map((x) => x.label), ["RF ON"], "camera_state must not become a marker");
   assert.deepEqual(markerLegend(m).map((c) => c.label), ["RF on"], "no generic 'event' entry");
+});
+
+test("assignLabelRows stacks only overlapping labels, keeping input order", () => {
+  // far-apart labels share row 0; a close one drops to row 1
+  assert.deepEqual(assignLabelRows([{ x: 0, width: 20 }, { x: 10, width: 20 }, { x: 100, width: 20 }], 4), [0, 1, 0]);
+  // three mutually overlapping stack 0,1,2
+  assert.deepEqual(assignLabelRows([{ x: 0, width: 30 }, { x: 10, width: 30 }, { x: 20, width: 30 }], 4), [0, 1, 2]);
+  // input given out of x-order: rows still align to the input indices
+  assert.deepEqual(assignLabelRows([{ x: 100, width: 20 }, { x: 0, width: 20 }, { x: 10, width: 20 }], 4), [0, 0, 1]);
+  assert.deepEqual(assignLabelRows([], 4), []);
 });

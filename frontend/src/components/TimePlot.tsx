@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { MouseEvent as RMouseEvent } from "react";
 import { niceTicks, valueRange, xToPx, yToPx, type TimeWindow, type ValueRange } from "../lib/plot.ts";
+import { assignLabelRows, markColor } from "../lib/events.ts";
 
 export interface Trace { id: number; label: string; color: string; t: ArrayLike<number>; v: ArrayLike<number>; }
 export interface Marker { t: number; label: string; }
@@ -95,14 +96,18 @@ export function TimePlot({ traces, markers = [], window: win, range, cursorT = n
       }
       ctx.stroke();
     }
-    // event markers
-    ctx.strokeStyle = css("var(--err)"); ctx.fillStyle = css("var(--err)"); ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+    // event markers: dashed line + label per event, colored by category (matching the legend), with
+    // the labels stacked into rows so close events don't overlap.
+    ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
     ctx.textAlign = "left"; ctx.textBaseline = "top";
-    for (const m of markers) {
-      if (m.t < win.t0 || m.t > win.t1) continue;
-      const x = Math.round(xToPx(m.t, win, pw)) + 0.5;
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ph); ctx.stroke();
-      ctx.fillText(m.label, x + 3, 2);
+    const vis = markers.filter((m) => m.t >= win.t0 && m.t <= win.t1);
+    const mx = vis.map((m) => Math.round(xToPx(m.t, win, pw)) + 0.5);
+    const rows = assignLabelRows(vis.map((m, i) => ({ x: mx[i] + 3, width: ctx.measureText(m.label).width })));
+    for (let i = 0; i < vis.length; i++) {
+      const col = css(markColor(vis[i].label));
+      ctx.strokeStyle = col; ctx.fillStyle = col;
+      ctx.beginPath(); ctx.moveTo(mx[i], 0); ctx.lineTo(mx[i], ph); ctx.stroke();
+      ctx.fillText(vis[i].label, mx[i] + 3, 2 + rows[i] * 11);
     }
     ctx.setLineDash([]);
     if (cursorT !== null && cursorT >= win.t0 && cursorT <= win.t1) {
