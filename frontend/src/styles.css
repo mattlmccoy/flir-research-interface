@@ -205,6 +205,10 @@ pre { background: var(--bg-deep); border: 1px solid var(--line); padding: 8px; b
 .plot { position: relative; width: 100%; height: 100%; min-height: 0; }
 .plot canvas { display: block; }
 .plot-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-family: var(--font-mono); font-size: 12px; pointer-events: none; }
+/* Hover readout for event markers (revealed for crowded events whose static labels were dropped). */
+.plot-evtip { position: absolute; transform: translate(10px, -50%); pointer-events: none; z-index: 20; background: var(--bg-deep); border: 1px solid var(--line-control); border-radius: var(--radius); padding: 3px 7px; box-shadow: 0 3px 12px var(--scrim); display: flex; flex-direction: column; gap: 2px; white-space: nowrap; }
+.plot-evtip .row { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 10px; color: var(--fg); }
+.plot-evtip .dot { width: 8px; height: 8px; border-radius: 2px; flex: none; box-shadow: 0 0 0 1px var(--scrim); }
 
 /* ---- Export links ------------------------------------------------------------------ */
 .dl { color: var(--accent); text-decoration: none; border-bottom: 1px dotted var(--accent); font-family: var(--font-mono); font-size: 12px; }

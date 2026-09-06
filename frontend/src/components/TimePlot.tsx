@@ -38,6 +38,7 @@ export function TimePlot({ traces, markers = [], window: win, range, cursorT = n
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
+  const [hover, setHover] = useState<{ x: number; y: number; items: { label: string; color: string }[] } | null>(null);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -103,11 +104,14 @@ export function TimePlot({ traces, markers = [], window: win, range, cursorT = n
     const vis = markers.filter((m) => m.t >= win.t0 && m.t <= win.t1);
     const mx = vis.map((m) => Math.round(xToPx(m.t, win, pw)) + 0.5);
     const rows = assignLabelRows(vis.map((m, i) => ({ x: mx[i] + 3, width: ctx.measureText(m.label).width })));
+    // Only draw as many stacked label rows as fit legibly; beyond that the labels would pile into an
+    // unreadable wall, so those events are line-only and their labels appear on hover instead.
+    const maxRows = Math.max(2, Math.min(4, Math.floor(ph / 52)));
     for (let i = 0; i < vis.length; i++) {
       const col = css(markColor(vis[i].label));
       ctx.strokeStyle = col; ctx.fillStyle = col;
       ctx.beginPath(); ctx.moveTo(mx[i], 0); ctx.lineTo(mx[i], ph); ctx.stroke();
-      ctx.fillText(vis[i].label, mx[i] + 3, 2 + rows[i] * 11);
+      if (rows[i] < maxRows) ctx.fillText(vis[i].label, mx[i] + 3, 2 + rows[i] * 11);
     }
     ctx.setLineDash([]);
     if (cursorT !== null && cursorT >= win.t0 && cursorT <= win.t1) {
@@ -128,9 +132,29 @@ export function TimePlot({ traces, markers = [], window: win, range, cursorT = n
     onSeek(win.t0 + f * (win.t1 - win.t0));
   }
 
+  // Reveal the label(s) of any event marker under the cursor — the fallback for crowded events whose
+  // static labels were dropped, and a precise readout for the rest.
+  function onMove(e: RMouseEvent<HTMLCanvasElement>) {
+    const r = e.currentTarget.getBoundingClientRect();
+    const pw = Math.max(1, r.width - PAD.left - PAD.right);
+    const cx = e.clientX - r.left;
+    const near = markers.filter((m) => m.t >= win.t0 && m.t <= win.t1
+      && Math.abs(PAD.left + xToPx(m.t, win, pw) - cx) <= 6);
+    setHover(near.length
+      ? { x: cx, y: e.clientY - r.top, items: near.map((m) => ({ label: m.label, color: css(markColor(m.label)) })) }
+      : null);
+  }
+
   return (
     <div className="plot" ref={hostRef}>
-      <canvas ref={canvasRef} style={{ width: size.w, height: size.h, cursor: onSeek ? "crosshair" : "default" }} onClick={onClick} aria-label="temperature vs time" />
+      <canvas ref={canvasRef} style={{ width: size.w, height: size.h, cursor: onSeek ? "crosshair" : "default" }} onClick={onClick} onMouseMove={onMove} onMouseLeave={() => setHover(null)} aria-label="temperature vs time" />
+      {hover && (
+        <div className="plot-evtip" style={{ left: Math.round(hover.x), top: Math.round(hover.y) }}>
+          {hover.items.map((it, i) => (
+            <span className="row" key={i}><i className="dot" style={{ background: it.color }} />{it.label}</span>
+          ))}
+        </div>
+      )}
       {traces.length === 0 && emptyText && <div className="plot-empty">{emptyText}</div>}
     </div>
   );
