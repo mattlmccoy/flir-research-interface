@@ -73,6 +73,7 @@ export function MediaExportEditor({ name, nFrames, index, tS, markers, rois, has
   const [scale, setScale] = useState(2);
   const [speed, setSpeed] = useState(1);
   const [step, setStep] = useState(1);
+  const [maxMb, setMaxMb] = useState(0);  // cap output file size (MB); 0 = no limit
   // Per-ROI selection: id -> stats to plot. Presence = the ROI's box is drawn on the frame; the
   // stat list is the lines plotted for it (spots use "value"; an empty list = box only, no line).
   const [sel, setSel] = useState<Record<number, string[]>>({});
@@ -151,7 +152,7 @@ export function MediaExportEditor({ name, nFrames, index, tS, markers, rois, has
   async function run() {
     setErr(null); setJob({ state: "running", step: "starting", done: 0, total: 0 });
     try {
-      await api.exportMedia(name, { start, stop, step, scale, speed, fmt, with_rois: showRois, frame_stats: frameStats, timestamp, colorbar, title: title.trim() || null, plot_series: plotSeries, overlay_rois: selIds, visible_opacity: visibleOpacity, palette });
+      await api.exportMedia(name, { start, stop, step, scale, speed, fmt, with_rois: showRois, frame_stats: frameStats, timestamp, colorbar, title: title.trim() || null, plot_series: plotSeries, overlay_rois: selIds, visible_opacity: visibleOpacity, palette, max_mb: maxMb });
       for (;;) {
         await new Promise((r) => setTimeout(r, 700));
         const jb = await api.mediaStatus(name);
@@ -213,6 +214,7 @@ export function MediaExportEditor({ name, nFrames, index, tS, markers, rois, has
         <div className="media-opts kv">
           <span>format</span><span className="v plain"><select value={fmt} onChange={(e) => setFmt(e.target.value as "mp4" | "gif")} aria-label="format"><option value="mp4">MP4 (H.264)</option><option value="gif">Animated GIF</option></select></span>
           <span>size</span><span className="v plain"><select value={scale} onChange={(e) => setScale(Number(e.target.value))} aria-label="size"><option value={1}>1× (native)</option><option value={2}>2× (crisp)</option></select></span>
+          <span>max size</span><span className="v plain"><select value={maxMb} onChange={(e) => setMaxMb(Number(e.target.value))} aria-label="maximum file size" title={fmt === "gif" ? "GIFs are large; a cap downscales the GIF to fit. MP4 is far smaller for the same clip." : "Cap the file size; MP4 bitrate is targeted to fit."}><option value={0}>no limit</option><option value={10}>10 MB</option><option value={25}>25 MB</option><option value={50}>50 MB</option><option value={100}>100 MB</option><option value={200}>200 MB</option></select></span>
           <span>palette</span><span className="v plain"><select value={palette} onChange={(e) => setPalette(e.target.value)} aria-label="color palette">{["inferno", "iron", "magma", "plasma", "viridis", "turbo", "rainbow", "grayscale", "blackhot"].map((p) => <option key={p} value={p}>{p}</option>)}</select></span>
           {hasVisible && <span title="Blend the recorded visible camera over the thermal image">visible cam</span>}
           {hasVisible && (

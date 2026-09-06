@@ -315,3 +315,48 @@ def test_cached_range_persists_and_reloads_without_rescan(tmp_path: Path) -> Non
     v2 = media._cached_range(r, on_progress=lambda d, t: scan2.append(d))
     assert v2 == v1
     assert scan2 == [], "second call loads range.json — no frame scan"
+
+
+def test_target_bitrate_bps_hits_the_size_budget() -> None:
+    from flir_research_interface.analysis.media import _target_bitrate_bps
+
+    assert _target_bitrate_bps(0, 10.0) == 0          # no limit → 0 (caller skips capping)
+    assert _target_bitrate_bps(10_000_000, 0) == 0    # unknown duration → 0
+    # 10 MB over 10 s ≈ 8 Mbps before overhead margin; margin trims it a little, floored at 64 kbps
+    bps = _target_bitrate_bps(10_000_000, 10.0)
+    assert 6_000_000 <= bps <= 8_000_000
+    assert _target_bitrate_bps(1_000, 3600.0) == 64_000  # tiny budget → the 64 kbps floor
+
+
+def test_fit_dims_shrinks_by_area_ratio_and_never_upscales() -> None:
+    from flir_research_interface.analysis.media import _fit_dims
+
+    assert _fit_dims(1000, 800, actual_bytes=50, target_bytes=100) == (1000, 800)  # already under
+    # 4x too big → halve each dimension (area ¼), rounded to even
+    assert _fit_dims(1000, 800, actual_bytes=100, target_bytes=25) == (500, 400)
+    w, h = _fit_dims(1304, 1100, actual_bytes=170_000_000, target_bytes=50_000_000)
+    assert w < 1304 and h < 1100 and w % 2 == 0 and h % 2 == 0
+    assert w >= 2 and h >= 2
+
+
+def test_encode_command_adds_a_bitrate_cap_only_when_requested() -> None:
+    from flir_research_interface.analysis.thermal_video import encode_command
+
+    capped = " ".join(str(c) for c in encode_command("/x/ffmpeg", 100, 100, 30,
+                                                      Path("/tmp/o.mp4"), maxrate_bps=800_000))
+    assert "-maxrate 800000" in capped and "-bufsize 1600000" in capped
+    uncapped = " ".join(str(c) for c in encode_command("/x/ffmpeg", 100, 100, 30, Path("/tmp/o.mp4")))
+    assert "-maxrate" not in uncapped
+
+
+@pytest.mark.skipif(not _HAVE_FFMPEG, reason="ffmpeg not installed")
+def test_gif_size_cap_downscales_to_fit(tmp_path: Path) -> None:
+    from flir_research_interface.analysis.media import MediaOptions, render_clip
+
+    r = _make(tmp_path, n=20)
+    big = render_clip(r, MediaOptions(start=0, stop=20, fmt="gif", scale=4))
+    cap_mb = big["bytes"] * 0.4 / 1_000_000  # a cap well under the uncapped size
+    small = render_clip(r, MediaOptions(start=0, stop=20, fmt="gif", scale=4, max_mb=cap_mb))
+    assert small["bytes"] < big["bytes"], (small["bytes"], big["bytes"])
+    assert small["bytes"] <= cap_mb * 1_000_000 * 1.3, small["bytes"]  # under the cap (± tolerance)
+    assert small["width"] <= big["width"] and "downscaled" in (small["note"] or "")

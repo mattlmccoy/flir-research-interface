@@ -93,6 +93,7 @@ class MediaOptions:
     overlay_rois: tuple[int, ...] = ()  # which ROI boxes to draw on the frame ((): all)
     visible_opacity: float = 0.0  # blend the recorded visible camera over the frame (0 = off)
     palette: str = "inferno"  # color palette for the thermal image + bar
+    max_mb: float = 0.0  # cap the output file size (MB); 0 = no limit
 
 
 def _slug(text: str) -> str:
@@ -490,17 +491,23 @@ def render_clip(
                     rgb = pad
                 yield k, rgb
 
+        max_bytes = int(opts.max_mb * 1_000_000) if opts.max_mb and opts.max_mb > 0 else 0
+        duration_s = total / out_fps if out_fps > 0 else 0.0
         if opts.fmt == "mp4":
             out = out_dir / f"{stem}.mp4"
-            info = _encode_mp4(ffmpeg, width, height, out_fps, out, _frames(), total, on_progress)
+            info = _encode_mp4(ffmpeg, width, height, out_fps, out, _frames(), total, on_progress,
+                               duration_s=duration_s, max_bytes=max_bytes)
         else:
             out = out_dir / f"{stem}.gif"
-            info = _encode_gif(ffmpeg, width, height, out_fps, out, _frames(), total, on_progress)
+            info = _encode_gif(ffmpeg, width, height, out_fps, out, _frames(), total, on_progress,
+                               max_bytes=max_bytes)
     finally:
         if vsrc is not None:
             vsrc.close()
+    note = "; ".join(x for x in (guard_note, info.get("note")) if x) or None
+    out_w, out_h = info.get("width", width), info.get("height", height)  # GIF may have downscaled
     info.update({"path": str(out), "name": out.name, "frames": total, "fps": out_fps,
-                 "width": width, "height": height, "bytes": out.stat().st_size, "note": guard_note})
+                 "width": out_w, "height": out_h, "bytes": out.stat().st_size, "note": note})
     logger.info("media clip written: %s", info)
     return info
 
@@ -590,11 +597,35 @@ def _pump(proc: subprocess.Popen[bytes], frames: Any, total: int,
         pass
 
 
+def _target_bitrate_bps(max_bytes: int, duration_s: float, margin: float = 0.92) -> int:
+    """Video bitrate (bits/s) so an H.264 MP4 of ``duration_s`` lands near ``max_bytes``.
+
+    ``margin`` leaves headroom for container/muxing overhead. Returns 0 when there is no size
+    limit or the duration is unknown (the caller then encodes at constant quality). Never drops
+    below 64 kbps — past that the clip is unwatchable and a smaller cap is the wrong tool.
+    """
+    if max_bytes <= 0 or duration_s <= 0:
+        return 0
+    return max(int(max_bytes * 8 * margin / duration_s), 64_000)
+
+
+def _fit_dims(width: int, height: int, actual_bytes: int, target_bytes: int) -> tuple[int, int]:
+    """Even (w, h) downscaled so a re-encode fits ``target_bytes``: GIF size ≈ area × frames, so
+    scale each side by √(target/actual). Never upscales; keeps aspect; floors at 2 px."""
+    if target_bytes <= 0 or actual_bytes <= target_bytes:
+        return width, height
+    factor = math.sqrt(target_bytes / actual_bytes)
+    nw = max(2, int(width * factor) // 2 * 2)
+    nh = max(2, int(height * factor) // 2 * 2)
+    return nw, nh
+
+
 def _encode_mp4(  # type: ignore[no-untyped-def]
-    ffmpeg, width, height, fps, out, frames, total, on_progress
+    ffmpeg, width, height, fps, out, frames, total, on_progress, duration_s=0.0, max_bytes=0
 ) -> dict[str, Any]:
+    maxrate = _target_bitrate_bps(max_bytes, duration_s)  # 0 = no cap (constant-quality CRF)
     tmp = _encode_tmp(".mp4")  # encode in the system temp dir, not the Dropbox-synced exports/
-    proc = subprocess.Popen(encode_command(ffmpeg, width, height, fps, tmp),
+    proc = subprocess.Popen(encode_command(ffmpeg, width, height, fps, tmp, maxrate),
                             stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     _pump(proc, frames, total, on_progress)
     _, err = proc.communicate(timeout=600)
@@ -606,10 +637,30 @@ def _encode_mp4(  # type: ignore[no-untyped-def]
     return {}
 
 
+_GIF_BPP = 0.3  # rough GIF bytes/pixel/frame; used only to pick a starting scale under a size cap
+
+
+def _gif_pass(base: list[str], td: str, ow: int, oh: int) -> Path:
+    """One palettegen→paletteuse GIF encode of the already-written raw frames, scaled to ow×oh."""
+    scale = f"scale={ow}:{oh}:flags=lanczos"
+    pal = Path(td) / "pal.png"
+    subprocess.run([*base, "-vf", f"{scale},palettegen=stats_mode=diff", str(pal)],
+                   check=True, capture_output=True, timeout=600)
+    gif = Path(td) / "out.gif"
+    r = subprocess.run([*base, "-i", str(pal), "-lavfi",
+                        f"{scale}[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3", str(gif)],
+                       capture_output=True, timeout=600)
+    if r.returncode != 0 or not gif.is_file():
+        gif.unlink(missing_ok=True)
+        raise RuntimeError(f"gif encode failed: {r.stderr.decode(errors='replace')[-400:]}")
+    return gif
+
+
 def _encode_gif(  # type: ignore[no-untyped-def]
-    ffmpeg, width, height, fps, out, frames, total, on_progress
+    ffmpeg, width, height, fps, out, frames, total, on_progress, max_bytes=0
 ) -> dict[str, Any]:
-    # write raw frames once, then two-pass palettegen/paletteuse for clean colors
+    # Write the raw frames once (the slow part), then run the cheap palette passes; a GIF has no
+    # bitrate, so to fit a size cap we downscale and re-run the passes until it fits.
     with tempfile.TemporaryDirectory() as td:
         raw = Path(td) / "frames.rgb"
         with raw.open("wb") as f:
@@ -617,20 +668,25 @@ def _encode_gif(  # type: ignore[no-untyped-def]
                 f.write(np.ascontiguousarray(rgb).tobytes())
                 if on_progress is not None:
                     on_progress(k + 1, total)
-        pal = Path(td) / "pal.png"
         base = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "rawvideo",
                 "-pix_fmt", "rgb24", "-s", f"{width}x{height}", "-r", f"{fps:g}", "-i", str(raw)]
-        subprocess.run([*base, "-vf", "palettegen=stats_mode=diff", str(pal)], check=True,
-                       capture_output=True, timeout=600)
-        tmp = Path(td) / "out.gif"  # build the GIF in the temp dir, then move it into exports/
-        r = subprocess.run([*base, "-i", str(pal), "-lavfi",
-                            "paletteuse=dither=bayer:bayer_scale=3", str(tmp)],
-                           capture_output=True, timeout=600)
-        if r.returncode != 0 or not tmp.is_file():
-            tmp.unlink(missing_ok=True)
-            raise RuntimeError(f"gif encode failed: {r.stderr.decode(errors='replace')[-400:]}")
+        ow, oh = width, height
+        if max_bytes > 0:  # start near the cap instead of encoding the full-size GIF first
+            est = int(_GIF_BPP * width * height * max(total, 1))
+            ow, oh = _fit_dims(width, height, est, int(max_bytes * 0.9))
+        tmp = _gif_pass(base, td, ow, oh)
+        for _ in range(2):  # correct the scale from the measured size (bytes ≈ area)
+            if max_bytes <= 0 or tmp.stat().st_size <= max_bytes:
+                break
+            nw, nh = _fit_dims(ow, oh, tmp.stat().st_size, int(max_bytes * 0.9))
+            if (nw, nh) == (ow, oh):
+                break
+            ow, oh = nw, nh
+            tmp = _gif_pass(base, td, ow, oh)
+        note = f"downscaled to {ow}×{oh} to fit {max_bytes / 1_000_000:.0f} MB" \
+            if (ow, oh) != (width, height) else None
         _finalize_encode(tmp, out)
-    return {}
+    return {"note": note, "width": ow, "height": oh}
 
 
 def compose_preview(reader: ExperimentReader, opts: MediaOptions, index: int) -> bytes:

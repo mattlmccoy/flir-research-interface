@@ -162,6 +162,7 @@ class MediaRequest(BaseModel):
     overlay_rois: list[int] = Field(default_factory=list)  # ROI boxes to draw ([]=all)
     visible_opacity: float = Field(default=0.0, ge=0.0, le=1.0)  # blend visible camera (0 = off)
     palette: str = "inferno"  # color palette for the thermal frame
+    max_mb: float = Field(default=0.0, ge=0.0)  # cap output file size (MB); 0 = no limit
     rois: list[dict[str, Any]] | None = None  # when given, persist first (on-screen ROIs)
 
 
@@ -1363,7 +1364,7 @@ def create_app(
             plot_roi=req.plot_roi, plot_rois=tuple(req.plot_rois), plot_stat=req.plot_stat,
             plot_stats=tuple(req.plot_stats), plot_series=_parse_series(req.plot_series),
             overlay_rois=tuple(req.overlay_rois), visible_opacity=req.visible_opacity,
-            palette=req.palette,
+            palette=req.palette, max_mb=req.max_mb,
         )
 
         def _work() -> dict[str, Any]:

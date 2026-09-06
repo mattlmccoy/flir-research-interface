@@ -225,9 +225,18 @@ def thermal_frame_rgb(
     return np.asarray(pil, dtype=np.uint8)
 
 
-def encode_command(ffmpeg: str, width: int, height: int, fps: float, out: Path) -> list[str]:
-    """ffmpeg command reading raw RGB frames from stdin and writing a web-friendly H.264 MP4."""
+def encode_command(
+    ffmpeg: str, width: int, height: int, fps: float, out: Path, maxrate_bps: int = 0
+) -> list[str]:
+    """ffmpeg command reading raw RGB frames from stdin and writing a web-friendly H.264 MP4.
+
+    ``maxrate_bps`` > 0 caps the peak bitrate (``-maxrate``/``-bufsize``) so the file cannot exceed
+    ~maxrate×duration, while CRF still makes easy content smaller — i.e. "at most this size".
+    """
     fps_txt = f"{fps:g}"
+    cap: list[str] = []
+    if maxrate_bps > 0:
+        cap = ["-maxrate", str(maxrate_bps), "-bufsize", str(maxrate_bps * 2)]
     return [
         ffmpeg,
         "-hide_banner",
@@ -250,6 +259,7 @@ def encode_command(ffmpeg: str, width: int, height: int, fps: float, out: Path) 
         "veryfast",
         "-crf",
         str(CRF),
+        *cap,
         "-pix_fmt",
         "yuv420p",
         "-movflags",
