@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { PALETTE_NAMES, paletteGradient, type PaletteName } from "../../lib/palette.ts";
+import { visibleButtonPress } from "../../lib/strip.ts";
 import { IconEye, IconLayers, IconPalette, IconSaveImage } from "./StripIcons.tsx";
 
 interface Props {
@@ -33,13 +34,21 @@ export function StripActions({
   palette, setPalette,
 }: Props) {
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // The opacity slider's open state is local and decoupled from the overlay's on/off state, so
+  // closing the slider leaves the overlay on (visibleButtonPress encodes the three-state cycle).
+  const [visOpen, setVisOpen] = useState(false);
+  const pressVisible = () => {
+    const next = visibleButtonPress(visibleOverlayOn, visOpen);
+    setVisOpen(next.open);
+    if (next.toggleOverlay) onToggleVisible();
+  };
   return (
     <>
       <button aria-label="Save image" data-tip="Save image — PNG snapshot of this frame with overlays" disabled={saveDisabled} onClick={onSaveImage}><IconSaveImage /></button>
       <button aria-label={roisHidden ? "Show ROIs" : "Hide ROIs"} aria-pressed={roisHidden} className={roisHidden ? "active" : ""} data-tip={roisHidden ? "Show ROI overlays" : "Hide ROI overlays (measurements keep running)"} onClick={onToggleRois}><IconEye off={roisHidden} /></button>
       <span className="strip-pop-anchor">
-        <button aria-label="Visible-camera overlay" aria-pressed={visibleOverlayOn} className={visibleOverlayOn ? "active" : ""} data-tip={visibleOverlayOn ? undefined : (hasVisible ? "Overlay the visible camera (opacity slider)" : (visibleTip ?? "No visible camera available"))} disabled={!hasVisible} onClick={onToggleVisible}><IconLayers /></button>
-        {hasVisible && visibleOverlayOn && (
+        <button aria-label="Visible-camera overlay" aria-pressed={visibleOverlayOn} className={visibleOverlayOn ? "active" : ""} data-tip={visibleOverlayOn ? undefined : (hasVisible ? "Overlay the visible camera (opacity slider)" : (visibleTip ?? "No visible camera available"))} disabled={!hasVisible} onClick={pressVisible}><IconLayers /></button>
+        {hasVisible && visibleOverlayOn && visOpen && (
           <span className="strip-popover" role="group" aria-label="Visible overlay opacity">
             <input type="range" min={0} max={1} step={0.05} value={overlayOpacity} aria-label="visible camera opacity"
               onChange={(e) => onOverlayOpacity(Number(e.target.value))} />
