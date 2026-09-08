@@ -124,6 +124,22 @@ class Armer:
             self.pending = "start"
             return True
 
+    def signal_rf(self, on: bool) -> bool:
+        """Apply an external RF on/off edge. Starts an rf-armed trigger on ``on``, stops an
+        rf-ended recording on ``off``. Returns True when it acted, False when this edge doesn't
+        apply (wrong state or the trigger isn't RF-driven). The pre-trigger ring still applies to
+        the start, so the frames leading up to RF-on are captured like any other start."""
+        with self._lock:
+            if on and self.machine.state == "armed" and self.spec.start.kind == "rf":
+                self.machine.start(self._clock(), self._index)
+                self.pending = "start"
+                return True
+            if not on and self.machine.state == "recording" and self.spec.end.kind == "rf":
+                self.machine.stop("rf_off")
+                self.pending = "stop"
+                return True
+            return False
+
     def attach(self, rec: Recorder) -> int:
         """Flush the ring (pre-trigger frames + frames that arrived while starting) then forward
         live frames. Returns the number of pre-trigger frames written."""

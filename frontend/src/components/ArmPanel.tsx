@@ -49,7 +49,7 @@ export function ArmPanel({ rois, armed, recording, disabled, busy, onArm, onDisa
           <span>start</span>
           <span className="v plain" style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
             <select value={f.startKind} aria-label="start condition" onChange={(e) => upd({ startKind: e.target.value as TriggerForm["startKind"] })}>
-              <option value="manual">manually</option><option value="after">after a delay</option><option value="threshold">on temperature</option>
+              <option value="manual">manually</option><option value="rf">on RF signal</option><option value="after">after a delay</option><option value="threshold">on temperature</option>
             </select>
             {f.startKind === "after" && <><NumberField min={0} step={1} value={f.afterS} style={{ width: 60 }} aria-label="delay s" onChange={(n) => upd({ afterS: n })} /><span className="hint">s</span></>}
             {f.startKind === "threshold" && <>
@@ -63,7 +63,7 @@ export function ArmPanel({ rois, armed, recording, disabled, busy, onArm, onDisa
           <span>stop</span>
           <span className="v plain" style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
             <select value={f.endKind} aria-label="end condition" onChange={(e) => upd({ endKind: e.target.value as TriggerForm["endKind"] })}>
-              <option value="manual">manually</option><option value="duration">after a duration</option><option value="frames">after N frames</option><option value="threshold">on temperature</option>
+              <option value="manual">manually</option><option value="rf">when RF turns off</option><option value="duration">after a duration</option><option value="frames">after N frames</option><option value="threshold">on temperature</option>
             </select>
             {f.endKind === "duration" && <><NumberField min={1} step={1} value={f.seconds} style={{ width: 64 }} aria-label="duration s" onChange={(n) => upd({ seconds: n })} /><span className="hint">s</span></>}
             {f.endKind === "frames" && <NumberField min={1} step={1} value={f.frames} style={{ width: 72 }} aria-label="frames" onChange={(n) => upd({ frames: n })} />}

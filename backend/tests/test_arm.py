@@ -109,3 +109,47 @@ def test_disarm_and_refusals(tmp_path: Path) -> None:
         assert not any(p.is_dir() for p in tmp_path.iterdir())  # disarm before start writes nothing
         assert c.post("/api/recording/disarm").status_code == 409
         c.post("/api/camera/disconnect")
+
+
+def _mk_frame(fid: int) -> Frame:
+    return Frame(frame_id=fid, device_timestamp_ns=0, host_timestamp_ns=0, pixel_format="Mono16",
+                 ir_format="TemperatureLinear10mK", counts=np.full((4, 4), 29815, np.uint16),
+                 incomplete=False)
+
+
+def test_signal_rf_starts_on_rf_on_and_stops_on_rf_off() -> None:
+    from flir_research_interface.recording.arm import Armer
+    from flir_research_interface.recording.trigger import (
+        EndCondition,
+        StartCondition,
+        TriggerSpec,
+    )
+
+    spec = TriggerSpec(start=StartCondition(kind="rf"), end=EndCondition(kind="rf"),
+                       pretrigger_s=0.0, max_seconds=10_000.0)
+    a = Armer(spec, rois=[], fps_hint=30.0)
+    for i in range(5):  # frames alone never start an rf trigger
+        a.on_frame(_mk_frame(i))
+    assert a.machine.state == "armed" and a.take_pending() is None
+
+    assert a.signal_rf(True) is True  # RF-on edge starts it
+    assert a.machine.state == "recording" and a.take_pending() == "start"
+
+    a.on_frame(_mk_frame(99))
+    assert a.signal_rf(False) is True  # RF-off edge stops it
+    assert a.machine.state == "done" and a.take_pending() == "stop"
+
+
+def test_signal_rf_ignored_when_start_is_not_rf() -> None:
+    from flir_research_interface.recording.arm import Armer
+    from flir_research_interface.recording.trigger import (
+        EndCondition,
+        StartCondition,
+        TriggerSpec,
+    )
+
+    spec = TriggerSpec(start=StartCondition(kind="after", after_s=99.0),
+                       end=EndCondition(kind="manual"))
+    a = Armer(spec, rois=[], fps_hint=30.0)
+    assert a.signal_rf(True) is False  # an RF edge must not start a non-rf trigger
+    assert a.machine.state == "armed"

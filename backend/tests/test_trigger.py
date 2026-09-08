@@ -103,3 +103,21 @@ def test_parse_trigger_validates_and_fills_defaults() -> None:
         parse_trigger({"start": {"kind": "manual"}, "end": {"kind": "frames", "frames": 0}})
     with pytest.raises(ValueError):
         parse_trigger({"start": {"kind": "sideways"}, "end": {"kind": "manual"}})
+
+
+def test_rf_start_and_end_never_fire_from_frames() -> None:
+    # An "rf" start/end is an external event (the RF generator), not a watched frame value: no
+    # sequence of frames should ever start or stop it. The Armer injects the RF edge instead.
+    spec = TriggerSpec(
+        start=StartCondition(kind="rf"),
+        end=EndCondition(kind="rf"),
+        max_seconds=10_000.0,
+    )
+    m = TriggerMachine(spec)
+    assert _run(m, [(float(i), 999.0) for i in range(50)]) == []
+    assert m.state == "armed"
+
+
+def test_parse_trigger_accepts_rf_start_and_end() -> None:
+    spec = parse_trigger({"start": {"kind": "rf"}, "end": {"kind": "rf"}})
+    assert spec.start.kind == "rf" and spec.end.kind == "rf"

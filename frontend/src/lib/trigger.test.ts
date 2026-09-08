@@ -15,3 +15,13 @@ test("triggerSummary is a readable one-liner", () => {
   assert.equal(s, "start when ROI 3 max rises above 80 °C (3 frames) · stop after 90 s · 2 s pre-trigger · cap 1800 s");
   assert.equal(triggerSummary({ start: { kind: "manual" }, end: { kind: "manual" }, pretrigger_s: 0, max_seconds: 60 }), "start manually · stop manually · cap 60 s");
 });
+
+test("rf start/end build an rf trigger and read as a readable line", () => {
+  const t = triggerFromForm({ ...DEFAULT_TRIGGER_FORM, startKind: "rf", endKind: "rf" });
+  assert.deepEqual(t.start, { kind: "rf" });
+  assert.deepEqual(t.end, { kind: "rf" });
+  assert.equal(
+    triggerSummary({ start: { kind: "rf" }, end: { kind: "rf" }, pretrigger_s: 2, max_seconds: 1800 }),
+    "start when RF turns on · stop when RF turns off · 2 s pre-trigger · cap 1800 s",
+  );
+});

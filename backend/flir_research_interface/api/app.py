@@ -27,7 +27,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from flir_research_interface import __version__, rf_link, storage
+from flir_research_interface import __version__, storage
 from flir_research_interface.acquisition.service import AcquisitionService, ServiceState
 from flir_research_interface.api.frames import encode_frame_message
 from flir_research_interface.api.reveal import Runner, contained, reveal
@@ -197,11 +197,6 @@ def _parse_series(items: list[str]) -> tuple[tuple[int, str], ...]:
     return tuple(out)
 
 
-class RfLinkSettingsBody(BaseModel):
-    auto_start_on_rf_on: bool = True
-    stop_on_rf_off: bool = False
-
-
 class RfLinkEvent(BaseModel):
     state: str  # "on" | "off"
     forward_w: float | None = None
@@ -286,6 +281,7 @@ def create_app(
         app.state.visible = None
         app.state.rf_link_owns_run = None
         app.state.rf_link_last_event = None
+        app.state.rf_link_pending = None  # RF metadata for the next arm-loop rf-triggered start
         app.state.live_rois = []  # server-side copy of the on-screen ROIs, for the control feed
         app.state.control_last = None  # last control-telemetry the RF controller posted
         yield
@@ -697,51 +693,28 @@ def create_app(
 
     @app.get("/api/rf-link/settings")
     def get_rf_link_settings() -> dict[str, Any]:
-        s = rf_link.load_settings(app.state.experiments_root)
-        return {
-            "auto_start_on_rf_on": s.auto_start_on_rf_on,
-            "stop_on_rf_off": s.stop_on_rf_off,
-            "last_event": app.state.rf_link_last_event,
-        }
-
-    @app.put("/api/rf-link/settings")
-    def put_rf_link_settings(body: RfLinkSettingsBody) -> dict[str, Any]:
-        s = rf_link.RfLinkSettings(
-            auto_start_on_rf_on=body.auto_start_on_rf_on, stop_on_rf_off=body.stop_on_rf_off
-        )
-        rf_link.save_settings(app.state.experiments_root, s)
-        return {"auto_start_on_rf_on": s.auto_start_on_rf_on, "stop_on_rf_off": s.stop_on_rf_off}
+        """RF-link status. Start/stop policy now lives in the recording trigger ("on RF signal"),
+        so this only reports the last received RF event for display."""
+        return {"last_event": app.state.rf_link_last_event}
 
     @app.post("/api/rf-link/event")
     async def rf_link_event(ev: RfLinkEvent) -> dict[str, Any]:
-        """RF on/off event from the T&C tool; applies the persisted start/stop policy (best-effort
-        from the caller's side — this endpoint always returns 200 with the resulting state)."""
-        settings = rf_link.load_settings(app.state.experiments_root)
+        """RF on/off edge from the T&C/CXN tool. Recording start/stop is unified into the armed-
+        trigger system: an RF-on edge starts a recording ONLY when an "on RF signal" trigger is
+        armed (the arm loop then creates the recorder, with pre-trigger); an RF-off edge stops a
+        recording armed to end on RF. Either edge also marks the timeline while a recording runs.
+        Always returns 200 with the resulting state."""
+        armer = app.state.armer
+        triggered = ""
+        if ev.state == "on" and armer is not None and armer.signal_rf(True):
+            app.state.rf_link_pending = {  # picked up by the arm loop's start event
+                "forward_w": ev.forward_w, "reflected_fraction": ev.reflected_fraction,
+            }
+            triggered = "start"
+        elif ev.state == "off" and armer is not None and armer.signal_rf(False):
+            triggered = "stop"
         rec = recorder()
-        is_recording = rec is not None and rec.state == RecorderState.RECORDING
-        current_run = rec.experiment_dir.name if rec is not None and rec.experiment_dir else None
-        owns = bool(is_recording and app.state.rf_link_owns_run == current_run)
-        action = rf_link.plan_rf_action(
-            state=ev.state, is_recording=is_recording, link_owns=owns, settings=settings
-        )
-        detail = ""
-        if action.start:
-            try:
-                name = f"RF_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-                start_req = RecordingStartRequest(
-                    name=name,
-                    metadata={
-                        "trigger": "rf_link",
-                        "forward_w": ev.forward_w,
-                        "reflected_fraction": ev.reflected_fraction,
-                    },
-                )
-                _rec, exp_dir, _vis = await _start_recording(start_req)
-                app.state.rf_link_owns_run = exp_dir.name
-            except HTTPException as exc:
-                detail = f"start failed: {exc.detail}"
-        rec = recorder()
-        if action.mark and rec is not None and rec.state == RecorderState.RECORDING:
+        if rec is not None and rec.state == RecorderState.RECORDING:
             label = "RF ON" if ev.state == "on" else "RF OFF"
             note = (
                 f"{ev.forward_w:.1f} W"
@@ -749,9 +722,6 @@ def create_app(
                 else (ev.reason or "")
             )
             rec.note_event("annotation", {"name": label, "note": note})
-        if action.stop:
-            await _finalize_recording()
-            app.state.rf_link_owns_run = None
         rec_now = recorder()
         recording = rec_now is not None and rec_now.state == RecorderState.RECORDING
         run_name = (
@@ -765,12 +735,7 @@ def create_app(
             "forward_w": ev.forward_w,
             "ts": datetime.now(timezone.utc).isoformat(),
         }
-        return {
-            "recording": recording,
-            "run": run_name,
-            "action": {"mark": action.mark, "start": action.start, "stop": action.stop},
-            "detail": detail,
-        }
+        return {"recording": recording, "run": run_name, "triggered": triggered}
 
     # -- live temperature feed + control telemetry (closed-loop thermal control) ------------
 
@@ -984,6 +949,8 @@ def create_app(
                         _nuc_hold_end()
                         return
                     pre = armer.attach(rec)
+                    rf_meta = app.state.rf_link_pending if armer.spec.start.kind == "rf" else None
+                    app.state.rf_link_pending = None
                     rec.note_event(
                         "trigger",
                         {
@@ -992,8 +959,15 @@ def create_app(
                             "pretrigger_frames": pre,
                             "watched_value": armer.last_value,
                             "frame_id": armer.started_frame_id,
+                            **({"rf": rf_meta} if rf_meta else {}),
                         },
                     )
+                    if rf_meta is not None:  # mark the RF-on edge that started this run
+                        fw = rf_meta.get("forward_w")
+                        rec.note_event("annotation", {
+                            "name": "RF ON",
+                            "note": f"{fw:.1f} W" if isinstance(fw, int | float) else "",
+                        })
                 elif action == "stop":
                     live = armer.detach()
                     if live is not None:

@@ -69,9 +69,8 @@ export interface StorageInfo {
 /** Progress of an offload/restore move (background job). */
 export interface MoveJob { state: "running" | "done" | "error" | "idle"; to?: "drive" | "local"; done?: number; total?: number; error?: string | null; }
 /** How FLIR reacts to RF-on/RF-off events posted by the separate T&C Power RF tool. */
-export interface RfLinkSettings { auto_start_on_rf_on: boolean; stop_on_rf_off: boolean; }
 export interface RfLinkEvent { state: string; reason: string | null; forward_w: number | null; ts: string; }
-export interface RfLinkStatus extends RfLinkSettings { last_event: RfLinkEvent | null; }
+export interface RfLinkStatus { last_event: RfLinkEvent | null; }
 export interface ControlSample { ts?: string; setpoint_c?: number; measured_c?: number; applied_w?: number | null; recommended_w?: number; phase?: string; mode?: string; armed?: boolean; forward_w?: number; reverse_w?: number; reflected_fraction?: number; error_c?: number; roi?: string; }
 export interface ControlStatus { rf_link_last_event: RfLinkEvent | null; control_last: ControlSample | null; }
 
@@ -217,8 +216,6 @@ export const api = {
   disconnect: () => j<{ state: string }>(req("/api/camera/disconnect", { method: "POST" })),
   // -- RF link (external T&C Power RF-on/off events) --
   rfLinkSettings: () => j<RfLinkStatus>(req("/api/rf-link/settings")),
-  saveRfLinkSettings: (s: RfLinkSettings) =>
-    j<RfLinkSettings>(req("/api/rf-link/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(s) })),
   putLiveRois: (rois: unknown[]) =>
     j<{ count: number }>(req("/api/live/rois", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ rois }) })),
   controlStatus: () => j<ControlStatus>(req("/api/control/status")),

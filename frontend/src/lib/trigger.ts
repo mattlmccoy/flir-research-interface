@@ -1,6 +1,6 @@
 /** Armed-recording trigger: form ↔ operator object (mirrors backend recording/trigger.py). */
-export type StartKind = "manual" | "after" | "threshold";
-export type EndKind = "manual" | "frames" | "duration" | "threshold";
+export type StartKind = "manual" | "after" | "threshold" | "rf";
+export type EndKind = "manual" | "frames" | "duration" | "threshold" | "rf";
 export type Stat = "value" | "mean" | "min" | "max";
 export type Direction = "rising" | "falling";
 
@@ -16,8 +16,8 @@ export const DEFAULT_TRIGGER_FORM: TriggerForm = Object.freeze({
 }) as TriggerForm;
 
 export interface Threshold { kind: "threshold"; roi?: number; stat: Stat; level_c: number; direction: Direction; sustain_frames: number; }
-export type StartSpec = { kind: "manual" } | { kind: "after"; after_s: number } | Threshold;
-export type EndSpec = { kind: "manual" } | { kind: "frames"; frames: number } | { kind: "duration"; seconds: number } | Threshold;
+export type StartSpec = { kind: "manual" } | { kind: "after"; after_s: number } | { kind: "rf" } | Threshold;
+export type EndSpec = { kind: "manual" } | { kind: "frames"; frames: number } | { kind: "duration"; seconds: number } | { kind: "rf" } | Threshold;
 export interface TriggerSpec { start: StartSpec; end: EndSpec; pretrigger_s: number; max_seconds: number; }
 
 function threshold(roi: number | null, stat: Stat, level: number, direction: Direction, sustain: number): Threshold {
@@ -27,9 +27,11 @@ function threshold(roi: number | null, stat: Stat, level: number, direction: Dir
 }
 
 export function triggerFromForm(f: TriggerForm): TriggerSpec {
-  const start: StartSpec = f.startKind === "manual" ? { kind: "manual" } : f.startKind === "after" ? { kind: "after", after_s: f.afterS }
+  const start: StartSpec = f.startKind === "manual" ? { kind: "manual" } : f.startKind === "rf" ? { kind: "rf" }
+    : f.startKind === "after" ? { kind: "after", after_s: f.afterS }
     : threshold(f.roi, f.stat, f.level, f.direction, f.sustain);
-  const end: EndSpec = f.endKind === "manual" ? { kind: "manual" } : f.endKind === "frames" ? { kind: "frames", frames: f.frames }
+  const end: EndSpec = f.endKind === "manual" ? { kind: "manual" } : f.endKind === "rf" ? { kind: "rf" }
+    : f.endKind === "frames" ? { kind: "frames", frames: f.frames }
     : f.endKind === "duration" ? { kind: "duration", seconds: f.seconds } : threshold(f.endRoi ?? f.roi, f.endStat, f.endLevel, f.endDirection, f.sustain);
   return { start, end, pretrigger_s: f.pretrigger, max_seconds: f.maxSeconds };
 }
@@ -40,8 +42,10 @@ function thresholdText(t: Threshold): string {
 }
 
 export function triggerSummary(t: TriggerSpec): string {
-  const s = t.start.kind === "manual" ? "start manually" : t.start.kind === "after" ? `start after ${t.start.after_s} s` : `start when ${thresholdText(t.start)}`;
-  const e = t.end.kind === "manual" ? "stop manually" : t.end.kind === "frames" ? `stop after ${t.end.frames} frames`
+  const s = t.start.kind === "manual" ? "start manually" : t.start.kind === "rf" ? "start when RF turns on"
+    : t.start.kind === "after" ? `start after ${t.start.after_s} s` : `start when ${thresholdText(t.start)}`;
+  const e = t.end.kind === "manual" ? "stop manually" : t.end.kind === "rf" ? "stop when RF turns off"
+    : t.end.kind === "frames" ? `stop after ${t.end.frames} frames`
     : t.end.kind === "duration" ? `stop after ${t.end.seconds} s` : `stop when ${thresholdText(t.end)}`;
   const parts = [s, e];
   if (t.pretrigger_s > 0) parts.push(`${t.pretrigger_s} s pre-trigger`);

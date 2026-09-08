@@ -13,8 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-StartKind = Literal["manual", "after", "threshold"]
-EndKind = Literal["manual", "frames", "duration", "threshold"]
+StartKind = Literal["manual", "after", "threshold", "rf"]
+EndKind = Literal["manual", "frames", "duration", "threshold", "rf"]
 Direction = Literal["rising", "falling"]
 Stat = Literal["value", "mean", "min", "max"]
 
@@ -110,7 +110,7 @@ class TriggerMachine:
 
     def _start_due(self, t_s: float, value: float | None) -> bool:
         s = self.spec.start
-        if s.kind == "manual":
+        if s.kind in ("manual", "rf"):  # external: manual button / RF-on edge, never a frame value
             return False
         if s.kind == "after":
             return self.armed_t is not None and t_s - self.armed_t >= float(s.after_s or 0.0)
@@ -194,6 +194,8 @@ def parse_trigger(raw: dict[str, Any]) -> TriggerSpec:
         start = StartCondition(kind="after", after_s=_num(s.get("after_s", 0), "after_s", lo=0))
     elif sk == "threshold":
         start = StartCondition(kind="threshold", **_threshold_fields(s, "rising"))
+    elif sk == "rf":
+        start = StartCondition(kind="rf")  # external: started by the RF-on edge via the Armer
     else:
         raise ValueError(f"unknown start kind {sk!r}")
     if ek == "manual":
@@ -204,6 +206,8 @@ def parse_trigger(raw: dict[str, Any]) -> TriggerSpec:
         end = EndCondition(kind="duration", seconds=_num(e.get("seconds"), "seconds", lo=0.1))
     elif ek == "threshold":
         end = EndCondition(kind="threshold", **_threshold_fields(e, "falling"))
+    elif ek == "rf":
+        end = EndCondition(kind="rf")  # external: stopped by the RF-off edge via the Armer
     else:
         raise ValueError(f"unknown end kind {ek!r}")
     return TriggerSpec(
