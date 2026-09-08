@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { api, type RecordingStatus, type Status, type StorageInfo } from "../../lib/api.ts";
 
-interface Props { status: Status; recording: RecordingStatus | null; displayFps?: number; stale?: boolean; left?: ReactNode; }
+interface Props { status: Status; recording: RecordingStatus | null; displayFps?: number; stale?: boolean; left?: ReactNode; extra?: ReactNode; }
 
 function num(v: number | null | undefined, d = 1): string { return v == null || !Number.isFinite(v) ? "—" : v.toFixed(d); }
 function gb(bytes: number | undefined): string { return bytes == null ? "—" : (bytes / 1e9).toFixed(0); }
@@ -17,7 +17,7 @@ function gb(bytes: number | undefined): string { return bytes == null ? "—" : 
  * The disk readout shows local free space, and — when an external drive is registered — the
  * drive's free space too (or a warning when it is disconnected). Manage the drive in Setup → Storage.
  */
-export function StatusBar({ status, recording, displayFps = 0, stale = false, left }: Props) {
+export function StatusBar({ status, recording, displayFps = 0, stale = false, left, extra }: Props) {
   const state = recording?.state;
   const showRecCounters = state === "recording" || state === "finalizing" || state === "error";
   const limit = recording?.min_free_gb ?? 2;
@@ -60,6 +60,7 @@ export function StatusBar({ status, recording, displayFps = 0, stale = false, le
         </>
       )}
       {state === "error" && <span className="bad">REC ERROR — {recording?.error}</span>}
+      {extra}
       <span className="right">
         {state === "recording" && <span className="badge rec">● REC {num(recording?.duration_s, 0)} s</span>}
         {state === "finalizing" && <span className="muted">finalizing…</span>}

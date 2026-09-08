@@ -166,6 +166,27 @@ class MediaRequest(BaseModel):
     rois: list[dict[str, Any]] | None = None  # when given, persist first (on-screen ROIs)
 
 
+_CONTROL_CSV_COLUMNS = (
+    "ts", "setpoint_c", "measured_c", "applied_w", "recommended_w", "phase", "mode", "armed",
+    "forward_w", "reverse_w", "reflected_fraction", "error_c", "roi",
+)
+
+
+def _append_control_csv(exp_dir: Path, sample: dict[str, Any]) -> None:
+    """Append one control-telemetry row to ``<exp_dir>/exports/control.csv`` (header once)."""
+    import csv
+
+    out_dir = exp_dir / "exports"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / "control.csv"
+    new = not path.exists()
+    with path.open("a", newline="") as f:
+        w = csv.writer(f)
+        if new:
+            w.writerow(_CONTROL_CSV_COLUMNS)
+        w.writerow(["" if sample.get(c) is None else sample.get(c) for c in _CONTROL_CSV_COLUMNS])
+
+
 def _parse_series(items: list[str]) -> tuple[tuple[int, str], ...]:
     """Parse "<roi_id>:<stat>" strings into (id, stat) pairs, skipping malformed ones."""
     out: list[tuple[int, str]] = []
@@ -187,6 +208,28 @@ class RfLinkEvent(BaseModel):
     reflected_fraction: float | None = None
     reason: str | None = None
     source_ts_ns: int | None = None
+
+
+class LiveRoisBody(BaseModel):
+    rois: list[dict[str, Any]]  # same ROI JSON the recording/media paths accept
+
+
+class ControlTelemetryBody(BaseModel):
+    """One control-loop sample from the RF controller (all fields optional; store what's sent)."""
+
+    ts: str | None = None
+    setpoint_c: float | None = None
+    measured_c: float | None = None
+    applied_w: float | None = None
+    recommended_w: float | None = None
+    phase: str | None = None
+    mode: str | None = None
+    armed: bool | None = None
+    forward_w: float | None = None
+    reverse_w: float | None = None
+    reflected_fraction: float | None = None
+    error_c: float | None = None
+    roi: str | None = None
 
 
 class RegisterDriveRequest(BaseModel):
@@ -243,6 +286,8 @@ def create_app(
         app.state.visible = None
         app.state.rf_link_owns_run = None
         app.state.rf_link_last_event = None
+        app.state.live_rois = []  # server-side copy of the on-screen ROIs, for the control feed
+        app.state.control_last = None  # last control-telemetry the RF controller posted
         yield
         await _finalize_recording()
         svc: AcquisitionService | None = app.state.service
@@ -725,6 +770,60 @@ def create_app(
             "run": run_name,
             "action": {"mark": action.mark, "start": action.start, "stop": action.stop},
             "detail": detail,
+        }
+
+    # -- live temperature feed + control telemetry (closed-loop thermal control) ------------
+
+    @app.put("/api/live/rois")
+    def put_live_rois(body: LiveRoisBody) -> dict[str, Any]:
+        """Sync the on-screen ROIs to the operator so the control feed can measure them.
+
+        The UI holds ROIs client-side; a separate controller (TC-POWER/CXN) has no access to
+        them, so the browser pushes them here for GET /api/live/roi-temps to use.
+        """
+        app.state.live_rois = _rois_with_labels(body.rois) if body.rois else []
+        return {"count": len(app.state.live_rois)}
+
+    @app.get("/api/live/roi-temps")
+    def live_roi_temps() -> dict[str, Any]:
+        """Per-ROI °C from the latest acquired frame, with an explicit freshness/validity contract
+        (see analysis/live_temps). Polled by the RF controller each control tick."""
+        from flir_research_interface.analysis.live_temps import live_roi_payload
+
+        svc = service()
+        acquiring = svc is not None and svc.state == ServiceState.ACQUIRING
+        frame = svc.latest() if svc is not None else None
+        return live_roi_payload(
+            counts=frame.counts if frame is not None else None,
+            ir_format=frame.ir_format if frame is not None else None,
+            rois=list(app.state.live_rois),
+            acquiring=acquiring,
+            frame_id=frame.frame_id if frame is not None else None,
+            host_ts_ns=frame.host_timestamp_ns if frame is not None else None,
+            now_ns=time.time_ns(),
+        )
+
+    @app.post("/api/control/telemetry")
+    def control_telemetry(body: ControlTelemetryBody) -> dict[str, Any]:
+        """Record one control-loop sample: mark the run timeline + append exports/control.csv.
+
+        A no-op ack when not recording (control may run before the operator hits record)."""
+        sample = {k: v for k, v in body.model_dump().items() if v is not None}
+        sample.setdefault("ts", datetime.now(timezone.utc).isoformat())
+        app.state.control_last = sample
+        rec = recorder()
+        recording = rec is not None and rec.state == RecorderState.RECORDING
+        if recording and rec is not None:
+            rec.note_event("control", sample)
+            _append_control_csv(rec.experiment_dir, sample)
+        return {"recording": recording, "stored": sample}
+
+    @app.get("/api/control/status")
+    def control_status() -> dict[str, Any]:
+        """Live RF/control state for the recording-page indicator: last RF edge + last telemetry."""
+        return {
+            "rf_link_last_event": app.state.rf_link_last_event,
+            "control_last": app.state.control_last,
         }
 
     # -- recording -------------------------------------------------------------------------

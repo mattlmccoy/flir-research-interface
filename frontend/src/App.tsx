@@ -35,6 +35,7 @@ import { Rail } from "./components/studio/Rail.tsx";
 import { RailSection } from "./components/studio/RailSection.tsx";
 import { PlotDock } from "./components/studio/PlotDock.tsx";
 import { StatusBar } from "./components/studio/StatusBar.tsx";
+import { LiveControlStrip } from "./components/LiveControlStrip.tsx";
 
 type Page = "live" | "setup" | "experiments" | "playback";
 const storage = (() => {
@@ -64,6 +65,14 @@ export function App() {
     if (scope !== "live" && rois.rois.length === 0 && !hasRois(storage, scope)) return;
     saveRois(storage, rois, scope);
   }, [rois]);
+  // Mirror the live ROIs to the operator so the closed-loop temperature feed
+  // (GET /api/live/roi-temps, polled by the RF controller) can measure them. The UI is the only
+  // holder of the on-screen ROIs; debounced so a drag doesn't spam the endpoint. Live scope only.
+  useEffect(() => {
+    if (roiScope !== "live") return;
+    const t = setTimeout(() => { api.putLiveRois(rois.rois).catch(() => {}); }, 400);
+    return () => clearTimeout(t);
+  }, [rois.rois, roiScope]);
   const [align, alignDispatch] = useReducer(alignmentReducer, EMPTY_ALIGNMENT, () => loadAlignment(storage));
   useEffect(() => { saveAlignment(storage, align); }, [align]);
   const [calibrating, setCalibrating] = useState(false);
@@ -208,7 +217,7 @@ export function App() {
     </>
   );
 
-  const statusbar = <StatusBar status={status} recording={recording} displayFps={wsFps} stale={stale} />;
+  const statusbar = <StatusBar status={status} recording={recording} displayFps={wsFps} stale={stale} extra={page === "live" ? <LiveControlStrip /> : undefined} />;
 
   if (page === "setup") {
     return <StudioFrame layout={layout} page topbar={topbar} statusbar={statusbar}

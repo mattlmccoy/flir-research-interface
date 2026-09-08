@@ -72,6 +72,8 @@ export interface MoveJob { state: "running" | "done" | "error" | "idle"; to?: "d
 export interface RfLinkSettings { auto_start_on_rf_on: boolean; stop_on_rf_off: boolean; }
 export interface RfLinkEvent { state: string; reason: string | null; forward_w: number | null; ts: string; }
 export interface RfLinkStatus extends RfLinkSettings { last_event: RfLinkEvent | null; }
+export interface ControlSample { ts?: string; setpoint_c?: number; measured_c?: number; applied_w?: number | null; recommended_w?: number; phase?: string; mode?: string; armed?: boolean; forward_w?: number; reverse_w?: number; reflected_fraction?: number; error_c?: number; roi?: string; }
+export interface ControlStatus { rf_link_last_event: RfLinkEvent | null; control_last: ControlSample | null; }
 
 export interface Experiment {
   name: string;
@@ -217,4 +219,7 @@ export const api = {
   rfLinkSettings: () => j<RfLinkStatus>(req("/api/rf-link/settings")),
   saveRfLinkSettings: (s: RfLinkSettings) =>
     j<RfLinkSettings>(req("/api/rf-link/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(s) })),
+  putLiveRois: (rois: unknown[]) =>
+    j<{ count: number }>(req("/api/live/rois", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ rois }) })),
+  controlStatus: () => j<ControlStatus>(req("/api/control/status")),
 };

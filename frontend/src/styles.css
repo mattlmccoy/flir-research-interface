@@ -340,3 +340,12 @@ button:disabled .spinner { opacity: 0.7; }
 .view .vbar-ticks { position: relative; flex: 1 1 auto; font-family: var(--font-mono); font-size: 10px; color: var(--fg); order: 1; }
 .view .vbar-ticks span { position: absolute; right: 2px; transform: translateY(-50%); text-shadow: 0 0 3px var(--scrim), 0 0 3px var(--scrim); white-space: nowrap; }
 .view .vbar-unit { color: var(--muted); }
+
+/* Live RF/closed-loop control indicator in the status bar */
+.ctl-strip { display: inline-flex; align-items: center; gap: 12px; margin-left: 12px; font: 11px/1.4 var(--font-mono, monospace); }
+.ctl-strip.muted { color: var(--muted); }
+.ctl-strip .rf { display: inline-flex; align-items: center; gap: 5px; }
+.ctl-strip .rf .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.ctl-strip .rf.on .dot { background: var(--live); }
+.ctl-strip .rf.off .dot { background: var(--warn); }
+.ctl-strip .ctl { color: var(--fg-strong); }
