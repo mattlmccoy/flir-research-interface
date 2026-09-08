@@ -660,21 +660,63 @@ def _encode_mp4(  # type: ignore[no-untyped-def]
     return {}
 
 
-_GIF_BPP = 0.3  # rough GIF bytes/pixel/frame; used only to pick a starting scale under a size cap
+_GIF_BPP = 0.075  # rough GIF bytes/pixel/frame (denoised); picks a starting scale under a size cap
+
+# A light temporal denoise applied to every GIF. Thermal sensor noise makes nearly every pixel
+# flicker frame-to-frame, which defeats GIF's inter-frame transparency and bloats the file — a
+# 600 s run can hit 130 MB at full resolution. Smoothing the (invisible) noise in the static
+# background lets that transparency collapse it, cutting size ~4× with no visible quality loss, so
+# the export stays at FULL resolution instead of being downscaled to meet a size cap. The spatial
+# terms are deliberately gentle (4:3) so real thermal detail and text stay crisp; the temporal
+# terms (6:4) only blend pixels that barely change, leaving moving hot-spots and plot lines intact.
+_GIF_DENOISE = "hqdn3d=4:3:6:4"
 
 
-def _gif_pass(base: list[str], pal: Path, out_path: Path, ow: int, oh: int) -> Path:
-    """One palettegen→paletteuse GIF encode of the already-written raw frames, scaled to ow×oh."""
+def _gif_filters(ow: int, oh: int, denoise: bool) -> tuple[str, str]:
+    """The (palettegen, paletteuse-prefilter) ffmpeg filter chains for one GIF pass at ow×oh.
+
+    Both chains are identical so the generated palette matches the frames it is applied to. When
+    ``denoise`` is set the temporal ``hqdn3d`` runs BEFORE the scale, at native detail, where it
+    removes the most inter-frame noise (see ``_GIF_DENOISE``).
+    """
     scale = f"scale={ow}:{oh}:flags=lanczos"
-    subprocess.run([*base, "-vf", f"{scale},palettegen=stats_mode=diff", str(pal)],
+    chain = f"{_GIF_DENOISE},{scale}" if denoise else scale
+    return chain, chain
+
+
+def _gif_pass(base: list[str], pal: Path, out_path: Path, ow: int, oh: int,
+              denoise: bool = True) -> Path:
+    """One palettegen→paletteuse GIF encode of the already-written raw frames, scaled to ow×oh."""
+    palgen_vf, puse_vf = _gif_filters(ow, oh, denoise)
+    subprocess.run([*base, "-vf", f"{palgen_vf},palettegen=stats_mode=diff", str(pal)],
                    check=True, capture_output=True, timeout=600)
-    r = subprocess.run([*base, "-i", str(pal), "-lavfi",
-                        f"{scale}[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3", str(out_path)],
+    use = f"{puse_vf}[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3"
+    r = subprocess.run([*base, "-i", str(pal), "-lavfi", use, str(out_path)],
                        capture_output=True, timeout=600)
     if r.returncode != 0 or not out_path.is_file():
         out_path.unlink(missing_ok=True)
         raise RuntimeError(f"gif encode failed: {r.stderr.decode(errors='replace')[-400:]}")
     return out_path
+
+
+def _choose_gif_size(
+    measure: Callable[[float], int], width: int, height: int, *, total: int, max_bytes: int
+) -> tuple[int, int]:
+    """Output (w, h) for a GIF under ``max_bytes``: full resolution whenever it fits (the denoise
+    usually makes it fit), otherwise the largest downscale that does.
+
+    ``measure(s)`` returns the encoded bytes at scale ``s`` of full size. Full res is checked first
+    so a clip the denoise already shrank under the cap is never needlessly downscaled; only when
+    full res overflows do we bisect for the best-fitting smaller size.
+    """
+    if max_bytes <= 0:
+        return width, height
+    target = int(max_bytes * 0.97)  # leave a little headroom under the cap
+    if measure(1.0) <= target:  # full resolution already fits — ship it
+        return width, height
+    est = _GIF_BPP * width * height * max(total, 1)
+    seed = 1.0 if est <= target else math.sqrt(target / est)  # avoid a huge first pass
+    return _scaled_even(width, height, _best_scale(measure, target, seed))
 
 
 def _encode_gif(  # type: ignore[no-untyped-def]
@@ -702,13 +744,7 @@ def _encode_gif(  # type: ignore[no-untyped-def]
                 cache[(ow, oh)] = (gif, gif.stat().st_size)
             return cache[(ow, oh)][1]
 
-        if max_bytes <= 0:
-            ow, oh = width, height
-        else:
-            target = int(max_bytes * 0.97)  # leave a little headroom under the cap
-            est = _GIF_BPP * width * height * max(total, 1)
-            seed = 1.0 if est <= target else math.sqrt(target / est)  # avoid a huge first pass
-            ow, oh = _scaled_even(width, height, _best_scale(measure, target, seed))
+        ow, oh = _choose_gif_size(measure, width, height, total=total, max_bytes=max_bytes)
         if (ow, oh) not in cache:  # ensure the chosen size is encoded (usually a cache hit)
             gif = _gif_pass(base, pal, Path(td) / f"g_{ow}x{oh}.gif", ow, oh)
             cache[(ow, oh)] = (gif, gif.stat().st_size)

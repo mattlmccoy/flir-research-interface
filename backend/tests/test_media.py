@@ -352,13 +352,51 @@ def test_best_scale_fills_toward_the_cap() -> None:
     assert _best_scale(lambda s: int(1000 * s), target=5000, seed=1.0) == 1.0  # full res fits
 
 
+def test_gif_filters_apply_a_temporal_denoise_before_scaling() -> None:
+    from flir_research_interface.analysis.media import _GIF_DENOISE, _gif_filters
+
+    # denoise on: both the palettegen and the paletteuse pre-filter run hqdn3d, then scale, in that
+    # order (temporal denoise at native detail collapses static-background noise so GIF inter-frame
+    # transparency can shrink the file at FULL resolution instead of downscaling to hit a cap).
+    palgen, puse = _gif_filters(640, 480, denoise=True)
+    assert palgen == puse, "palette and use passes must see identically filtered frames"
+    assert _GIF_DENOISE in palgen and "scale=640:480:flags=lanczos" in palgen
+    assert palgen.index(_GIF_DENOISE) < palgen.index("scale="), "denoise before scale"
+
+    # denoise off: scale only, no hqdn3d
+    plain, _ = _gif_filters(640, 480, denoise=False)
+    assert "hqdn3d" not in plain and plain == "scale=640:480:flags=lanczos"
+
+
+def test_choose_gif_size_keeps_full_res_when_it_already_fits() -> None:
+    from flir_research_interface.analysis.media import _choose_gif_size
+
+    # Denoise makes full resolution tiny: measure(1.0) is well under the cap. The chooser must NOT
+    # downscale — earlier it started the search below 1.0 (from a byte estimate) and never climbed
+    # back, shipping a needlessly downscaled GIF marked "downscaled" while full res fit fine.
+    fits = _choose_gif_size(lambda s: 1_000, 1000, 1000, total=300, max_bytes=2_000_000)
+    assert fits == (1000, 1000), fits
+    # no cap → full resolution
+    assert _choose_gif_size(lambda s: 9_999, 640, 480, total=10, max_bytes=0) == (640, 480)
+
+
+def test_choose_gif_size_downscales_only_when_full_res_overflows() -> None:
+    from flir_research_interface.analysis.media import _choose_gif_size
+
+    # bytes ∝ area at full detail; full res (10 MB) overflows a 4 MB cap, so it downscales to fit.
+    ow, oh = _choose_gif_size(lambda s: int(10_000_000 * s * s), 1000, 800,
+                              total=300, max_bytes=4_000_000)
+    assert (ow, oh) != (1000, 800) and ow < 1000, (ow, oh)
+
+
 def test_encode_command_adds_a_bitrate_cap_only_when_requested() -> None:
     from flir_research_interface.analysis.thermal_video import encode_command
 
     capped = " ".join(str(c) for c in encode_command("/x/ffmpeg", 100, 100, 30,
                                                       Path("/tmp/o.mp4"), maxrate_bps=800_000))
     assert "-maxrate 800000" in capped and "-bufsize 1600000" in capped
-    uncapped = " ".join(str(c) for c in encode_command("/x/ffmpeg", 100, 100, 30, Path("/tmp/o.mp4")))
+    uncapped = " ".join(str(c) for c in
+                        encode_command("/x/ffmpeg", 100, 100, 30, Path("/tmp/o.mp4")))
     assert "-maxrate" not in uncapped
 
 
