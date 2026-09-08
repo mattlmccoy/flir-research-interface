@@ -4,6 +4,7 @@ import { RfLinkPanel } from "./RfLinkPanel.tsx";
 import { CredentialsHelp } from "./CredentialsHelp.tsx";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api.ts";
+import { useControlStatus } from "../lib/useControlStatus.ts";
 
 type Any = Record<string, unknown>;
 
@@ -12,6 +13,7 @@ export function SetupPage({ onConnected }: { onConnected: () => void }) {
   const [disc, setDisc] = useState<Any | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const rfEngaged = !!useControlStatus()?.engaged;  // show the RF-link card only when linked
 
   async function load() {
     setErr(null);
@@ -118,10 +120,12 @@ export function SetupPage({ onConnected }: { onConnected: () => void }) {
         <StoragePanel />
       </div>
 
-      <div className="card">
-        <h2>6. RF link (external RF-power trigger)</h2>
-        <RfLinkPanel />
-      </div>
+      {rfEngaged && (
+        <div className="card">
+          <h2>6. RF link (external RF-power trigger)</h2>
+          <RfLinkPanel />
+        </div>
+      )}
 
       <details className="card" style={{ opacity: 0.8 }}>
         <summary className="hint" style={{ cursor: "pointer" }}>Developer: simulated camera (no hardware)</summary>

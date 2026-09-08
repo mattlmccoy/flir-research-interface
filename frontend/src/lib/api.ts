@@ -72,7 +72,7 @@ export interface MoveJob { state: "running" | "done" | "error" | "idle"; to?: "d
 export interface RfLinkEvent { state: string; reason: string | null; forward_w: number | null; ts: string; }
 export interface RfLinkStatus { last_event: RfLinkEvent | null; }
 export interface ControlSample { ts?: string; setpoint_c?: number; measured_c?: number; applied_w?: number | null; recommended_w?: number; phase?: string; mode?: string; armed?: boolean; forward_w?: number; reverse_w?: number; reflected_fraction?: number; error_c?: number; roi?: string; }
-export interface ControlStatus { rf_link_last_event: RfLinkEvent | null; control_last: ControlSample | null; }
+export interface ControlStatus { rf_link_last_event: RfLinkEvent | null; control_last: ControlSample | null; engaged: boolean; }
 
 export interface Experiment {
   name: string;

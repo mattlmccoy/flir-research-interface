@@ -166,9 +166,11 @@ class MediaRequest(BaseModel):
     rois: list[dict[str, Any]] | None = None  # when given, persist first (on-screen ROIs)
 
 
+# frame_id + t_utc first so the control trace (esp. forward_w) aligns to the thermal frames /
+# temperature readings for playback plotting; then the controller's own fields.
 _CONTROL_CSV_COLUMNS = (
-    "ts", "setpoint_c", "measured_c", "applied_w", "recommended_w", "phase", "mode", "armed",
-    "forward_w", "reverse_w", "reflected_fraction", "error_c", "roi",
+    "frame_id", "t_utc", "ts", "setpoint_c", "measured_c", "applied_w", "recommended_w",
+    "phase", "mode", "armed", "forward_w", "reverse_w", "reflected_fraction", "error_c", "roi",
 )
 
 
@@ -779,16 +781,22 @@ def create_app(
         rec = recorder()
         recording = rec is not None and rec.state == RecorderState.RECORDING
         if recording and rec is not None:
-            rec.note_event("control", sample)
-            _append_control_csv(rec.experiment_dir, sample)
+            stored = rec.note_event("control", sample)  # stamps frame_id + t_utc
+            _append_control_csv(rec.experiment_dir, stored)
         return {"recording": recording, "stored": sample}
 
     @app.get("/api/control/status")
     def control_status() -> dict[str, Any]:
-        """Live RF/control state for the recording-page indicator: last RF edge + last telemetry."""
+        """Live RF/control state for the recording-page indicator + UI gating: last RF edge, last
+        telemetry, and whether the RF generator is currently linked (recent posts)."""
+        from flir_research_interface.rf_status import rf_engaged
+
         return {
             "rf_link_last_event": app.state.rf_link_last_event,
             "control_last": app.state.control_last,
+            "engaged": rf_engaged(
+                app.state.control_last, app.state.rf_link_last_event, datetime.now(timezone.utc)
+            ),
         }
 
     # -- recording -------------------------------------------------------------------------

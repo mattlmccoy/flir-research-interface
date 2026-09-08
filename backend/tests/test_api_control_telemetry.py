@@ -56,12 +56,14 @@ def test_telemetry_marks_timeline_and_writes_control_csv_while_recording(tmp_pat
         assert len(runs) == 1
         run = runs[0]
 
-        # control.csv: header + two rows, with our values
+        # control.csv: header + two rows; frame_id + t_utc lead so power aligns to the frames
         rows = list(csv.reader((run / "exports" / "control.csv").open()))
-        assert rows[0][:3] == ["ts", "setpoint_c", "measured_c"]
+        assert rows[0][:5] == ["frame_id", "t_utc", "ts", "setpoint_c", "measured_c"]
         assert len(rows) == 3  # header + 2 samples
-        assert rows[1][1] == "185.0" and rows[1][3] == "240.0"  # setpoint_c, applied_w
-        assert rows[2][2] == "184.0"  # second sample's measured_c
+        cols = {name: i for i, name in enumerate(rows[0])}
+        assert rows[1][cols["setpoint_c"]] == "185.0" and rows[1][cols["applied_w"]] == "240.0"
+        assert rows[2][cols["measured_c"]] == "184.0"
+        assert rows[1][cols["frame_id"]] != ""  # stamped with the frame it landed on
 
         # timeline event of type "control" was recorded
         events = json.loads((run / "events.json").read_text())
