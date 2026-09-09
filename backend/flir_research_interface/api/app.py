@@ -493,6 +493,9 @@ def create_app(
                 cam.disconnect()
             except Exception as exc:  # noqa: BLE001
                 out["spinnaker_error"] = f"{type(exc).__name__}: {exc}"
+        from flir_research_interface.net_diagnostics import subnet_warnings
+
+        out["warnings"] = subnet_warnings(out["host_interfaces"], out["gvcp_devices"])
         return out
 
     # -- camera ----------------------------------------------------------------------------
