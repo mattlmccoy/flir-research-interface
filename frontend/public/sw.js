@@ -1,36 +1,34 @@
-/* FLIR Research Interface site worker: network-first for the app shell, cache fallback offline.
-   Operator traffic (localhost) is never intercepted. A styled offline.html is precached on install
-   so that even a first-ever visit while offline shows a branded page pointing at the local operator
-   (http://127.0.0.1:8000), instead of the browser's raw "no internet" error. */
-const CACHE = "fri-shell-v2";
-const OFFLINE = `${self.registration.scope}offline.html`;
+/* Offline fallback for the GitHub-Pages copy of the FLIR Research Interface.
 
-self.addEventListener("install", (e) => {
-  // Precache the offline fallback so it is available with no prior network hit.
-  e.waitUntil(caches.open(CACHE).then((c) => c.add(OFFLINE)).then(() => self.skipWaiting()));
-});
-self.addEventListener("activate", (e) => {
-  e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
+   The tool controls a LOCAL operator (the acquisition server on this machine, :8000) and serves the
+   whole app there with no internet. If the internet drops, the remote Pages page can't load — a
+   browser error, with the healthy local operator one click away. This worker precaches ONE
+   self-contained styled page (offline.html) and serves it ONLY when a top-level NAVIGATION fails.
+
+   It deliberately does NOT cache the app shell or /api,/ws: a cached SPA shell goes stale after a
+   deploy (offline you'd then load a broken shell instead of a clear page), and API/WebSocket traffic
+   must always be live. offline.html links to the local operator, which serves a fresh, working app. */
+const CACHE = "fri-offline-v3";
+const OFFLINE_URL = new URL("offline.html", self.registration.scope).href;
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(
+    caches.open(CACHE).then((cache) => cache.add(OFFLINE_URL)).then(() => self.skipWaiting()),
+  );
 });
 
-self.addEventListener("fetch", (e) => {
-  const url = new URL(e.request.url);
-  if (e.request.method !== "GET" || url.origin !== self.location.origin) return; // operator calls pass through
-  e.respondWith(
-    fetch(e.request)
-      .then((res) => {
-        if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); }
-        return res;
-      })
-      .catch(() => caches.match(e.request).then((hit) => {
-        if (hit) return hit;
-        if (e.request.mode === "navigate") {
-          // cached app shell first (full app works offline against the local operator), else the
-          // branded offline page pointing at the operator.
-          return caches.match(`${self.registration.scope}index.html`)
-            .then((shell) => shell || caches.match(OFFLINE));
-        }
-        return undefined;
-      })),
+self.addEventListener("activate", (event) => {
+  // Drop caches from older worker versions (including the v2 app-shell cache), then take control.
+  event.waitUntil(
+    caches.keys()
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then(() => self.clients.claim()),
+  );
+});
+
+self.addEventListener("fetch", (event) => {
+  if (event.request.mode !== "navigate") return; // page loads only — never assets, /api, or /ws
+  event.respondWith(
+    fetch(event.request).catch(() => caches.match(OFFLINE_URL).then((cached) => cached ?? Response.error())),
   );
 });
