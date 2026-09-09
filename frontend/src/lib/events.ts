@@ -2,9 +2,11 @@
 import type { ExperimentEvent, Timeline } from "./api.ts";
 import type { Marker } from "../components/TimePlot.tsx";
 
-// Internal bookkeeping events, not things that "happened" on the timeline: the start/stop records
-// and the camera_state snapshot written at stop (device temperature, NUC count). No tick, no legend.
-const BOOKKEEPING = new Set(["recording_started", "recording_stopped", "camera_state"]);
+// Internal bookkeeping events, not things that "happened" on the timeline: the start/stop records,
+// the camera_state snapshot written at stop (device temperature, NUC count), and the high-rate
+// `control` telemetry samples from the RF controller (those are the RF-power trace, plotted
+// separately — as markers they'd be a wall of "control" labels). No tick, no legend.
+const BOOKKEEPING = new Set(["recording_started", "recording_stopped", "camera_state", "control"]);
 /** Frozen runs at least this long are shown as a NUC marker. */
 export const NUC_MIN_REPEATS = 10;
 

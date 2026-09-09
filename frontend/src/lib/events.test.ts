@@ -105,3 +105,18 @@ test("assignLabelRows stacks only overlapping labels, keeping input order", () =
   assert.deepEqual(assignLabelRows([{ x: 100, width: 20 }, { x: 0, width: 20 }, { x: 10, width: 20 }], 4), [0, 0, 1]);
   assert.deepEqual(assignLabelRows([], 4), []);
 });
+
+test("control-telemetry samples are not timeline markers (they are the RF-power trace)", () => {
+  // A run drives ~1-2 control POSTs/sec → dozens of "control" events. They must NOT each become a
+  // marker, or the plot top becomes an unreadable wall of "control" labels. They're the RF-power
+  // trace (plotted separately), not discrete timeline events.
+  const evs = [
+    { type: "annotation", name: "RF ON", frame_id: 101 },
+    { type: "control", frame_id: 101, forward_w: 15.4 },
+    { type: "control", frame_id: 103, forward_w: 120.0 },
+    { type: "control", frame_id: 104, forward_w: 135.7 },
+  ];
+  const m = eventsToMarkers(evs, TL, START);
+  assert.deepEqual(m.map((x) => x.label), ["RF ON"], "only RF ON is a marker; control is excluded");
+  assert.deepEqual(markerLegend(m).map((c) => c.label), ["RF on"], "no 'control' or generic entry");
+});
