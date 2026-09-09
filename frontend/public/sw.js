@@ -9,6 +9,10 @@
    deploy (offline you'd then load a broken shell instead of a clear page), and API/WebSocket traffic
    must always be live. offline.html links to the local operator, which serves a fresh, working app. */
 const CACHE = "fri-offline-v3";
+// Our own cache prefix. CacheStorage is shared per-ORIGIN, not per-path: on github.io this app and
+// the sibling T&C Power tool share one origin, so we must only ever delete OUR OWN caches — never
+// `k !== CACHE`, which would wipe the other app's offline cache and break its offline page.
+const CACHE_PREFIX = "fri-";
 const OFFLINE_URL = new URL("offline.html", self.registration.scope).href;
 
 self.addEventListener("install", (event) => {
@@ -18,10 +22,13 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
-  // Drop caches from older worker versions (including the v2 app-shell cache), then take control.
+  // Drop only OUR OWN older caches (fri-shell-v1/v2, etc.) — leave other apps' caches on the shared
+  // origin untouched, then take control.
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(
+        keys.filter((k) => k.startsWith(CACHE_PREFIX) && k !== CACHE).map((k) => caches.delete(k)),
+      ))
       .then(() => self.clients.claim()),
   );
 });
