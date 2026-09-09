@@ -12,7 +12,7 @@ surface RF link state in the panel.
       every event. Retire `auto_start_on_rf_on` from rf-link settings. TDD (endpoint).
 - [x] P3 frontend model (`lib/trigger.ts` + test): add `rf` start/end kinds, form fields, summary
       text ("start when RF turns on"). TDD.
-- [~] P4 frontend UX (partial): ArmPanel adds "on RF signal" start option; RecordPanel splits Record-now vs
+- [x] P4 frontend UX: ArmPanel adds "on RF signal" start option; RecordPanel splits Record-now vs
       Arm with clear state; RF link status shown in the panel; trigger form simplified (advanced
       behind a toggle). Retire the Setup §6 auto-start checkbox (keep the last-event display).
       Browser-verify against the live operator.
