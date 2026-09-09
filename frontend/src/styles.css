@@ -349,3 +349,11 @@ button:disabled .spinner { opacity: 0.7; }
 .ctl-strip .rf.on .dot { background: var(--live); }
 .ctl-strip .rf.off .dot { background: var(--warn); }
 .ctl-strip .ctl { color: var(--fg-strong); }
+
+/* Recording panel: status banner + Record-now / Armed-trigger mode selector */
+.rec-status { margin-bottom: 6px; min-height: 20px; display: flex; align-items: center; }
+.row.seg { gap: 0; margin-bottom: 8px; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; width: fit-content; }
+.row.seg button { border: none; border-radius: 0; background: transparent; color: var(--muted); padding: 6px 14px; font: inherit; cursor: pointer; }
+.row.seg button + button { border-left: 1px solid var(--line); }
+.row.seg button.active { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.row.seg button:not(.active):hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 6%, transparent); }

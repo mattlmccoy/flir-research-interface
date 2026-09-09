@@ -16,6 +16,7 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: Roi
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [mode, setMode] = useState<"now" | "arm">("now");  // record-now vs armed-trigger
   const [withVisible, setWithVisible] = useState(true);
   const [nucHold, setNucHold] = useState(true);
   const [everyNth, setEveryNth] = useState(1);
@@ -96,15 +97,39 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: Roi
     } catch (e) { setErr(String(e)); }
   }
 
+  const idle = !recording && !armed;
   return (
     <>
-      {(armed || !recording) && <ArmPanel rois={rois} armed={armed} recording={recording} disabled={!acquiring} busy={busy} onArm={arm} onDisarm={disarm} onStartNow={startNow} />}
-      <div className="row">
-        {!recording && !armed ? (
-          <>
+      {/* Status banner — always says plainly what the recorder is doing. */}
+      <div className="rec-status">
+        {recording && !armed ? <span className="badge rec">● RECORDING · {(status.duration_s ?? 0).toFixed(1)} s</span>
+          : armed ? null  /* the armed banner is rendered by ArmPanel below */
+          : <span className="hint">idle — {acquiring ? "ready to record" : "connect a camera first"}</span>}
+      </div>
+
+      {/* Idle: choose HOW to record — start now, or arm a trigger. */}
+      {idle && (
+        <div className="row seg" role="tablist" aria-label="recording mode">
+          <button role="tab" aria-selected={mode === "now"} className={mode === "now" ? "active" : ""} onClick={() => setMode("now")}>Record now</button>
+          <button role="tab" aria-selected={mode === "arm"} className={mode === "arm" ? "active" : ""} onClick={() => setMode("arm")} title="Start and stop the recording automatically on a condition (RF, time, or temperature)">Armed trigger</button>
+        </div>
+      )}
+
+      {/* Armed banner + controls (waiting / triggered). */}
+      {armed && <ArmPanel rois={rois} armed={armed} recording={recording} disabled={!acquiring} busy={busy} onArm={arm} onDisarm={disarm} onStartNow={startNow} />}
+
+      {/* Idle → armed-trigger mode: the trigger form. */}
+      {idle && mode === "arm" && <ArmPanel rois={rois} armed={null} recording={false} disabled={!acquiring} busy={busy} onArm={arm} onDisarm={disarm} onStartNow={startNow} />}
+
+      {/* Idle → record-now mode: name + immediate Record + options. */}
+      {idle && mode === "now" && (
+        <>
+          <div className="row">
             <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="experiment name" style={{ width: 140 }} />
             <button className="primary" disabled={!acquiring || busy} onClick={start} title={acquiring ? "" : "connect a camera first"}>● Record</button>
             <button className="secondary" onClick={() => setShowForm(!showForm)}>{showForm ? "Hide metadata" : "Metadata"}</button>
+          </div>
+          <div className="row">
             <label className="hint" title={visibleAvailable ? "Also record the visible camera (RTSP /avc/ch1, H.264 stream copy) as visible.mp4" : `visible camera unavailable: ${vis?.reason ?? "no status yet"}`}>
               <input type="checkbox" checked={withVisible && visibleAvailable} disabled={!visibleAvailable} onChange={(e) => setWithVisible(e.target.checked)} /> visible video
             </label>
@@ -114,11 +139,12 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: Roi
             <label className="hint" title="Periodic (time-lapse) recording: keep every Nth frame. 1 = every frame (30 fps); 30 = one frame per second; 1800 = one per minute. Skipped frames are intentional and do not count as drops.">
               every <NumberField min={1} max={100000} step={1} value={everyNth} style={{ width: 64 }} onChange={(n) => setEveryNth(Math.max(1, Math.floor(n)))} /> frame{everyNth === 1 ? "" : "s"}{everyNth > 1 ? <small className="muted"> ≈ {(30 / everyNth).toPrecision(2)} fps</small> : null}
             </label>
-          </>
-        ) : recording && !armed ? (
-          <button className="danger" disabled={busy} onClick={stop}>■ Stop</button>
-        ) : null}
-      </div>
+          </div>
+        </>
+      )}
+
+      {/* Recording (started directly, not via a trigger): Stop. */}
+      {recording && !armed && <div className="row"><button className="danger" disabled={busy} onClick={stop}>■ Stop</button></div>}
       {recording && (
         <>
           <div className="row" aria-label="event marks">
