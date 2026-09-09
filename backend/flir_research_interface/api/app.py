@@ -1328,6 +1328,26 @@ def create_app(
     def experiment_timeline(name: str) -> dict[str, list[Any]]:
         return _open(name).timeline()
 
+    @app.get("/api/experiments/{name}/control")
+    def experiment_control(name: str) -> dict[str, Any]:
+        """The run's control/telemetry trace (RF power etc.) on the relative time axis, aligned to
+        the thermal frames by frame_id, for overlaying on the ROI-temperature plot. Reads the
+        frame-stamped ``control`` events from events.json; empty when the run has none."""
+        from flir_research_interface.analysis.control_series import control_series_from_rows
+
+        reader = _open(name)
+        events_path = reader.path / "events.json"
+        if not events_path.is_file():
+            return {"t_s": []}
+        try:
+            events = json.loads(events_path.read_text())
+        except (OSError, ValueError):
+            return {"t_s": []}
+        rows = [e for e in events if isinstance(e, dict) and e.get("type") == "control"]
+        tl = reader.timeline()
+        frame_t_s = {int(f): float(t) for f, t in zip(tl["frame_id"], tl["t_s"], strict=False)}
+        return control_series_from_rows(rows, frame_t_s)
+
     @app.patch("/api/experiments/{name}/metadata")
     def experiment_metadata_patch(name: str, req: MetadataPatch) -> dict[str, Any]:
         """Edit operator fields after the fact; camera/conversion blocks stay as recorded."""

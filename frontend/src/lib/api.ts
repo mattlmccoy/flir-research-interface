@@ -73,6 +73,8 @@ export interface RfLinkEvent { state: string; reason: string | null; forward_w: 
 export interface RfLinkStatus { last_event: RfLinkEvent | null; }
 export interface ControlSample { ts?: string; setpoint_c?: number; measured_c?: number; applied_w?: number | null; recommended_w?: number; phase?: string; mode?: string; armed?: boolean; forward_w?: number; reverse_w?: number; reflected_fraction?: number; error_c?: number; roi?: string; }
 export interface ControlStatus { rf_link_last_event: RfLinkEvent | null; control_last: ControlSample | null; engaged: boolean; }
+/** A run's control trace on the relative time axis (frame-aligned). Numeric columns are optional. */
+export interface ControlSeries { t_s: number[]; forward_w?: (number | null)[]; reverse_w?: (number | null)[]; reflected_fraction?: (number | null)[]; setpoint_c?: (number | null)[]; measured_c?: (number | null)[]; applied_w?: (number | null)[]; recommended_w?: (number | null)[]; error_c?: (number | null)[]; }
 
 export interface Experiment {
   name: string;
@@ -219,4 +221,6 @@ export const api = {
   putLiveRois: (rois: unknown[]) =>
     j<{ count: number }>(req("/api/live/rois", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ rois }) })),
   controlStatus: () => j<ControlStatus>(req("/api/control/status")),
+  controlSeries: (name: string) =>
+    j<ControlSeries>(req(`/api/experiments/${encodeURIComponent(name)}/control`)),
 };

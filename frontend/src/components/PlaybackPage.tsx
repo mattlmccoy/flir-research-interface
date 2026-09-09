@@ -6,7 +6,7 @@ import { ProfilePanel, type FieldSnapshot } from "../components/ProfilePanel.tsx
 import { radiometryFromCamera } from "../lib/emissivity.ts";
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import type { Dispatch, ReactNode } from "react";
-import { api, type ExperimentInfo, type RecordingStatus, type RoiSeries, type Status, type Timeline } from "../lib/api.ts";
+import { api, type ControlSeries, type ExperimentInfo, type RecordingStatus, type RoiSeries, type Status, type Timeline } from "../lib/api.ts";
 import { type FrameMessage, decodeFrameBlock } from "../lib/protocol.ts";
 import type { PaletteName } from "../lib/palette.ts";
 import type { Range, ScaleMode } from "../lib/scale.ts";
@@ -76,6 +76,8 @@ export function PlaybackPage(p: Props) {
   const [err, setErr] = useState<string | null>(null);
   const [stats, setStats] = useState<StatsMap>(new Map());
   const [series, setSeries] = useState<RoiSeries | null>(null);
+  const [control, setControl] = useState<ControlSeries | null>(null);
+  const [showRf, setShowRf] = useState(true);
   const [showMedia, setShowMedia] = useState(false);
   const [regenBusy, setRegenBusy] = useState(false);
   const cache = useRef(new Map<number, FrameMessage>());
@@ -112,6 +114,14 @@ export function PlaybackPage(p: Props) {
     }, 250);
     return () => { alive = false; window.clearTimeout(id); };
   }, [p.name, info, p.rois.rois, p.layout.segment.on, p.layout.segment.min, p.layout.segment.max]);
+
+  // RF power / control trace for this run (frame-aligned), for the plot overlay.
+  useEffect(() => {
+    if (!info) { setControl(null); return; }
+    let alive = true;
+    api.controlSeries(p.name).then((c) => { if (alive) setControl(c); }).catch(() => { if (alive) setControl(null); });
+    return () => { alive = false; };
+  }, [p.name, info]);
 
   const ensureBlock = useCallback((start: number): Promise<void> => {
     const running = inflight.current.get(start);
@@ -196,6 +206,11 @@ export function PlaybackPage(p: Props) {
   const recordedH = info?.visible_alignment ? parseAlignment(info.visible_alignment).H : null;
   const overlayH = recordedH ?? loadAlignment(typeof localStorage !== "undefined" ? localStorage : null).H;
   const traces = seriesTraces(series, p.rois);
+  // RF forward power on the secondary axis (frame-aligned to the temperature trace).
+  const hasRf = !!control && Array.isArray(control.forward_w) && control.forward_w.some((v) => v != null);
+  const rightTraces: Trace[] = hasRf && showRf
+    ? [{ id: -100, label: "RF power", color: "var(--warn)", t: control!.t_s, v: (control!.forward_w!).map((v) => (v == null ? NaN : v)) }]
+    : [];
   // Derived files (ROI plot, peak frames, ROI video, roi_series.csv) are stale when the ROIs on
   // screen no longer match the ones stored with the recording; badge the export section so it's
   // visible even when collapsed.
@@ -287,8 +302,10 @@ export function PlaybackPage(p: Props) {
         </div>
       }
       dock={
-        <PlotDock title="temperature vs time (whole recording)" foot={transport} onCollapse={() => p.dispatch({ type: "toggle", panel: "dock" })}>
+        <PlotDock title="temperature vs time (whole recording)" foot={transport} onCollapse={() => p.dispatch({ type: "toggle", panel: "dock" })}
+          controls={hasRf ? <label className="hint" title="Overlay the RF forward power (right axis, W) recorded from the RF generator, aligned to the temperature."><input type="checkbox" checked={showRf} onChange={(e) => setShowRf(e.target.checked)} /> RF power</label> : undefined}>
           <TimePlot traces={withDelta} markers={markers} window={{ t0: 0, t1: Math.max(info?.duration_s ?? 0, 0.001) }} cursorT={t}
+            rightTraces={rightTraces} rightUnits="W"
             emptyText={p.rois.rois.length ? "loading series…" : "add a spot or rectangle ROI to plot it over the whole recording"}
             onSeek={(tt) => { if (tl) { setPlaying(false); setIndex(nearestIndex(tl.t_s, tt)); } }} />
         </PlotDock>

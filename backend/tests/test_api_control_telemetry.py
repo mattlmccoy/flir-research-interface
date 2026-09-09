@@ -30,6 +30,24 @@ def test_telemetry_is_a_noop_ack_when_not_recording(tmp_path: Path) -> None:
         assert r["stored"]["setpoint_c"] == 185.0 and "ts" in r["stored"]  # ts auto-filled
 
 
+def test_control_endpoint_returns_frame_aligned_rf_power(tmp_path: Path) -> None:
+    with _client(tmp_path) as c:
+        devs = c.get("/api/camera/devices").json()
+        c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        c.post("/api/recording/start", json={"name": "rf trace"})
+        time.sleep(0.2)
+        c.post("/api/control/telemetry", json={**SAMPLE, "forward_w": 100.0})
+        time.sleep(0.1)
+        c.post("/api/control/telemetry", json={**SAMPLE, "forward_w": 250.0})
+        c.post("/api/recording/stop")
+        c.post("/api/camera/disconnect")
+        runs = [d for d in tmp_path.iterdir() if d.is_dir() and (d / "events.json").exists()]
+        s = c.get(f"/api/experiments/{runs[0].name}/control").json()
+        assert len(s["t_s"]) == 2 and all(isinstance(t, float) for t in s["t_s"])
+        assert s["forward_w"] == [100.0, 250.0]  # RF power over the run, frame-aligned
+        assert s["setpoint_c"] == [185.0, 185.0]
+
+
 def test_control_status_reports_last_telemetry(tmp_path: Path) -> None:
     with _client(tmp_path) as c:
         assert c.get("/api/control/status").json()["control_last"] is None

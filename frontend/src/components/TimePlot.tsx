@@ -16,6 +16,9 @@ interface Props {
   units?: string;
   emptyText?: string;
   onSeek?: (t: number) => void;
+  /** Optional traces on a secondary right-hand axis (e.g. RF power in W) with their own scale. */
+  rightTraces?: Trace[];
+  rightUnits?: string;
 }
 
 const PAD = { left: 56, right: 10, top: 8, bottom: 20 };
@@ -34,7 +37,9 @@ function css(color: string): string {
 }
 
 /** Temperature-vs-time canvas plot (spec §3 plot dock): traces, event markers, time cursor. */
-export function TimePlot({ traces, markers = [], window: win, range, cursorT = null, units = "°C", emptyText, onSeek }: Props) {
+export function TimePlot({ traces, markers = [], window: win, range, cursorT = null, units = "°C", emptyText, onSeek, rightTraces, rightUnits = "W" }: Props) {
+  const hasRight = !!rightTraces && rightTraces.length > 0;
+  const padRight = hasRight ? 46 : PAD.right;
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -58,9 +63,10 @@ export function TimePlot({ traces, markers = [], window: win, range, cursorT = n
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, size.w, size.h);
-    const pw = Math.max(1, size.w - PAD.left - PAD.right);
+    const pw = Math.max(1, size.w - PAD.left - padRight);
     const ph = Math.max(1, size.h - PAD.top - PAD.bottom);
     const yr = range ?? valueRange(traces) ?? { min: 0, max: 1 };
+    const yrR = hasRight ? (valueRange(rightTraces) ?? { min: 0, max: 1 }) : null;
     const line = css("var(--line)"), muted = css("var(--muted)");
     ctx.font = `10px ${css("var(--font-mono)")}`;
     ctx.save();
@@ -74,6 +80,12 @@ export function TimePlot({ traces, markers = [], window: win, range, cursorT = n
       const y = Math.round(yToPx(v, yr, ph)) + 0.5;
       ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(pw, y); ctx.stroke();
       ctx.fillText(v.toFixed(yDec), -6, y);
+    }
+    if (yrR) {  // secondary (right) axis tick labels, e.g. RF power in W
+      ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillStyle = css("var(--warn)");
+      const rTicks = niceTicks(yrR.min, yrR.max, Math.max(2, Math.floor(ph / 36)));
+      for (const v of rTicks) ctx.fillText(v.toFixed(decimalsFor(rTicks)), pw + 6, Math.round(yToPx(v, yrR, ph)) + 0.5);
+      ctx.fillStyle = muted;
     }
     ctx.textAlign = "center"; ctx.textBaseline = "top";
     const xTicks = niceTicks(win.t0, win.t1, Math.max(2, Math.floor(pw / 160)));
@@ -96,6 +108,20 @@ export function TimePlot({ traces, markers = [], window: win, range, cursorT = n
         if (pen) ctx.lineTo(x, y); else { ctx.moveTo(x, y); pen = true; }
       }
       ctx.stroke();
+    }
+    if (yrR) {  // secondary-axis traces (RF power), scaled to their own range
+      for (const tr of rightTraces!) {
+        ctx.strokeStyle = css(tr.color); ctx.lineWidth = 1.5; ctx.beginPath();
+        let pen = false;
+        for (let i = 0; i < tr.t.length; i++) {
+          const t = tr.t[i], v = tr.v[i];
+          if (t < win.t0 - 1 || t > win.t1 + 1) continue;
+          if (!Number.isFinite(v)) { pen = false; continue; }
+          const x = xToPx(t, win, pw), y = yToPx(v, yrR, ph);
+          if (pen) ctx.lineTo(x, y); else { ctx.moveTo(x, y); pen = true; }
+        }
+        ctx.stroke();
+      }
     }
     // event markers: dashed line + label per event, colored by category (matching the legend), with
     // the labels stacked into rows so close events don't overlap.
@@ -121,12 +147,16 @@ export function TimePlot({ traces, markers = [], window: win, range, cursorT = n
     ctx.restore();
     ctx.fillStyle = muted; ctx.textAlign = "left"; ctx.textBaseline = "top";
     ctx.fillText(units, 4, 2);
-  }, [traces, markers, win, range, cursorT, units, size]);
+    if (yrR) {  // right-axis unit (RF power)
+      ctx.fillStyle = css("var(--warn)"); ctx.textAlign = "right";
+      ctx.fillText(rightUnits, size.w - 4, 2);
+    }
+  }, [traces, markers, win, range, cursorT, units, size, rightTraces, rightUnits, hasRight, padRight]);
 
   function onClick(e: RMouseEvent<HTMLCanvasElement>) {
     if (!onSeek) return;
     const r = e.currentTarget.getBoundingClientRect();
-    const pw = Math.max(1, r.width - PAD.left - PAD.right);
+    const pw = Math.max(1, r.width - PAD.left - padRight);
     const f = (e.clientX - r.left - PAD.left) / pw;
     if (f < 0 || f > 1) return;
     onSeek(win.t0 + f * (win.t1 - win.t0));
@@ -136,7 +166,7 @@ export function TimePlot({ traces, markers = [], window: win, range, cursorT = n
   // static labels were dropped, and a precise readout for the rest.
   function onMove(e: RMouseEvent<HTMLCanvasElement>) {
     const r = e.currentTarget.getBoundingClientRect();
-    const pw = Math.max(1, r.width - PAD.left - PAD.right);
+    const pw = Math.max(1, r.width - PAD.left - padRight);
     const cx = e.clientX - r.left;
     const near = markers.filter((m) => m.t >= win.t0 && m.t <= win.t1
       && Math.abs(PAD.left + xToPx(m.t, win, pw) - cx) <= 6);
