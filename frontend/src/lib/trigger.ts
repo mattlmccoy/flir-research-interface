@@ -26,6 +26,17 @@ function threshold(roi: number | null, stat: Stat, level: number, direction: Dir
   return t;
 }
 
+/** Warn when a trigger uses RF (start or end) but no RF generator is currently linked, so arming
+ *  it would silently capture nothing (no RF-on start, no power logged). Null when it's fine. */
+export function rfLinkWarning(
+  f: { startKind: StartKind; endKind: EndKind }, engaged: boolean,
+): string | null {
+  if (engaged) return null;
+  if (f.startKind !== "rf" && f.endKind !== "rf") return null;
+  return "No RF generator is linked right now — this trigger won't fire on RF and no power will be "
+    + "logged. Enable the RF link on the T&C/CXN tool (URL http://127.0.0.1:8000) before arming.";
+}
+
 export function triggerFromForm(f: TriggerForm): TriggerSpec {
   const start: StartSpec = f.startKind === "manual" ? { kind: "manual" } : f.startKind === "rf" ? { kind: "rf" }
     : f.startKind === "after" ? { kind: "after", after_s: f.afterS }

@@ -1,7 +1,8 @@
 import { NumberField } from "./NumberField.tsx";
 import { useState } from "react";
-import { DEFAULT_TRIGGER_FORM, triggerFromForm, triggerSummary, type TriggerForm } from "../lib/trigger.ts";
+import { DEFAULT_TRIGGER_FORM, rfLinkWarning, triggerFromForm, triggerSummary, type TriggerForm } from "../lib/trigger.ts";
 import { roiLabel, type Roi } from "../lib/roi.ts";
+import { useControlStatus } from "../lib/useControlStatus.ts";
 import type { ArmedStatus } from "../lib/api.ts";
 
 interface Props {
@@ -14,6 +15,7 @@ interface Props {
 export function ArmPanel({ rois, armed, recording, disabled, busy, onArm, onDisarm, onStartNow }: Props) {
   const [f, setF] = useState<TriggerForm>({ ...DEFAULT_TRIGGER_FORM, roi: rois[0]?.id ?? null });
   const [adv, setAdv] = useState(false);
+  const rfEngaged = !!useControlStatus()?.engaged;  // is an RF generator actually linked right now?
   const upd = (patch: Partial<TriggerForm>) => setF({ ...f, ...patch });
   const spec = triggerFromForm(f);
   const area = rois.filter((r) => r.kind !== "line");
@@ -27,13 +29,19 @@ export function ArmPanel({ rois, armed, recording, disabled, busy, onArm, onDisa
   // ARMED / TRIGGERED — the live status while a trigger is running.
   if (armed) {
     const m = armed.machine;
+    const t = armed.trigger as { start?: { kind?: string }; end?: { kind?: string } };
     const startText = triggerSummary(armed.trigger as never).split(" · ")[0]; // "start when …"
+    // Waiting on RF but nothing is linked → it will never fire and no power will be logged.
+    const rfWarn = !recording
+      ? rfLinkWarning({ startKind: (t.start?.kind ?? "manual") as never, endKind: (t.end?.kind ?? "manual") as never }, rfEngaged)
+      : null;
     return (
       <div className="warnbox" role="status" style={{ display: "grid", gap: 6 }}>
         <div>
           <span className="badge rec" style={{ animation: "pulse 1.2s infinite" }}>{recording ? "● RECORDING" : "◌ ARMED"}</span>{" "}
           <span className="hint">{recording ? "trigger fired — recording in progress" : `waiting — ${startText}`}</span>
         </div>
+        {rfWarn && <div className="bad" role="alert" style={{ fontSize: 12 }}>⚠ {rfWarn}</div>}
         <div className="hint">{triggerSummary(armed.trigger as never)}</div>
         <div className="hint">watched value: <b>{armed.watched_value != null ? `${armed.watched_value.toFixed(2)} °C` : "—"}</b>{armed.watched_roi != null ? ` (ROI ${armed.watched_roi})` : ""} · buffered {armed.ring_frames} fr{recording ? ` · recorded ${m.frames_recorded} fr` : ""}</div>
         <div className="row">
@@ -77,6 +85,10 @@ export function ArmPanel({ rois, armed, recording, disabled, busy, onArm, onDisa
       </span>
 
       <span className="hint" style={{ gridColumn: "1 / -1" }}>{triggerSummary(spec)}</span>
+
+      {rfLinkWarning(f, rfEngaged) && (
+        <div className="warnbox" role="alert" style={{ gridColumn: "1 / -1" }}>⚠ {rfLinkWarning(f, rfEngaged)}</div>
+      )}
 
       <button className="secondary" aria-expanded={adv} style={{ gridColumn: "1 / -1", justifySelf: "start" }} onClick={() => setAdv(!adv)}>{adv ? "▾ advanced" : "▸ advanced"}</button>
       {adv && <>

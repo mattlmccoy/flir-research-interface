@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_TRIGGER_FORM, triggerFromForm, triggerSummary } from "./trigger.ts";
+import { DEFAULT_TRIGGER_FORM, rfLinkWarning, triggerFromForm, triggerSummary } from "./trigger.ts";
 
 test("triggerFromForm builds the operator's trigger object and drops irrelevant fields", () => {
   const t = triggerFromForm({ ...DEFAULT_TRIGGER_FORM, startKind: "threshold", roi: 3, stat: "max", level: 80, direction: "rising", endKind: "duration", seconds: 90, pretrigger: 2 });
@@ -24,4 +24,15 @@ test("rf start/end build an rf trigger and read as a readable line", () => {
     triggerSummary({ start: { kind: "rf" }, end: { kind: "rf" }, pretrigger_s: 2, max_seconds: 1800 }),
     "start when RF turns on · stop when RF turns off · 2 s pre-trigger · cap 1800 s",
   );
+});
+
+test("rfLinkWarning flags arming on RF while no RF link is engaged", () => {
+  const engaged = true, notEngaged = false;
+  // uses RF (start or end) + not engaged -> warn
+  assert.ok(rfLinkWarning({ startKind: "rf", endKind: "manual" }, notEngaged));
+  assert.ok(rfLinkWarning({ startKind: "threshold", endKind: "rf" }, notEngaged));
+  // engaged -> no warning even when using RF
+  assert.equal(rfLinkWarning({ startKind: "rf", endKind: "rf" }, engaged), null);
+  // not using RF -> no warning even when not engaged
+  assert.equal(rfLinkWarning({ startKind: "threshold", endKind: "duration" }, notEngaged), null);
 });
