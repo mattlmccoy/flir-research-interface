@@ -1,5 +1,13 @@
 # Camera network setup
 
+> **Current addresses (updated 2026-09-11):** the A70 is on a persistent **`192.168.8.2/24`**
+> and the host adapter `en13` on **`192.168.8.1/24`**. It was moved off `192.168.7.x` so the
+> Vention MachineMotion (which lives on `192.168.7.x`) can share the same Mac without an IP
+> collision or routing ambiguity. The persistent IP was set via the **camera web UI**
+> (`http://<camera IP>` → Network) because SpinView's persistent-IP fields were locked. The
+> `192.168.7.x` examples below are the original 2026-09-01 setup, kept for the troubleshooting
+> steps — substitute the `8.x` subnet when following them today.
+
 ## How the A70 is reached
 
 The A70 is a GigE Vision device: control over UDP port 3956 (GVCP), image stream over UDP

@@ -20,7 +20,7 @@ systemd --user). Set `FRI_SDK_BASE_URL` to use a different mirror.
 
 | Value | Where it comes from |
 |---|---|
-| Camera IP | Setup → *Scan network* on the site (raw GigE Vision discovery); lab default 192.168.7.2. If the camera announces 0.0.0.0 after a re-plug, *Force IP* once. |
+| Camera IP | Setup → *Scan network* on the site (raw GigE Vision discovery); lab default 192.168.8.2 (moved off 192.168.7.x on 2026-09-11 so the Vention MachineMotion can share the bench — host adapter `en13` is 192.168.8.1/24). If the camera announces 0.0.0.0 after a re-plug, *Force IP* once. |
 | Admin password (to open the camera's web interface) | Printed on the **calibration certificate / card** shipped in the camera box (FLIR's initial password). FLIR support can reset it from the serial number. |
 | RTSP user + password | Camera web interface `http://<camera IP>` → log in as `admin` → **Settings → Users**. The RTSP account (usually `rtsp`) and its password are managed there and nowhere else. |
 
