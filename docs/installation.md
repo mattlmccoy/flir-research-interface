@@ -27,6 +27,21 @@ systemd --user). Set `FRI_SDK_BASE_URL` to use a different mirror.
 They are written only to the git-ignored `backend/.env`; re-run `uv run fri-install --no-service`
 to change them. Without them the thermal side works fully; only the visible camera is disabled.
 
+### Where recordings are stored
+
+By default the operator writes runs to `experiments/` inside the checkout (`<checkout>/backend/experiments`).
+To keep them elsewhere — a backed-up / synced folder, or a location that survives re-installing the
+operator into a fresh clone — set `FRI_EXPERIMENTS_ROOT` in `backend/.env` (or the service's
+environment) to an absolute path, e.g.:
+
+```bash
+FRI_EXPERIMENTS_ROOT=/Users/you/Dropbox/FLIR-experiments
+```
+
+`backend/.env` is git-ignored, so `git pull` / re-running the installer **in place** never touches
+it — the setting persists across updates. The operator reads it at startup (`fri-serve` logs the
+resolved root). Set it once, then `launchctl kickstart -k …` (or the platform restart) to apply.
+
 Publishing the mirror (owner only, from a machine that has the artifacts):
 
 ```bash
