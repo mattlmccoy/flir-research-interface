@@ -136,6 +136,15 @@ _extract_spinnaker_libs_from_deb() {
       || { echo "!! failed to unpack $d"; return 1; }
   done
   sudo ldconfig
+  # FLIR's libSpinnaker.so / libSpinVideo.so are marked with an executable stack, which hardened
+  # Fedora/SELinux kernels refuse to load ("cannot enable executable stack"). Clear that flag.
+  if [ -f "$DEST/scripts/clear_execstack.py" ]; then
+    sudo python3 "$DEST/scripts/clear_execstack.py" /opt/spinnaker/lib/*.so* || {
+      echo "!! could not clear the executable-stack flag automatically. If 'import PySpin' fails"
+      echo "   with 'cannot enable executable stack', run:"
+      echo "     sudo dnf install -y execstack && sudo execstack -c /opt/spinnaker/lib/*.so*"
+    }
+  fi
   echo "installed Spinnaker libraries to /opt/spinnaker/lib"
 }
 
