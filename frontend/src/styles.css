@@ -418,7 +418,8 @@ button:disabled .spinner { opacity: 0.7; }
 @keyframes fri-rise { from { transform: translate(-50%, 10px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
 .selection-bar .count { color: var(--accent); font-weight: 600; }
 .selection-bar .sep { width: 1px; align-self: stretch; background: var(--line-control); margin: 0 2px; }
-.selection-bar .done { margin-left: auto; }
+/* keep 'done' inline at the end — margin-left:auto would wrap it to a new row in a flex-wrap bar */
+.selection-bar .done { margin-left: 4px; }
 .selection-progress { flex-basis: 100%; display: flex; align-items: center; gap: 8px; color: var(--fg-strong); }
 .selection-progress .progressbar { flex: 1; }
 .bulk-tag-pop { position: fixed; left: 50%; transform: translateX(-50%); bottom: 64px; z-index: 41; }
