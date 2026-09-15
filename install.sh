@@ -10,8 +10,41 @@ REPO="https://github.com/mattlmccoy/flir-research-interface.git"
 DEST="${FRI_HOME:-$HOME/flir-research-interface}"
 SDK_BASE="${FRI_SDK_BASE_URL:-https://github.com/mattlmccoy/flir-research-interface/releases/download/sdk-4.4.0.246}"
 TELEDYNE="https://www.teledynevisionsolutions.com/products/spinnaker-sdk/"
+RAW_INSTALL="https://raw.githubusercontent.com/mattlmccoy/flir-research-interface/main/install.sh"
+BIN_DIR="${FRI_BIN_DIR:-$HOME/.local/bin}"
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
+
+# Leave an easy, persistent re-run command on the machine. The long curl one-liner scrolls out of
+# the terminal after setup; `fri-update` (and the local install.sh) stay put. fri-update pulls the
+# latest and re-runs, so it also upgrades the installer itself.
+install_updater() {
+  mkdir -p "$BIN_DIR"
+  cat > "$BIN_DIR/fri-update" <<EOF
+#!/usr/bin/env bash
+# Update the FLIR Research Interface operator to the latest version and restart it.
+set -e
+FRI_HOME="\${FRI_HOME:-$DEST}"
+git -C "\$FRI_HOME" pull --ff-only || true
+exec bash "\$FRI_HOME/install.sh" "\$@"
+EOF
+  chmod +x "$BIN_DIR/fri-update"
+}
+
+# Printed at the end of every install so the re-run/uninstall commands never "disappear".
+print_persistent_commands() {
+  say "Update or re-run any time (these stay on the machine)"
+  echo "  fri-update"
+  echo "      or:  bash \"$DEST/install.sh\""
+  echo "      or:  curl -fsSL $RAW_INSTALL | bash"
+  echo "  Uninstall:  bash \"$DEST/uninstall.sh\"   (add --purge to also remove the code)"
+  case ":$PATH:" in
+    *":$BIN_DIR:"*) : ;;
+    *) echo ""
+       echo "  Note: $BIN_DIR is not on your PATH yet — for the short 'fri-update' command, add it:"
+       echo "        echo 'export PATH=\"$BIN_DIR:\$PATH\"' >> ~/.bashrc && source ~/.bashrc" ;;
+  esac
+}
 
 # ---------------------------------------------------------------- Linux ----
 # Which system package manager this distro uses (apt/dnf/pacman/zypper), or "none".
@@ -33,20 +66,30 @@ linux_install_deps() {
       sudo apt-get install -y ffmpeg || echo "!! ffmpeg did not install via apt; install it manually"
       ;;
     dnf)
-      sudo dnf install -y git curl libgomp || true
+      # binutils (ar) + zstd let us unpack the Spinnaker .deb libraries on a non-Debian distro.
+      sudo dnf install -y git curl libgomp binutils zstd || true
       # libusb-1.0 is 'libusb1' on current Fedora, 'libusbx' on older releases.
       sudo dnf install -y libusb1 || sudo dnf install -y libusbx || true
-      # Full ffmpeg needs RPM Fusion; ffmpeg-free (default repos) is the fallback.
-      sudo dnf install -y ffmpeg || sudo dnf install -y ffmpeg-free || {
-        echo "!! ffmpeg could not be installed from your repos."
-        echo "   Enable RPM Fusion (https://rpmfusion.org) then: sudo dnf install ffmpeg"
-      }
+      # Full ffmpeg (RPM Fusion) has the libx264 encoder that mp4 export needs. Fedora's default
+      # 'ffmpeg-free' can play/decode and make GIFs, but has NO libx264, so mp4 export fails on it.
+      if sudo dnf install -y ffmpeg; then
+        :
+      elif sudo dnf install -y ffmpeg-free; then
+        echo "!! Installed 'ffmpeg-free' (default repos). GIF export works; mp4/H.264 export does NOT"
+        echo "   (no libx264). For mp4, enable RPM Fusion then swap to the full build:"
+        echo "     sudo dnf install -y https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-\$(rpm -E %fedora).noarch.rpm"
+        echo "     sudo dnf install -y --allowerasing ffmpeg"
+      else
+        echo "!! ffmpeg could not be installed. Enable RPM Fusion (https://rpmfusion.org), then:"
+        echo "     sudo dnf install -y ffmpeg"
+      fi
       ;;
     pacman)
-      sudo pacman -Sy --noconfirm git curl ffmpeg libusb gcc-libs || echo "!! pacman deps incomplete"
+      sudo pacman -Sy --noconfirm git curl ffmpeg libusb gcc-libs binutils zstd \
+        || echo "!! pacman deps incomplete"
       ;;
     zypper)
-      sudo zypper --non-interactive install git curl ffmpeg libusb-1_0-0 libgomp1 \
+      sudo zypper --non-interactive install git curl ffmpeg libusb-1_0-0 libgomp1 binutils zstd \
         || echo "!! zypper deps incomplete"
       ;;
     none)
@@ -57,24 +100,90 @@ linux_install_deps() {
   esac
 }
 
-# Camera driver (PySpin). Auto-installed only on Debian/Ubuntu (Teledyne ships .deb); on other
-# distros the operator still installs and runs in SIMULATED mode, with a clear pointer to the SDK.
+# Map `uname -m` to the arch tags used by the SDK filenames.
+_spin_arch() {  # -> "<pyarch> <debarch>"
+  case "$(uname -m)" in
+    x86_64|amd64) echo "x86_64 amd64" ;;
+    aarch64|arm64) echo "aarch64 arm64" ;;
+    *) echo "$(uname -m) $(uname -m)" ;;
+  esac
+}
+
+# Install the Spinnaker C++ runtime libraries on a NON-Debian distro (Fedora/Arch/openSUSE) by
+# extracting them straight out of Teledyne's Ubuntu .deb packages — no dpkg needed. The libs are
+# glibc-forward-compatible, so the Ubuntu 24.04 (noble, gcc13) build runs on newer Fedora. They go
+# to /opt/spinnaker/lib with an ld.so.conf.d entry, exactly where Teledyne's own installer puts
+# them, so the PySpin wheel finds them by soname after ldconfig.
+_extract_spinnaker_libs_from_deb() {
+  local debarch="$1" tmp="$2"
+  if ! command -v ar >/dev/null 2>&1 || ! command -v zstd >/dev/null 2>&1; then
+    echo "!! need 'ar' (binutils) and 'zstd' to unpack the SDK libraries; install them and re-run"
+    return 1
+  fi
+  local pkg="spinnaker-4.4.0.246-noble-${debarch}-pkg.tar.gz"
+  echo "fetching Spinnaker runtime libraries ($pkg)…"
+  if ! curl -fL --progress-bar -o "$tmp/sdk.tar.gz" "$SDK_BASE/$pkg"; then
+    echo "!! could not download $pkg from the mirror ($SDK_BASE)"; return 1
+  fi
+  tar -xzf "$tmp/sdk.tar.gz" -C "$tmp"
+  local sdkdir d deb x
+  sdkdir="$(echo "$tmp"/spinnaker-*-"${debarch}")"
+  for d in libgentl libspinnaker libspinnaker-c libspinvideo libspinvideo-c; do
+    deb="$(ls "$sdkdir/${d}_"*.deb 2>/dev/null | head -1)"
+    [ -n "$deb" ] || continue
+    x="$(mktemp -d)"
+    ( cd "$x" && ar x "$deb" && zstd -dc data.tar.zst | sudo tar -x -C / ) \
+      || { echo "!! failed to unpack $d"; return 1; }
+  done
+  sudo ldconfig
+  echo "installed Spinnaker libraries to /opt/spinnaker/lib"
+}
+
+# Install the PySpin wheel into the operator venv. The wheel is arch-specific; we look on the SDK
+# mirror first, then for a copy the user already downloaded from Teledyne (~/Downloads or the cwd),
+# whether still a .tar.gz or already unpacked. Returns non-zero (with guidance) if none is found.
+_install_pyspin_wheel() {
+  local pyarch="$1" tmp="$2"
+  local tgz="spinnaker_python-4.4.0.246-cp312-cp312-linux_${pyarch}.tar.gz"
+  local src="" whl=""
+  if curl -fsL -o "$tmp/py.tar.gz" "$SDK_BASE/$tgz"; then
+    src="$tmp/py.tar.gz"
+  else
+    # A copy the user downloaded from Teledyne (Keenan's case): the tarball or an unpacked folder.
+    src="$(ls "$HOME/Downloads/$tgz" "$PWD/$tgz" 2>/dev/null | head -1 || true)"
+    if [ -z "$src" ]; then
+      whl="$(ls "$HOME/Downloads/spinnaker_python-4.4.0.246-cp312-cp312-linux_${pyarch}"/*.whl \
+               "$HOME/Downloads"/spinnaker_python-*-cp312-cp312-linux_"${pyarch}".whl 2>/dev/null \
+             | head -1 || true)"
+    fi
+  fi
+  if [ -n "$src" ]; then
+    mkdir -p "$tmp/py" && tar -xzf "$src" -C "$tmp/py"
+    whl="$(ls "$tmp"/py/*.whl "$tmp"/py/**/*.whl 2>/dev/null | head -1 || true)"
+  fi
+  if [ -z "$whl" ]; then
+    echo "!! PySpin wheel not found on the mirror or in ~/Downloads."
+    echo "   Download 'Spinnaker Python 4.4.0.246' (cp312, linux_${pyarch}) from:"
+    echo "     $TELEDYNE"
+    echo "   save it to ~/Downloads, then run: fri-update"
+    return 1
+  fi
+  ( cd "$DEST/backend" && uv pip install -q "$whl" ) && echo "PySpin installed from $(basename "$whl")"
+}
+
+# Camera driver (PySpin), all distros: install the C++ libs (dpkg on Debian/Ubuntu; extract-to-
+# /opt on others) then the Python wheel. If the wheel can't be found, the operator still runs in
+# SIMULATED mode and the message says exactly how to finish.
 linux_install_sdk() {
   if ( cd "$DEST/backend" && uv run python -c "import PySpin" 2>/dev/null ); then
     echo "PySpin already importable"; return 0
   fi
-  local arch pyarch tmp
-  arch="$(uname -m)"
-  case "$arch" in
-    x86_64|amd64) pyarch=x86_64 ;;
-    aarch64|arm64) pyarch=aarch64 ;;
-    *) pyarch="$arch" ;;
-  esac
+  local pyarch debarch tmp
+  read -r pyarch debarch <<<"$(_spin_arch)"
   tmp="$(mktemp -d)"
   if command -v dpkg >/dev/null 2>&1; then
-    local codename debarch pkg
-    codename="$(. /etc/os-release && echo "${VERSION_CODENAME:-jammy}")"
-    debarch="$(dpkg --print-architecture)"
+    local codename pkg
+    codename="$(. /etc/os-release && echo "${VERSION_CODENAME:-noble}")"
     pkg="spinnaker-4.4.0.246-${codename}-${debarch}-pkg.tar.gz"
     if curl -fL --progress-bar -o "$tmp/$pkg" "$SDK_BASE/$pkg"; then
       tar -xzf "$tmp/$pkg" -C "$tmp"
@@ -84,19 +193,9 @@ linux_install_sdk() {
       echo "!! Spinnaker .deb not on the mirror for ${codename}/${debarch}; get it from $TELEDYNE"
     fi
   else
-    local pretty; pretty="$(. /etc/os-release 2>/dev/null && echo "${PRETTY_NAME:-Linux}")"
-    echo "!! ${pretty} is not Debian/Ubuntu, so the Spinnaker camera SDK is not auto-installed."
-    echo "   The operator will still install and run in SIMULATED mode. For the real FLIR A70,"
-    echo "   install the Linux Spinnaker SDK from:"
-    echo "     $TELEDYNE"
-    echo "   then re-run this command to pick up PySpin."
+    _extract_spinnaker_libs_from_deb "$debarch" "$tmp" || true
   fi
-  # Try the Python wheel regardless — it imports once libSpinnaker*.so is present from the SDK.
-  local whl="spinnaker_python-4.4.0.246-cp312-cp312-linux_${pyarch}.tar.gz"
-  if curl -fsL -o "$tmp/$whl" "$SDK_BASE/$whl"; then
-    mkdir -p "$tmp/py" && tar -xzf "$tmp/$whl" -C "$tmp/py" \
-      && ( cd "$DEST/backend" && uv pip install -q "$tmp"/py/*.whl ) || true
-  fi
+  _install_pyspin_wheel "$pyarch" "$tmp" || true
 }
 
 linux_main() {
@@ -130,9 +229,11 @@ linux_main() {
     ( cd "$DEST/backend" && uv run fri-install "$@" < /dev/tty )
   fi
 
+  install_updater
   say "Done"
   echo "Open https://mattlmccoy.github.io/flir-research-interface/ on this machine's browser: it"
-  echo "finds the operator at http://127.0.0.1:8000 by itself. Re-run this command any time to update."
+  echo "finds the operator at http://127.0.0.1:8000 by itself."
+  print_persistent_commands
 }
 
 # ---------------------------------------------------------------- macOS ----
@@ -201,9 +302,11 @@ mac_main() {
     ( cd "$DEST/backend" && uv run fri-install "$@" < /dev/tty )
   fi
 
+  install_updater
   say "Done"
   echo "Open https://mattlmccoy.github.io/flir-research-interface/ in this Mac's browser: it will find the"
-  echo "operator at http://127.0.0.1:8000 by itself. Re-run this same command any time to update."
+  echo "operator at http://127.0.0.1:8000 by itself."
+  print_persistent_commands
 }
 
 main() {

@@ -35,6 +35,15 @@ LABEL = "io.github.mattlmccoy.flir-research-interface"
 DEFAULT_SITE_ORIGIN = "https://mattlmccoy.github.io"
 SDK_URL = "https://www.teledynevisionsolutions.com/products/spinnaker-sdk/"
 
+# Baked-in defaults for *this lab's* camera, so a labmate can accept every prompt with Enter. The
+# owner has deliberately chosen to keep these (including the RTSP password) in the public repo: it
+# is one fixed camera on a private lab subnet, used only by the group. They still land only in the
+# git-ignored backend/.env on each machine; change them here if the camera or credentials change.
+# moved off 192.168.7.x on 2026-09-11 to share the bench with the Vention MachineMotion.
+LAB_CAMERA_HOST = "192.168.8.2"
+LAB_RTSP_USER = "rtsp"
+LAB_RTSP_PASSWORD = "ktEmIrar"
+
 
 def launchd_plist(
     *, uv: str, backend_dir: Path, port: int, site_origin: str, host: str = "127.0.0.1"
@@ -236,17 +245,26 @@ def main(argv: list[str] | None = None) -> int:
     if a.doctor:
         print_doctor(doctor(backend_dir=backend_dir, dotenv=dotenv))
         return 0
-    host, user, _ = credentials(dotenv)
+    host, user, existing_pw = credentials(dotenv)
     host = (
-        a.host or input(f"Camera IP [{host or '192.168.7.2'}]: ").strip() or host or "192.168.7.2"
+        a.host
+        or input(f"Camera IP [{host or LAB_CAMERA_HOST}]: ").strip()
+        or host
+        or LAB_CAMERA_HOST
     )
-    user = a.rtsp_user or input(f"RTSP user [{user or 'rtsp'}]: ").strip() or user or "rtsp"
-    password = getpass.getpass("RTSP password (not echoed; stored only in backend/.env): ")
-    if password:
-        write_env(dotenv, host=host, user=user, password=password)
-        print(f"wrote {dotenv} (mode 600, git-ignored)")
-    else:
-        print("no password entered; .env left unchanged")
+    user = (
+        a.rtsp_user
+        or input(f"RTSP user [{user or LAB_RTSP_USER}]: ").strip()
+        or user
+        or LAB_RTSP_USER
+    )
+    hint = "Enter = keep current" if existing_pw else "Enter = lab default"
+    entered = getpass.getpass(f"RTSP password [{hint}]: ")
+    # Empty means "accept the default": the lab password if none is stored, else what is already
+    # in .env. So a labmate can press Enter through every prompt and get a working install.
+    password = entered or existing_pw or LAB_RTSP_PASSWORD
+    write_env(dotenv, host=host, user=user, password=password)
+    print(f"wrote {dotenv} (mode 600, git-ignored)")
     if not a.no_service:
         if sys.platform == "darwin":
             plist = install_launchd(
@@ -279,6 +297,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 __all__ = [
+    "LAB_CAMERA_HOST",
+    "LAB_RTSP_PASSWORD",
+    "LAB_RTSP_USER",
     "LABEL",
     "doctor",
     "install_launchd",

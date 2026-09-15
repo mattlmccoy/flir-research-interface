@@ -16,14 +16,21 @@ Teledyne FLIR's and its official page is <https://www.teledynevisionsolutions.co
 asks for the camera credentials, and installs a background service (launchd / Task Scheduler /
 systemd --user). Set `FRI_SDK_BASE_URL` to use a different mirror.
 
-**Linux distros.** The installer detects your package manager (apt, dnf, pacman, or zypper) and
-installs the runtime deps for it, then registers a `systemd --user` service. The **operator and
-simulated mode work on any of these distros.** The **camera driver (Spinnaker/PySpin) is
-auto-installed only on Debian/Ubuntu**, because Teledyne ships `.deb` packages. On Fedora, Arch, or
-openSUSE the script installs everything else and runs in **simulated mode**, then points you to the
-Teledyne SDK page — install the Linux Spinnaker SDK from there and re-run the command to pick up the
-real camera. On Fedora, full `ffmpeg` needs [RPM Fusion](https://rpmfusion.org); the script falls
-back to `ffmpeg-free` and tells you if a codec is missing.
+**Linux distros.** The installer detects your package manager (apt, dnf, pacman, or zypper),
+installs the runtime deps, and registers a `systemd --user` service. The **camera driver
+(Spinnaker/PySpin) is installed on all of them**: on Debian/Ubuntu via Teledyne's `.deb` packages;
+on Fedora/Arch/openSUSE by extracting the Spinnaker C++ libraries out of those same `.deb`s into
+`/opt/spinnaker/lib` (glibc-forward-compatible, so the Ubuntu 24.04 build runs on newer Fedora) and
+running `ldconfig` — no dpkg required.
+
+The **PySpin Python wheel** is arch-specific. The installer looks for it on the SDK mirror first,
+then for a copy you've downloaded from Teledyne into `~/Downloads` (the `.tar.gz` or its unpacked
+folder). If the x86_64 wheel isn't on the mirror yet, download *Spinnaker Python 4.4.0.246* (cp312,
+`linux_x86_64`) from the [Teledyne SDK page](https://www.teledynevisionsolutions.com/products/spinnaker-sdk/),
+drop it in `~/Downloads`, and run `fri-update`. Without the camera the operator still runs in
+simulated mode. On Fedora, full `ffmpeg` (the `libx264` encoder that **mp4 export** needs) comes
+from [RPM Fusion](https://rpmfusion.org); the default `ffmpeg-free` makes **GIFs** fine but cannot
+encode mp4 — the installer tells you and prints the RPM Fusion command.
 
 ### Camera credentials the installer asks for
 

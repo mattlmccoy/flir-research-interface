@@ -12,7 +12,9 @@ from pathlib import Path
 
 import pytest
 
-INSTALL_SH = Path(__file__).resolve().parents[2] / "install.sh"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+INSTALL_SH = REPO_ROOT / "install.sh"
+UNINSTALL_SH = REPO_ROOT / "uninstall.sh"
 BASH = shutil.which("bash")
 pytestmark = pytest.mark.skipif(BASH is None, reason="bash not available")
 
@@ -71,3 +73,43 @@ def test_no_broken_self_dispatch_and_is_sourceable(tmp_path: Path) -> None:
     )
     assert "sourced-ok" in out.stdout
     assert not marker.exists()
+
+
+def test_install_defines_the_pyspin_and_updater_helpers() -> None:
+    # Linux camera-driver install (extract .deb libs + wheel) and the persistent re-run command.
+    script = (
+        f'FRI_INSTALL_LIB=1 source "{INSTALL_SH}"\n'
+        f'type _extract_spinnaker_libs_from_deb _install_pyspin_wheel install_updater '
+        f'print_persistent_commands >/dev/null\n'
+        f'echo ok\n'
+    )
+    out = subprocess.run(
+        [BASH, "-c", script],
+        env={"PATH": os.environ["PATH"], "HOME": os.environ.get("HOME", "/tmp")},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "ok" in out.stdout
+
+
+def test_uninstall_is_sourceable_and_does_nothing_on_import(tmp_path: Path) -> None:
+    # Sourcing the uninstaller as a library must NOT remove services or files.
+    home = tmp_path / "home"
+    (home / ".local" / "bin").mkdir(parents=True)
+    sentinel = home / ".local" / "bin" / "fri-update"
+    sentinel.write_text("#!/usr/bin/env bash\n")
+    script = (
+        f'FRI_UNINSTALL_LIB=1 source "{UNINSTALL_SH}"\n'
+        f'type uninstall_main remove_service_linux remove_service_macos remove_updater >/dev/null\n'
+        f'echo ok\n'
+    )
+    out = subprocess.run(
+        [BASH, "-c", script],
+        env={"PATH": os.environ["PATH"], "HOME": str(home)},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "ok" in out.stdout
+    assert sentinel.exists(), "sourcing uninstall.sh must not delete anything"

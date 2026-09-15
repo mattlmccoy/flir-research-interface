@@ -5,10 +5,38 @@ A50/A70 radiometric thermal cameras (GigE Vision / GenICam via the FLIR Spinnake
 built for RF-heating experiments on polymer powder and intended to replace day-to-day use of
 FLIR Research Studio.
 
-**Status: Milestones 3–8 implemented and the Milestone 9 core written (2026-09-02) — live view,
-recording, playback, ROIs and temperature-vs-time plots, camera controls, exports, event marks
-and metadata edits, visible-video recorder verified on the A70; Milestone 2
-validation table still open.** `fri-serve` + the React UI show live temperature-linear video at
+## Use it
+
+**→ [mattlmccoy.github.io/flir-research-interface](https://mattlmccoy.github.io/flir-research-interface/)**
+
+The interface is a web app. It runs against a small local **operator** that talks to the camera on
+your machine; the page finds it automatically at `http://127.0.0.1:8000`. Install the operator once
+per machine with the one-liner below, then just open the link.
+
+### Install / update / uninstall
+
+| Platform | Install (and update — re-running updates everything) |
+|---|---|
+| macOS (Apple Silicon) | `curl -fsSL https://raw.githubusercontent.com/mattlmccoy/flir-research-interface/main/install.sh \| bash` |
+| Linux (Ubuntu, Fedora, Arch, openSUSE) | `curl -fsSL https://raw.githubusercontent.com/mattlmccoy/flir-research-interface/main/install.sh \| bash` |
+| Windows 10/11 x64 | PowerShell: `irm https://raw.githubusercontent.com/mattlmccoy/flir-research-interface/main/install.ps1 \| iex` |
+
+The installer sets up the tools, installs the Spinnaker SDK + PySpin, pre-fills this lab's camera
+credentials (just press Enter), and registers a background service. It leaves an easy re-run command
+on the machine — **`fri-update`** (or `bash ~/flir-research-interface/install.sh`) — so you never
+have to hunt for the long command again.
+
+**Uninstall:** `bash ~/flir-research-interface/uninstall.sh` (add `--purge` to also remove the code;
+your recordings are never deleted). Full details and the Linux camera-driver notes are in
+[docs/installation.md](docs/installation.md).
+
+**Status: in daily lab use on the A70.** Live view, recording, playback, ROIs and
+temperature-vs-time plots, camera controls, exports, event marks and metadata edits, and the
+visible-video recorder are all verified on the camera. The web app is deployed to GitHub Pages and
+drives a local operator (macOS launchd / Linux systemd / Windows Task Scheduler) installed by the
+one-liner above; an in-app banner tells each machine when its operator is behind the site. RF-linked
+recording triggers and closed-loop thermal control (FLIR as sensor/recorder, a separate RF session
+as the PID) are wired in. `fri-serve` + the React UI show live temperature-linear video at
 30 Hz, record lossless Zarr experiments with full frame accounting, replay them without the
 camera, measure spots and rectangles live and in playback, write real camera nodes (locked while
 recording), and export CSV/TIFF/PNG/NPY/HDF5. What exists:
