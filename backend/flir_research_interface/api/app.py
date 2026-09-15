@@ -28,6 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from flir_research_interface import __version__, storage
+from flir_research_interface import labels as labels_mod
 from flir_research_interface.acquisition.service import AcquisitionService, ServiceState
 from flir_research_interface.api.frames import encode_frame_message
 from flir_research_interface.api.reveal import Runner, contained, reveal
@@ -236,6 +237,12 @@ class RegisterDriveRequest(BaseModel):
 class MoveRequest(BaseModel):
     to: str  # "drive" | "local"
     full_verify: bool = False  # SHA-256 every file (slower) vs size + critical-file checksums
+
+
+class LabelsRequest(BaseModel):
+    starred: bool = False
+    tags: list[str] = []
+    library: str | None = None  # "local"|"drive"|None (None = first found, local-first)
 
 
 class ForceIpRequest(BaseModel):
@@ -1140,7 +1147,9 @@ def create_app(
         items: list[dict[str, Any]] = []
         for lib, root in _roots():
             for it in list_experiments(root, library=lib):
-                it["size_bytes"] = _dir_size(root / str(it.get("name", "")))
+                run_dir = root / str(it.get("name", ""))
+                it["size_bytes"] = _dir_size(run_dir)
+                it.update(labels_mod.read_labels(run_dir))  # starred + tags
                 items.append(it)
         # newest first across both libraries (names are timestamped)
         items.sort(key=lambda e: str(e.get("name", "")), reverse=True)
@@ -1279,6 +1288,26 @@ def create_app(
     @app.get("/api/experiments/{name}/move/status")
     def move_status(name: str) -> dict[str, Any]:
         return app.state.move_jobs.get(name) or {"state": "idle"}
+
+    def _exp_dir_in(name: str, library: str | None) -> Path:
+        """Resolve a run's folder in a specific library (a run can exist on both local and drive,
+        with independent sidecars); ``None`` falls back to local-first ``_exp_dir``."""
+        if "/" in name or "\\" in name or name in ("", ".", ".."):
+            raise HTTPException(400, "invalid experiment name")
+        if library is None:
+            return _exp_dir(name)
+        for lib, root in _roots():
+            if lib == library:
+                d = root / name
+                if d.is_dir() and contained(root, d):
+                    return d
+                raise HTTPException(404, f"experiment {name!r} not found in {library}")
+        raise HTTPException(404, f"library {library!r} is not available")
+
+    @app.put("/api/experiments/{name}/labels")
+    def set_labels(name: str, req: LabelsRequest) -> dict[str, Any]:
+        run = _exp_dir_in(name, req.library)
+        return labels_mod.write_labels(run, starred=req.starred, tags=req.tags)
 
     def _open(name: str) -> ExperimentReader:
         d = _exp_dir(name)
