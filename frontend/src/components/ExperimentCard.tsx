@@ -2,12 +2,24 @@ import { useState } from "react";
 import { api, type Experiment, type Previews } from "../lib/api.ts";
 import { formatSeconds, keyframeBackgroundPosition, keyframeIndex } from "../lib/keyframes.ts";
 import { hasRois, loadRois, roisDifferFromStored } from "../lib/roi.ts";
+import { TagPopover } from "./TagPopover.tsx";
 
-interface Props { exp: Experiment; onOpen: () => void; onChanged: () => void; driveConnected?: boolean; fullVerify?: boolean; }
+interface Props {
+  exp: Experiment; onOpen: () => void; onChanged: () => void;
+  driveConnected?: boolean; fullVerify?: boolean;
+  universe?: string[];                              // all tags in use, for autocomplete
+  selecting?: boolean;                             // selection mode on?
+  selected?: boolean;                              // is this card selected?
+  onToggleSelect?: (e: React.MouseEvent) => void;  // shift-aware toggle
+  onFilterTag?: (tag: string) => void;             // click a chip to filter by it
+}
 
 const roiStorage: Storage | null = (() => { try { return typeof localStorage !== "undefined" ? localStorage : null; } catch { return null; } })();
 
-export function ExperimentCard({ exp, onOpen, onChanged, driveConnected = false, fullVerify = false }: Props) {
+export function ExperimentCard({
+  exp, onOpen, onChanged, driveConnected = false, fullVerify = false,
+  universe = [], selecting = false, selected = false, onToggleSelect, onFilterTag,
+}: Props) {
   // Flag runs whose ROIs have been edited since their exports were built: the run has a saved
   // working set that differs from the ROIs stored (and exported) with the recording.
   const scope = `exp.${exp.name}`;
@@ -16,7 +28,20 @@ export function ExperimentCard({ exp, onOpen, onChanged, driveConnected = false,
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [move, setMove] = useState<{ done: number; total: number } | null>(null);
+  const [showTags, setShowTags] = useState(false);
   const onDrive = exp.library === "drive";
+  const tags = exp.tags ?? [];
+  const lib = exp.library === "drive" ? "drive" : "local";
+
+  // Persist star/tags to this run's sidecar (the card's own library copy). Optimistic via onChanged.
+  async function saveLabels(next: { starred?: boolean; tags?: string[] }) {
+    try {
+      await api.setLabels(exp.name, {
+        starred: next.starred ?? !!exp.starred, tags: next.tags ?? tags, library: lib,
+      });
+      onChanged();
+    } catch (e) { setNote(String(e)); }
+  }
 
   // Offload to the drive (or bring back), copy → verify → delete, with a progress bar.
   async function moveTo(to: "drive" | "local") {
@@ -101,8 +126,16 @@ export function ExperimentCard({ exp, onOpen, onChanged, driveConnected = false,
 
   const unitLabel = previews?.units === "counts" ? " (raw counts)" : "";
   return (
-    <div className="exp-card">
-      <div className="thumb" onMouseMove={onMove} onMouseLeave={() => setK(null)} onClick={onOpen} title="open">
+    <div className={`exp-card${selected ? " selected" : ""}`}>
+      <div className="thumb" onMouseMove={onMove} onMouseLeave={() => setK(null)}
+        onClick={selecting ? onToggleSelect : onOpen} title={selecting ? "select" : "open"}>
+        {selecting && (
+          <input type="checkbox" className="card-check" checked={selected} readOnly
+            aria-label={`select ${exp.name}`} />
+        )}
+        <button className={`star${exp.starred ? " on" : ""}`} title={exp.starred ? "unstar" : "star"}
+          aria-label={exp.starred ? "unstar" : "star"}
+          onClick={(e) => { e.stopPropagation(); saveLabels({ starred: !exp.starred }); }}>★</button>
         {previews ? (
           <>
             <img src={`${api.previewUrl(exp.name)}?v=${v}`} alt="" />
@@ -146,6 +179,18 @@ export function ExperimentCard({ exp, onOpen, onChanged, driveConnected = false,
           <span className="badge lib" style={{ marginLeft: 6 }} title={onDrive ? "Stored on the external drive" : "Stored on local disk"}>{onDrive ? "Drive" : "Local"}</span>
           {roisDiffer && <span className="badge warn" style={{ marginLeft: 6 }} title="You've changed this run's ROIs since its exports were built. Open it and regenerate to update the ROI plot, video and roi_series.csv.">ROIs edited</span>}
         </span>
+        <div className="tag-row">
+          {tags.map((t) => (
+            <button key={t} className="tag-chip" title={`filter by ${t}`} onClick={() => onFilterTag?.(t)}>{t}</button>
+          ))}
+          <span style={{ position: "relative" }}>
+            <button className="tag-add" title="add tags" onClick={() => setShowTags((s) => !s)}>＋ tag</button>
+            {showTags && (
+              <TagPopover tags={tags} universe={universe}
+                onChange={(next) => saveLabels({ tags: next })} onClose={() => setShowTags(false)} />
+            )}
+          </span>
+        </div>
         <div className="actions">
           <div className="actions-row">
             <button className="primary" disabled={!n || !!exp.error} onClick={onOpen}>
