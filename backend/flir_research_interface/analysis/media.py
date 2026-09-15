@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+import shutil
 import subprocess
 import tempfile
 from collections.abc import Callable
@@ -699,6 +700,56 @@ def _gif_pass(base: list[str], pal: Path, out_path: Path, ow: int, oh: int,
     return out_path
 
 
+#: gifsicle binaries to try (like the ffmpeg candidates). gifsicle does lossy LZW + inter-frame
+#: optimisation — the same thing ezgif does — so a GIF can hit a size cap at FULL resolution with
+#: no visible quality loss, instead of being downscaled soft.
+GIFSICLE_CANDIDATES = (
+    "gifsicle", "/opt/homebrew/bin/gifsicle", "/usr/local/bin/gifsicle", "/usr/bin/gifsicle"
+)
+#: escalating gifsicle --lossy levels; ~30 is visually lossless, higher trades a little dithering
+#: noise (invisible on thermal gradients) for a lot of size.
+_GIF_LOSSY_LADDER = (30, 80, 140, 200)
+
+
+def _find_gifsicle() -> str | None:
+    """First gifsicle on the system that runs, else None (callers fall back to downscaling)."""
+    for c in GIFSICLE_CANDIDATES:
+        p = shutil.which(c) if "/" not in c else (c if Path(c).is_file() else None)
+        if not p:
+            continue
+        try:
+            if subprocess.run([p, "--version"], capture_output=True, timeout=10).returncode == 0:
+                return p
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+    return None
+
+
+def _gifsicle(gifsicle: str, src: Path, dst: Path, *, lossy: int) -> int:
+    """Compress ``src`` GIF into ``dst`` with ``gifsicle -O3 --lossy=lossy`` (keeps resolution and
+    frames). Returns the output size in bytes."""
+    subprocess.run(
+        [gifsicle, "-O3", f"--lossy={lossy}", str(src), "-o", str(dst)],
+        check=True, capture_output=True, timeout=600,
+    )
+    return dst.stat().st_size
+
+
+def _choose_lossy(
+    measure: Callable[[int], int], ladder: tuple[int, ...], max_bytes: int
+) -> tuple[int, int]:
+    """Escalate gifsicle ``--lossy`` and return the (level, size) of the LEAST-lossy level whose
+    output fits ``max_bytes`` — best quality that fits. If none fit, the most aggressive level (the
+    smallest file). ``measure(level)`` returns the encoded bytes at that level."""
+    level, size = ladder[-1], 0
+    for lv in ladder:
+        size = measure(lv)
+        level = lv
+        if size <= max_bytes:
+            return lv, size
+    return level, size
+
+
 def _choose_gif_size(
     measure: Callable[[float], int], width: int, height: int, *, total: int, max_bytes: int
 ) -> tuple[int, int]:
@@ -725,6 +776,7 @@ def _encode_gif(  # type: ignore[no-untyped-def]
     # Write the raw frames once (the slow part), then run the cheap palette passes. A GIF has no
     # bitrate, so to hit a size cap we search for the LARGEST downscale that still fits — filling
     # the budget for the best resolution — by bisection over the scale (bytes rise with scale).
+    cap_mb = max_bytes / 1_000_000
     with tempfile.TemporaryDirectory() as td:
         raw = Path(td) / "frames.rgb"
         with raw.open("wb") as f:
@@ -744,13 +796,42 @@ def _encode_gif(  # type: ignore[no-untyped-def]
                 cache[(ow, oh)] = (gif, gif.stat().st_size)
             return cache[(ow, oh)][1]
 
-        ow, oh = _choose_gif_size(measure, width, height, total=total, max_bytes=max_bytes)
-        if (ow, oh) not in cache:  # ensure the chosen size is encoded (usually a cache hit)
-            gif = _gif_pass(base, pal, Path(td) / f"g_{ow}x{oh}.gif", ow, oh)
-            cache[(ow, oh)] = (gif, gif.stat().st_size)
-        note = f"downscaled to {ow}×{oh} to fit {max_bytes / 1_000_000:.0f} MB" \
-            if (ow, oh) != (width, height) else None
-        _finalize_encode(cache[(ow, oh)][0], out)
+        target = int(max_bytes * 0.97) if max_bytes > 0 else 0  # headroom under the cap
+        full_sz = measure(1.0)  # always encode full resolution first
+        full = cache[(width, height)][0]
+
+        # No cap, or full resolution already fits → ship it untouched.
+        if target <= 0 or full_sz <= target:
+            _finalize_encode(full, out)
+            return {"note": None, "width": width, "height": height}
+
+        # Over cap: shrink with gifsicle (lossy LZW + inter-frame optimisation) at FULL resolution —
+        # ezgif-style, no visible quality loss — before ever downscaling.
+        gifsicle = _find_gifsicle()
+        if gifsicle is not None:
+            def gmeasure(lossy: int) -> int:
+                return _gifsicle(gifsicle, full, Path(td) / f"lossy{lossy}.gif", lossy=lossy)
+
+            lossy, sz = _choose_lossy(gmeasure, _GIF_LOSSY_LADDER, target)
+            if sz <= target:
+                _finalize_encode(Path(td) / f"lossy{lossy}.gif", out)
+                note = f"compressed to fit {cap_mb:.0f} MB (full resolution)"
+                return {"note": note, "width": width, "height": height}
+
+        # Last resort (no gifsicle, or a clip so long even max lossy overflows): downscale the
+        # resolution to fit, then squeeze that with gifsicle too if it is available.
+        ow, oh = _choose_gif_size(measure, width, height, total=total, max_bytes=target)
+        chosen = cache[(ow, oh)][0]
+        if gifsicle is not None and cache[(ow, oh)][1] > target:
+            small = Path(td) / "small_lossy.gif"
+            _, sz = _choose_lossy(
+                lambda lv: _gifsicle(gifsicle, chosen, small, lossy=lv), _GIF_LOSSY_LADDER, target
+            )
+            if sz <= target:
+                chosen = small
+        note = (f"downscaled to {ow}×{oh} to fit {cap_mb:.0f} MB"
+                if (ow, oh) != (width, height) else f"compressed to fit {cap_mb:.0f} MB")
+        _finalize_encode(chosen, out)
     return {"note": note, "width": ow, "height": oh}
 
 

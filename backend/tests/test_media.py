@@ -337,6 +337,24 @@ def test_scaled_even_clamps_and_never_upscales() -> None:
     assert w >= 2 and h >= 2 and w % 2 == 0 and h % 2 == 0
 
 
+def test_choose_lossy_returns_the_lowest_level_that_fits() -> None:
+    # Lossy GIF compression at full resolution: pick the LEAST-lossy level (best quality) that fits.
+    from flir_research_interface.analysis.media import _choose_lossy
+
+    # bigger lossy => smaller file
+    sizes = {30: 40_000_000, 80: 28_000_000, 140: 20_000_000, 200: 15_000_000}
+    lossy, sz = _choose_lossy(lambda lv: sizes[lv], (30, 80, 140, 200), max_bytes=25_000_000)
+    assert lossy == 140 and sz == 20_000_000  # first level under 25 MB, not the most aggressive
+
+
+def test_choose_lossy_falls_back_to_the_most_aggressive_when_nothing_fits() -> None:
+    from flir_research_interface.analysis.media import _choose_lossy
+
+    sizes = {30: 90_000_000, 80: 80_000_000, 200: 60_000_000}
+    lossy, sz = _choose_lossy(lambda lv: sizes[lv], (30, 80, 200), max_bytes=25_000_000)
+    assert lossy == 200 and sz == 60_000_000  # none fit -> smallest (most compressed) result
+
+
 def test_best_scale_fills_toward_the_cap() -> None:
     from flir_research_interface.analysis.media import _best_scale
 

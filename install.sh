@@ -62,12 +62,12 @@ linux_install_deps() {
   case "$mgr" in
     apt-get)
       sudo apt-get update -qq || true
-      sudo apt-get install -y git curl libusb-1.0-0 libgomp1 || true
+      sudo apt-get install -y git curl libusb-1.0-0 libgomp1 gifsicle || true
       sudo apt-get install -y ffmpeg || echo "!! ffmpeg did not install via apt; install it manually"
       ;;
     dnf)
       # binutils (ar) + zstd unpack the Spinnaker .deb libraries; patchelf trims an unused dep.
-      sudo dnf install -y git curl libgomp binutils zstd patchelf || true
+      sudo dnf install -y git curl libgomp binutils zstd patchelf gifsicle || true
       # libusb-1.0 is 'libusb1' on current Fedora, 'libusbx' on older releases.
       sudo dnf install -y libusb1 || sudo dnf install -y libusbx || true
       # Full ffmpeg (RPM Fusion) has the libx264 encoder that mp4 export needs. Fedora's default
@@ -85,12 +85,12 @@ linux_install_deps() {
       fi
       ;;
     pacman)
-      sudo pacman -Sy --noconfirm git curl ffmpeg libusb gcc-libs binutils zstd patchelf \
+      sudo pacman -Sy --noconfirm git curl ffmpeg libusb gcc-libs binutils zstd patchelf gifsicle \
         || echo "!! pacman deps incomplete"
       ;;
     zypper)
       sudo zypper --non-interactive install git curl ffmpeg libusb-1_0-0 libgomp1 binutils zstd \
-        patchelf || echo "!! zypper deps incomplete"
+        patchelf gifsicle || echo "!! zypper deps incomplete"
       ;;
     none)
       echo "!! No supported package manager (apt/dnf/pacman/zypper) was found."
@@ -284,6 +284,7 @@ mac_main() {
   brew list ffmpeg@6 >/dev/null 2>&1 || brew install ffmpeg@6
   brew list libomp >/dev/null 2>&1 || brew install libomp
   brew list libusb >/dev/null 2>&1 || brew install libusb
+  brew list gifsicle >/dev/null 2>&1 || brew install gifsicle  # lossy GIF compression for exports
   command -v git >/dev/null 2>&1 || xcode-select --install
 
   say "Checkout at $DEST"
