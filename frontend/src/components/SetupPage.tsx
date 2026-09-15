@@ -71,12 +71,18 @@ export function SetupPage({ onConnected }: { onConnected: () => void }) {
           <button className="primary" onClick={discover} disabled={busy !== null}>{busy === "discovering" ? "Scanning…" : "Scan network"}</button>
           <span className="muted">Raw GigE Vision discovery on every adapter, then Spinnaker.</span>
         </div>
-        {((disc?.warnings as Any[] | undefined) ?? []).map((w, i) => (
-          <div key={`w${i}`} className="warnbox" role="alert">
-            <b>Network conflict</b> — {String((w as Any).message)} Two interfaces on one subnet make
-            GigE routing ambiguous; the camera may connect intermittently or not at all.
-          </div>
-        ))}
+        {((disc?.warnings as Any[] | undefined) ?? []).map((w, i) => {
+          const kind = String((w as Any).kind);
+          const title = kind === "no_host_on_camera_subnet" ? "Camera unreachable" : "Network conflict";
+          const extra = kind === "subnet_conflict"
+            ? " Two interfaces on one subnet make GigE routing ambiguous; the camera may connect intermittently or not at all."
+            : "";
+          return (
+            <div key={`w${i}`} className="warnbox" role="alert">
+              <b>{title}</b> — {String((w as Any).message)}{extra}
+            </div>
+          );
+        })}
         {disc && gvcp.length === 0 && spin.length === 0 && <div className="errbox">No camera answered. Check PoE power, cable, and that the adapter link light is on.</div>}
         {gvcp.map((d, i) => {
           const force = d.force_ip as { ip: string; subnet_mask: string; gateway: string } | null | undefined;

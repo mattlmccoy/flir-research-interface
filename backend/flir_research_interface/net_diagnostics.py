@@ -61,4 +61,44 @@ def subnet_warnings(
     return out
 
 
-__all__ = ["subnet_warnings"]
+def configured_camera_warning(
+    host_interfaces: list[dict[str, Any]],
+    camera_host: str | None,
+    gvcp_devices: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    """Warn when the configured camera IP has NO host interface on its subnet, so this machine
+    cannot reach it (the exact failure on a fresh Linux box whose wired adapter has no IPv4 on
+    192.168.8.x).
+
+    Returns ``None`` — no warning — when ``camera_host`` is unset/invalid, when some host interface
+    is already on the camera's subnet, or when a camera was actually discovered at that IP (so it is
+    plainly reachable). Otherwise a ``no_host_on_camera_subnet`` warning suggesting a host IP on the
+    camera's /24.
+    """
+    if not camera_host:
+        return None
+    try:
+        cam = ipaddress.ip_address(camera_host)
+    except ValueError:
+        return None
+    for dev in gvcp_devices or []:
+        found_ip, _, _ = str(dev.get("camera_ip", "")).partition("/")
+        if found_ip == camera_host:
+            return None  # discovered → reachable, no warning
+    nets = [_network(h.get("ip", ""), h.get("netmask", "")) for h in host_interfaces]
+    if any(n is not None and cam in n for n in nets):
+        return None  # a NIC is already on the camera's subnet
+    suggested = str(ipaddress.ip_interface(f"{camera_host}/24").network.network_address + 1)
+    return {
+        "kind": "no_host_on_camera_subnet",
+        "camera_host": camera_host,
+        "message": (
+            f"The camera is configured at {camera_host}, but no network interface on this machine "
+            f"is on that subnet — so it cannot be reached and will not appear in discovery. Give "
+            f"the wired adapter a static IP on the camera's subnet (e.g. {suggested}) and, on "
+            f"Linux, allow GigE Vision through the firewall. See docs/camera_setup.md."
+        ),
+    }
+
+
+__all__ = ["configured_camera_warning", "subnet_warnings"]

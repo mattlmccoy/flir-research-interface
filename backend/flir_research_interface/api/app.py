@@ -501,9 +501,20 @@ def create_app(
                 cam.disconnect()
             except Exception as exc:  # noqa: BLE001
                 out["spinnaker_error"] = f"{type(exc).__name__}: {exc}"
-        from flir_research_interface.net_diagnostics import subnet_warnings
+        from flir_research_interface.net_diagnostics import (
+            configured_camera_warning,
+            subnet_warnings,
+        )
+        from flir_research_interface.visible.rtsp import credentials
 
         out["warnings"] = subnet_warnings(out["host_interfaces"], out["gvcp_devices"])
+        dotenv = Path(__file__).resolve().parents[2] / ".env"  # backend/.env
+        camera_host = credentials(dotenv if dotenv.exists() else None)[0]
+        unreachable = configured_camera_warning(
+            out["host_interfaces"], camera_host, out["gvcp_devices"]
+        )
+        if unreachable is not None:
+            out["warnings"].append(unreachable)
         return out
 
     # -- camera ----------------------------------------------------------------------------
