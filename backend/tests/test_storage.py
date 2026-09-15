@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -136,6 +137,33 @@ def test_move_experiment_copies_verifies_and_deletes_source(tmp_path: Path) -> N
     assert (dst_root / "run1" / "thermal.zarr" / "0.0.0").stat().st_size == 1000
     assert not (dst_root / "run1.partial").exists()  # temp cleaned up
     assert seen and seen[-1][0] == seen[-1][1] and seen[-1][1] > 0  # progress reached 100%
+
+
+def test_verify_and_move_ignore_os_junk_but_keep_zarr_dotfiles(tmp_path: Path) -> None:
+    # exFAT/macOS scatters AppleDouble "._*" and .DS_Store files; they must not be copied, must not
+    # fail verification, and must not propagate across devices. Zarr's .zarray/.zattrs/.zgroup ARE
+    # real data and must be kept.
+    from flir_research_interface import storage
+
+    src_root = tmp_path / "drive"
+    dst_root = tmp_path / "local"
+    dst_root.mkdir(parents=True)
+    run = _make_run(src_root)
+    (run / "thermal.zarr" / ".zarray").write_text('{"shape":[1]}')  # real zarr metadata — keep
+    (run / "._metadata.json").write_bytes(b"\x00\x05\x16\x07")  # AppleDouble junk — drop
+    (run / ".DS_Store").write_bytes(b"junk")  # Finder junk — drop
+    (run / "thermal.zarr" / "._0.0.0").write_bytes(b"\x00")  # AppleDouble junk — drop
+
+    # verify_copy must not require the junk to exist in a copy that omits it
+    clean = dst_root / "clean"
+    shutil.copytree(run, clean, ignore=shutil.ignore_patterns("._*", ".DS_Store"))
+    assert storage.verify_copy(run, clean) is None
+
+    dest = storage.move_experiment(run, dst_root)
+    assert (dest / "thermal.zarr" / ".zarray").read_text() == '{"shape":[1]}'  # zarr kept
+    assert not (dest / "._metadata.json").exists()  # junk not copied
+    assert not (dest / ".DS_Store").exists()
+    assert not (dest / "thermal.zarr" / "._0.0.0").exists()
 
 
 def test_move_overwrites_a_stale_destination_folder(tmp_path: Path) -> None:

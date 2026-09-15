@@ -168,6 +168,18 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+#: OS bookkeeping files that are not experiment data — never copied, verified, or counted, so they
+#: cannot fail an integrity check or propagate between machines. Note ``._`` is AppleDouble; zarr's
+#: own ``.zarray`` / ``.zattrs`` / ``.zgroup`` do NOT start with ``._`` and are kept.
+_JUNK_NAMES = frozenset(
+    {".DS_Store", ".Spotlight-V100", ".Trashes", ".fseventsd", "System Volume Information"}
+)
+
+
+def _is_os_junk(name: str) -> bool:
+    return name.startswith("._") or name in _JUNK_NAMES
+
+
 def verify_copy(src: Path | str, dst: Path | str) -> str | None:
     """Confirm ``dst`` is a faithful copy of ``src``. Returns ``None`` when good, else a reason.
 
@@ -176,7 +188,7 @@ def verify_copy(src: Path | str, dst: Path | str) -> str | None:
     """
     src, dst = Path(src), Path(dst)
     for sp in src.rglob("*"):
-        if not sp.is_file():
+        if not sp.is_file() or _is_os_junk(sp.name):
             continue
         rel = sp.relative_to(src)
         dp = dst / rel
@@ -190,7 +202,9 @@ def verify_copy(src: Path | str, dst: Path | str) -> str | None:
 
 
 def _tree_bytes(root: Path) -> int:
-    return sum(p.stat().st_size for p in root.rglob("*") if p.is_file())
+    return sum(
+        p.stat().st_size for p in root.rglob("*") if p.is_file() and not _is_os_junk(p.name)
+    )
 
 
 def _remove_tree(path: Path) -> None:
@@ -245,13 +259,18 @@ def move_experiment(
     try:
         done = 0
         for sp in sorted(src_run.rglob("*")):
+            if _is_os_junk(sp.name):
+                continue  # don't copy OS bookkeeping files (AppleDouble, .DS_Store, …)
             rel = sp.relative_to(src_run)
             dp = partial / rel
             if sp.is_dir():
                 dp.mkdir(parents=True, exist_ok=True)
                 continue
             dp.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(sp, dp)
+            # copy (data + mode), not copy2 (adds xattrs): writing xattrs to exFAT makes macOS spawn
+            # AppleDouble "._" sidecars that clutter the drive. The run's timestamps live in its
+            # manifest, not file mtimes, so dropping mtime is harmless.
+            shutil.copy(sp, dp)
             done += sp.stat().st_size
             if on_progress is not None:
                 on_progress(done, total)

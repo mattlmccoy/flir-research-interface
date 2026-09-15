@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type Experiment } from "../lib/api.ts";
+import { storageBreakdown, summaryLabel } from "../lib/storageSummary.ts";
 import { ExperimentCard } from "./ExperimentCard.tsx";
 
 type Sort = "newest" | "name" | "duration";
@@ -24,7 +25,7 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) 
     const id = setInterval(tick, 5000);
     return () => { alive = false; clearInterval(id); };
   }, [load]);
-  const totalBytes = items ? items.reduce((a, e) => a + (e.size_bytes ?? 0), 0) : 0;
+  const breakdown = useMemo(() => storageBreakdown(items ?? []), [items]);
 
   const shown = useMemo(() => {
     if (!items) return [];
@@ -47,7 +48,7 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) 
   return (
     <div className="page-body wide">
       <div className="exp-head">
-        <span>{items ? (filtering ? `${shown.length} / ${items.length} experiments` : `${items.length} experiments`) : "loading…"}{items && totalBytes > 0 ? ` · ${(totalBytes / 1e9).toFixed(2)} GB on disk` : ""}</span>
+        <span>{items ? (filtering ? `${shown.length} / ${summaryLabel(breakdown, driveConnected)}` : summaryLabel(breakdown, driveConnected)) : "loading…"}</span>
         <span className="right">
           <input type="text" placeholder="filter" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 160 }} />
           <select value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
