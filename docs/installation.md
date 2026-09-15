@@ -8,13 +8,22 @@ The first-run page of the website shows the right command for the machine you ar
 |---|---|
 | macOS (Apple Silicon) | `curl -fsSL https://raw.githubusercontent.com/mattlmccoy/flir-research-interface/main/install.sh \| bash` |
 | Windows 10/11 x64 | PowerShell: `irm https://raw.githubusercontent.com/mattlmccoy/flir-research-interface/main/install.ps1 \| iex` |
-| Ubuntu 20.04/22.04/24.04 | `curl -fsSL https://raw.githubusercontent.com/mattlmccoy/flir-research-interface/main/install.sh \| bash` |
+| Linux (Ubuntu, Fedora, Arch, openSUSE) | `curl -fsSL https://raw.githubusercontent.com/mattlmccoy/flir-research-interface/main/install.sh \| bash` |
 
 Each script installs the tools, clones or updates the repo, installs the Spinnaker SDK and PySpin
 from the project's **internal SDK mirror** (GitHub release `sdk-4.4.0.246`; the SDK itself is
 Teledyne FLIR's and its official page is <https://www.teledynevisionsolutions.com/products/spinnaker-sdk/>),
 asks for the camera credentials, and installs a background service (launchd / Task Scheduler /
 systemd --user). Set `FRI_SDK_BASE_URL` to use a different mirror.
+
+**Linux distros.** The installer detects your package manager (apt, dnf, pacman, or zypper) and
+installs the runtime deps for it, then registers a `systemd --user` service. The **operator and
+simulated mode work on any of these distros.** The **camera driver (Spinnaker/PySpin) is
+auto-installed only on Debian/Ubuntu**, because Teledyne ships `.deb` packages. On Fedora, Arch, or
+openSUSE the script installs everything else and runs in **simulated mode**, then points you to the
+Teledyne SDK page — install the Linux Spinnaker SDK from there and re-run the command to pick up the
+real camera. On Fedora, full `ffmpeg` needs [RPM Fusion](https://rpmfusion.org); the script falls
+back to `ffmpeg-free` and tells you if a codec is missing.
 
 ### Camera credentials the installer asks for
 

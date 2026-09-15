@@ -69,6 +69,49 @@ def launchd_plist(
     )
 
 
+def systemd_unit(
+    *, uv: str, backend_dir: Path, port: int, site_origin: str, host: str = "127.0.0.1"
+) -> str:
+    """A systemd ``--user`` service that runs the operator and restarts it if it dies. Distro-
+    neutral (Fedora, Ubuntu, Arch, openSUSE all use systemd), so it is the Linux counterpart of
+    :func:`launchd_plist`."""
+    backend_dir = Path(backend_dir)
+    return (
+        "[Unit]\n"
+        "Description=FLIR Research Interface operator\n"
+        "After=network-online.target\n"
+        "Wants=network-online.target\n"
+        "\n"
+        "[Service]\n"
+        f"WorkingDirectory={backend_dir}\n"
+        f"ExecStart={uv} run --directory {backend_dir} fri-serve "
+        f"--host {host} --port {port} --site-origin {site_origin}\n"
+        "Restart=always\n"
+        "RestartSec=2\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=default.target\n"
+    )
+
+
+def install_systemd(
+    backend_dir: Path, *, port: int, site_origin: str, run: Callable[..., Any]
+) -> Path:
+    """Write and start a systemd ``--user`` unit; enable lingering so it runs without a login
+    session. Returns the unit path."""
+    uv = shutil.which("uv") or str(Path.home() / ".local" / "bin" / "uv")
+    unit_dir = Path.home() / ".config" / "systemd" / "user"
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    unit = unit_dir / "fri-operator.service"
+    unit.write_text(
+        systemd_unit(uv=uv, backend_dir=backend_dir, port=port, site_origin=site_origin)
+    )
+    run(["systemctl", "--user", "daemon-reload"], check=True)
+    run(["systemctl", "--user", "enable", "--now", "fri-operator.service"], check=True)
+    run(["loginctl", "enable-linger", getpass.getuser()], check=False, capture_output=True)
+    return unit
+
+
 def write_env(env_path: Path, *, host: str, user: str, password: str) -> None:
     """Upsert the three camera keys into ``.env`` (mode 600); other lines are kept verbatim."""
     env_path = Path(env_path)
@@ -205,21 +248,43 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print("no password entered; .env left unchanged")
     if not a.no_service:
-        if sys.platform != "darwin":
-            print(
-                "background service: only macOS launchd is automated; see docs/installation.md "
-                "for systemd (Linux) and Task Scheduler (Windows)"
-            )
-        else:
+        if sys.platform == "darwin":
             plist = install_launchd(
                 backend_dir, port=a.port, site_origin=a.site_origin, run=subprocess.run
             )
             print(f"installed and started LaunchAgent {plist}")
             print(f"operator: http://127.0.0.1:{a.port}/api/health")
             print(f"log: {backend_dir / 'operator.log'}")
+        elif sys.platform.startswith("linux"):
+            try:
+                unit = install_systemd(
+                    backend_dir, port=a.port, site_origin=a.site_origin, run=subprocess.run
+                )
+                print(f"installed and started systemd --user service {unit}")
+                print(f"operator: http://127.0.0.1:{a.port}/api/health")
+                print("logs: journalctl --user -u fri-operator -f")
+            except Exception as exc:  # noqa: BLE001 - a headless/no-systemd box must still finish
+                print(
+                    f"could not install the systemd service ({exc}); run the operator directly "
+                    f"with `uv run fri-serve --port {a.port}` or see docs/installation.md"
+                )
+        else:
+            print(
+                "background service: automated on macOS (launchd) and Linux (systemd --user); "
+                "on Windows see docs/installation.md for Task Scheduler"
+            )
     print_doctor(doctor(backend_dir=backend_dir, dotenv=dotenv))
     print(f"then open {a.site_origin}/flir-research-interface/ and enter http://127.0.0.1:{a.port}")
     return 0
 
 
-__all__ = ["LABEL", "doctor", "install_launchd", "launchd_plist", "main", "write_env"]
+__all__ = [
+    "LABEL",
+    "doctor",
+    "install_launchd",
+    "install_systemd",
+    "launchd_plist",
+    "main",
+    "systemd_unit",
+    "write_env",
+]

@@ -10,6 +10,7 @@ from flir_research_interface.install import (
     LABEL,
     doctor,
     launchd_plist,
+    systemd_unit,
     write_env,
 )
 
@@ -40,6 +41,24 @@ def test_launchd_plist_runs_fri_serve_at_login_with_logs_beside_the_repo(tmp_pat
         "operator.log"
     )
     assert d["EnvironmentVariables"]["PATH"].startswith("/opt/homebrew/bin")
+
+
+def test_systemd_unit_runs_fri_serve_and_restarts(tmp_path: Path) -> None:
+    unit = systemd_unit(
+        uv="/home/lab/.local/bin/uv",
+        backend_dir=tmp_path / "backend",
+        port=8000,
+        site_origin="https://example.github.io",
+    )
+    # An INI systemd --user service, not distro-specific: works on Fedora, Ubuntu, Arch alike.
+    assert "[Service]" in unit and "[Install]" in unit
+    assert f"WorkingDirectory={tmp_path / 'backend'}" in unit
+    exec_line = next(ln for ln in unit.splitlines() if ln.startswith("ExecStart="))
+    assert "/home/lab/.local/bin/uv" in exec_line
+    assert "fri-serve" in exec_line and "--port 8000" in exec_line
+    assert "--site-origin https://example.github.io" in exec_line
+    assert "Restart=always" in unit
+    assert "WantedBy=default.target" in unit
 
 
 def test_write_env_keeps_secrets_out_of_git_and_preserves_other_keys(tmp_path: Path) -> None:
