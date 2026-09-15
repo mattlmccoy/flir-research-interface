@@ -9,8 +9,8 @@ echo "### 0. clear executable stack (idempotent, needs sudo)"
 sudo python3 "$FRI_HOME/scripts/clear_execstack.py" /opt/spinnaker/lib/*.so* 2>&1
 
 echo
-echo "### 1. import PySpin (the real error)"
-uv run python -c "import PySpin; print('PySpin OK; system=', PySpin.System.GetInstance() is not None)" 2>&1
+echo "### 1. import PySpin the way the operator does (lazy binding)"
+uv run python -c "from flir_research_interface.sdk_install import pyspin_importable; ok,detail=pyspin_importable(); print('PySpin OK' if ok else 'FAILED', '-', detail)" 2>&1
 
 echo
 echo "### 2. loader path for spinnaker"

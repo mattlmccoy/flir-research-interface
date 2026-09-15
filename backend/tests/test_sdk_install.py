@@ -2,13 +2,28 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from flir_research_interface.sdk_install import (
     SPINNAKER_VERSION,
     Selection,
+    _lazy_dlopen_flags,
     select_artifacts,
 )
+
+
+def test_lazy_dlopen_flags_swaps_now_for_lazy() -> None:
+    # PySpin links libSpinVideo (ffmpeg) but we never call it; importing lazily keeps a hardened
+    # loader from having to resolve that unused, ffmpeg-version-sensitive path at load time.
+    now = getattr(os, "RTLD_NOW", 0)
+    lazy = getattr(os, "RTLD_LAZY", 0)
+    glob = getattr(os, "RTLD_GLOBAL", 0)
+    out = _lazy_dlopen_flags(now | glob)
+    assert out & lazy  # lazy binding requested
+    assert not (out & now)  # eager binding cleared
+    assert out & glob  # unrelated flags preserved
 
 
 def test_macos_apple_silicon_py312_points_at_bundled_wheel_tarball() -> None:

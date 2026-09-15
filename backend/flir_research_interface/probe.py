@@ -383,7 +383,9 @@ def run_hardware_probe(
 ) -> dict[str, Any]:
     """Probe a real camera through PySpin. Follows FLIR example ordering for cleanup."""
     try:
-        import PySpin as pyspin  # noqa: N813
+        from flir_research_interface.sdk_install import import_pyspin
+
+        pyspin = import_pyspin()
     except ImportError as exc:
         raise SystemExit(
             "PySpin is not importable in this interpreter. Install the Spinnaker SDK and the "

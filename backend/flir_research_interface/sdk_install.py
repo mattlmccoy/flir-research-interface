@@ -25,6 +25,7 @@ import platform
 import sys
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 SPINNAKER_VERSION = "4.4.0.246"
 SUPPORTED_PYTHON: tuple[tuple[int, int], ...] = ((3, 10), (3, 11), (3, 12))
@@ -245,12 +246,40 @@ def detect_and_select(vendor_dir: str = DEFAULT_VENDOR_DIR) -> Selection:
     )
 
 
+def _lazy_dlopen_flags(current: int) -> int:
+    """Turn eager (RTLD_NOW) symbol binding into lazy (RTLD_LAZY), preserving every other bit.
+
+    The PySpin extension links libSpinVideo, which pulls ffmpeg; we never use SpinVideo, but an
+    eager loader on a machine with a different ffmpeg ABI (e.g. Fedora) would still fail to resolve
+    that unused path at import. Lazy binding defers it so it never triggers."""
+    now = getattr(os, "RTLD_NOW", 0)
+    lazy = getattr(os, "RTLD_LAZY", 0)
+    return (current & ~now) | lazy
+
+
+def import_pyspin() -> Any:
+    """Import and return the PySpin module. On Linux, import with lazy symbol binding (see
+    :func:`_lazy_dlopen_flags`); elsewhere a plain import. Every PySpin import in this package goes
+    through here so the loader treatment is consistent."""
+    if sys.platform.startswith("linux") and hasattr(sys, "setdlopenflags"):
+        old = sys.getdlopenflags()
+        sys.setdlopenflags(_lazy_dlopen_flags(old))
+        try:
+            import PySpin  # noqa: N813
+        finally:
+            sys.setdlopenflags(old)
+        return PySpin
+    import PySpin  # noqa: N813
+
+    return PySpin
+
+
 def pyspin_importable() -> tuple[bool, str]:
     """Try ``import PySpin`` and report the Spinnaker library version or the failure text."""
     try:
-        import PySpin  # noqa: N813
+        pyspin = import_pyspin()
 
-        system = PySpin.System.GetInstance()
+        system = pyspin.System.GetInstance()
         try:
             v = system.GetLibraryVersion()
             return True, f"{v.major}.{v.minor}.{v.type}.{v.build}"
@@ -288,6 +317,7 @@ __all__ = [
     "SUPPORTED_PYTHON",
     "Selection",
     "detect_and_select",
+    "import_pyspin",
     "pyspin_importable",
     "select_artifacts",
 ]

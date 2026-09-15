@@ -66,8 +66,8 @@ linux_install_deps() {
       sudo apt-get install -y ffmpeg || echo "!! ffmpeg did not install via apt; install it manually"
       ;;
     dnf)
-      # binutils (ar) + zstd let us unpack the Spinnaker .deb libraries on a non-Debian distro.
-      sudo dnf install -y git curl libgomp binutils zstd || true
+      # binutils (ar) + zstd unpack the Spinnaker .deb libraries; patchelf trims an unused dep.
+      sudo dnf install -y git curl libgomp binutils zstd patchelf || true
       # libusb-1.0 is 'libusb1' on current Fedora, 'libusbx' on older releases.
       sudo dnf install -y libusb1 || sudo dnf install -y libusbx || true
       # Full ffmpeg (RPM Fusion) has the libx264 encoder that mp4 export needs. Fedora's default
@@ -85,12 +85,12 @@ linux_install_deps() {
       fi
       ;;
     pacman)
-      sudo pacman -Sy --noconfirm git curl ffmpeg libusb gcc-libs binutils zstd \
+      sudo pacman -Sy --noconfirm git curl ffmpeg libusb gcc-libs binutils zstd patchelf \
         || echo "!! pacman deps incomplete"
       ;;
     zypper)
       sudo zypper --non-interactive install git curl ffmpeg libusb-1_0-0 libgomp1 binutils zstd \
-        || echo "!! zypper deps incomplete"
+        patchelf || echo "!! zypper deps incomplete"
       ;;
     none)
       echo "!! No supported package manager (apt/dnf/pacman/zypper) was found."
@@ -147,29 +147,28 @@ _extract_spinnaker_libs_from_deb() {
       echo "     sudo dnf install -y execstack && sudo execstack -c /opt/spinnaker/lib/*.so*"
     }
   fi
-  _link_ffmpeg_compat
   echo "installed Spinnaker libraries to /opt/spinnaker/lib"
 }
 
-# libSpinVideo (pulled in by the PySpin extension) links the ffmpeg 6 sonames; Fedora ships
-# ffmpeg 7. Point the names it wants at whatever ffmpeg is installed so the loader can resolve
-# libSpinVideo. We never call SpinVideo (its one symbol in _PySpin is a lazily-bound constructor),
-# so any ABI drift on that unused path never executes.
-_link_ffmpeg_compat() {
-  local want base sys
-  for want in libavcodec.so.60 libavutil.so.58 libavformat.so.60 libswscale.so.7; do
-    [ -e "/opt/spinnaker/lib/$want" ] && continue
-    base="${want%.so.*}.so."
-    sys="$(ldconfig -p 2>/dev/null | awk -v b="$base" '$1 ~ b {print $NF; exit}')"
-    if [ -n "$sys" ] && [ -e "$sys" ]; then
-      sudo ln -sf "$sys" "/opt/spinnaker/lib/$want"
-      echo "linked $want -> $sys (ffmpeg compat for the unused SpinVideo path)"
-    else
-      echo "!! no system $base* found to satisfy libSpinVideo; install ffmpeg if PySpin import"
-      echo "   later complains about $want"
+# The PySpin extension links libSpinVideo, which in turn links the ffmpeg 6 shared libraries.
+# We never use SpinVideo (the operator does its own visible-camera recording), and ffmpeg on
+# Fedora is a different major version — so drop libSpinVideo from the extension's needs entirely.
+# _PySpin then depends only on libSpinnaker + libSpinUpdate (both present, no ffmpeg). The one
+# SpinVideo symbol it referenced is a constructor we never call; import_pyspin() binds lazily so
+# it never has to resolve. Best-effort: if patchelf is missing we say so and leave it.
+_drop_spinvideo_from_pyspin() {
+  local ext
+  ext="$(find "$DEST/backend/.venv" -name '_PySpin*.so' 2>/dev/null | head -1)"
+  [ -n "$ext" ] || return 0
+  if command -v patchelf >/dev/null 2>&1; then
+    if patchelf --print-needed "$ext" 2>/dev/null | grep -q '^libSpinVideo\.so'; then
+      patchelf --remove-needed libSpinVideo.so.4 "$ext" \
+        && echo "removed the unused libSpinVideo/ffmpeg dependency from $(basename "$ext")"
     fi
-  done
-  sudo ldconfig
+  else
+    echo "!! patchelf not available; PySpin may fail to import if this distro's ffmpeg differs."
+    echo "   Install patchelf and re-run, or install ffmpeg 6 runtime libraries."
+  fi
 }
 
 # Install the PySpin wheel into the operator venv. The wheel is arch-specific; we look on the SDK
@@ -202,13 +201,16 @@ _install_pyspin_wheel() {
     return 1
   fi
   ( cd "$DEST/backend" && uv pip install -q "$whl" ) && echo "PySpin installed from $(basename "$whl")"
+  # On non-Debian distros, decouple the extension from libSpinVideo/ffmpeg (see the function).
+  command -v dpkg >/dev/null 2>&1 || _drop_spinvideo_from_pyspin
 }
 
 # Camera driver (PySpin), all distros: install the C++ libs (dpkg on Debian/Ubuntu; extract-to-
 # /opt on others) then the Python wheel. If the wheel can't be found, the operator still runs in
 # SIMULATED mode and the message says exactly how to finish.
 linux_install_sdk() {
-  if ( cd "$DEST/backend" && uv run python -c "import PySpin" 2>/dev/null ); then
+  if ( cd "$DEST/backend" && uv run python -c \
+      "from flir_research_interface.sdk_install import import_pyspin; import_pyspin()" 2>/dev/null ); then
     echo "PySpin already importable"; return 0
   fi
   local pyarch debarch tmp

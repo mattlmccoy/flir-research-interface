@@ -165,9 +165,9 @@ def build_camera_info(
 
 def _pyspin() -> Any:
     try:
-        import PySpin  # noqa: N813
+        from flir_research_interface.sdk_install import import_pyspin
 
-        return PySpin
+        return import_pyspin()
     except ImportError as exc:  # pragma: no cover - depends on machine
         raise CameraError(
             "PySpin is not importable; install the Spinnaker SDK and matching wheel "
