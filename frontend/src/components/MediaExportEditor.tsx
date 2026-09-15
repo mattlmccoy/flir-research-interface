@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { NumberField } from "./NumberField.tsx";
+import { defaultMaxMbForFormat } from "../lib/mediaDefaults.ts";
 import { api, type MediaJob, type RangeJob } from "../lib/api.ts";
 import { markColor } from "../lib/events.ts";
 import { EventLegend } from "./EventLegend.tsx";
@@ -74,6 +75,9 @@ export function MediaExportEditor({ name, nFrames, index, tS, markers, rois, has
   const [speed, setSpeed] = useState(1);
   const [step, setStep] = useState(1);
   const [maxMb, setMaxMb] = useState(0);  // cap output file size (MB); 0 = no limit
+  // GIFs balloon without a cap (no inter-frame compression); default them to 25 MB, MP4 to no
+  // limit, while preserving any explicit choice. See defaultMaxMbForFormat.
+  useEffect(() => { setMaxMb((m) => defaultMaxMbForFormat(fmt, m)); }, [fmt]);
   // Per-ROI selection: id -> stats to plot. Presence = the ROI's box is drawn on the frame; the
   // stat list is the lines plotted for it (spots use "value"; an empty list = box only, no line).
   const [sel, setSel] = useState<Record<number, string[]>>({});
