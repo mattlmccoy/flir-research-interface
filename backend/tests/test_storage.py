@@ -183,6 +183,21 @@ def test_verify_and_move_ignore_os_junk_but_keep_zarr_dotfiles(tmp_path: Path) -
     assert not (dest / "thermal.zarr" / "._0.0.0").exists()
 
 
+def test_move_carries_the_labels_sidecar(tmp_path: Path) -> None:
+    # Stars/tags live in labels.json inside the run folder, so a move must carry them (they are
+    # ordinary data, not OS junk) — this locks that guarantee in.
+    from flir_research_interface import storage
+    from flir_research_interface.labels import read_labels, write_labels
+
+    src_root = tmp_path / "local"
+    dst_root = tmp_path / "drive"
+    dst_root.mkdir(parents=True)
+    run = _make_run(src_root)
+    write_labels(run, starred=True, tags=["doped"])
+    dest = storage.move_experiment(run, dst_root)
+    assert read_labels(dest) == {"starred": True, "tags": ["doped"]}
+
+
 def test_move_overwrites_a_stale_destination_folder(tmp_path: Path) -> None:
     # exFAT/regression: a prior failed move can leave the run already on the target. os.replace onto
     # a non-empty dir raised "Directory not empty" (Errno 66); the move must overwrite it instead.
