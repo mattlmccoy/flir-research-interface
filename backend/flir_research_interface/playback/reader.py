@@ -177,6 +177,10 @@ def list_experiments(root: Path, library: str = "local") -> list[dict[str, Any]]
         return []
     out: list[dict[str, Any]] = []
     for d in sorted((p for p in root.iterdir() if p.is_dir()), reverse=True):
+        # Skip transient / non-experiment dirs: a "<name>.partial" half-copy left by an interrupted
+        # move, and macOS/exFAT dot-directories (.Trashes, .Spotlight-V100, ._* AppleDouble).
+        if d.name.endswith(".partial") or d.name.startswith("."):
+            continue
         try:
             r = ExperimentReader(d)
         except (FileNotFoundError, KeyError, ValueError):

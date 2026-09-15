@@ -124,6 +124,19 @@ def test_list_experiments_sorted_newest_first(tmp_path: Path) -> None:
     assert all("name" in i and "complete" in i for i in items)
 
 
+def test_list_experiments_skips_partial_and_hidden_dirs(tmp_path: Path) -> None:
+    # A half-finished move leaves "<name>.partial"; macOS leaves dot-dirs. Neither is an experiment
+    # and must not appear as an "unreadable experiment" card.
+    _make_experiment(tmp_path, n=2, name="realrun")
+    (tmp_path / "realrun.partial" / "thermal.zarr").mkdir(parents=True)  # leftover half-copy
+    (tmp_path / ".Trashes").mkdir()  # macOS/exFAT dot-dir
+    items = list_experiments(tmp_path)
+    names = [i["name"] for i in items]
+    assert any(n.endswith("realrun") for n in names)  # the real run is listed
+    assert not any(n.endswith(".partial") for n in names)  # the half-copy is not
+    assert not any(n.startswith(".") for n in names)  # dot-dirs are not
+
+
 def _make_empty_experiment(root: Path) -> Path:
     rec = Recorder(None, experiments_root=root, chunk_frames=8)
     d = rec.start(

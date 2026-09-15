@@ -138,6 +138,43 @@ def test_move_experiment_copies_verifies_and_deletes_source(tmp_path: Path) -> N
     assert seen and seen[-1][0] == seen[-1][1] and seen[-1][1] > 0  # progress reached 100%
 
 
+def test_move_overwrites_a_stale_destination_folder(tmp_path: Path) -> None:
+    # exFAT/regression: a prior failed move can leave the run already on the target. os.replace onto
+    # a non-empty dir raised "Directory not empty" (Errno 66); the move must overwrite it instead.
+    from flir_research_interface.storage import move_experiment
+
+    src_root = tmp_path / "local"
+    dst_root = tmp_path / "drive"
+    dst_root.mkdir(parents=True)
+    stale = dst_root / "run1"  # leftover copy from an earlier failed move
+    (stale / "thermal.zarr").mkdir(parents=True)
+    (stale / "old.txt").write_text("stale")
+    run = _make_run(src_root)
+    dest = move_experiment(run, dst_root)
+    assert dest == dst_root / "run1"
+    assert not run.exists()  # source removed
+    assert not (dst_root / "run1" / "old.txt").exists()  # stale content replaced
+    assert (dst_root / "run1" / "metadata.json").read_text() == '{"a":1}'
+    assert not (dst_root / "run1.partial").exists()
+
+
+def test_move_deletes_source_and_its_appledouble_sidecar(tmp_path: Path) -> None:
+    # On exFAT, macOS leaves a sibling "._<name>" AppleDouble file next to the run folder; deleting
+    # the source must remove it too, and must not choke on the exFAT rmtree ENOENT race.
+    from flir_research_interface.storage import move_experiment
+
+    src_root = tmp_path / "drive"  # moving OFF the drive (restore to local)
+    dst_root = tmp_path / "local"
+    dst_root.mkdir(parents=True)
+    run = _make_run(src_root)
+    sidecar = src_root / "._run1"
+    sidecar.write_bytes(b"\x00\x05\x16\x07")  # AppleDouble header-ish
+    move_experiment(run, dst_root)
+    assert not run.exists()  # source folder gone
+    assert not sidecar.exists()  # AppleDouble sidecar gone too
+    assert (dst_root / "run1" / "metadata.json").read_text() == '{"a":1}'
+
+
 def test_move_keeps_source_when_target_has_no_space(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from flir_research_interface import storage
 

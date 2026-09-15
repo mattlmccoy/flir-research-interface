@@ -8,6 +8,7 @@ always stays on local disk; this module only offloads finished runs. See the des
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -192,6 +193,30 @@ def _tree_bytes(root: Path) -> int:
     return sum(p.stat().st_size for p in root.rglob("*") if p.is_file())
 
 
+def _remove_tree(path: Path) -> None:
+    """Delete a run folder robustly on exFAT / removable drives.
+
+    ``shutil.rmtree`` races on exFAT: macOS AppleDouble ``._`` sidecars and lazy metadata make it
+    try to unlink an entry that has already vanished, raising ``FileNotFoundError`` (the Errno 2
+    seen when restoring a run to local left the drive copy behind). ENOENT means the entry is
+    already gone — success — so we ignore it and retry until the tree is actually removed. We also
+    delete the sibling ``._<name>`` AppleDouble file macOS leaves next to the folder on exFAT.
+    """
+
+    def _onexc(_func: Any, _p: Any, exc: BaseException) -> None:
+        if not isinstance(exc, FileNotFoundError):
+            raise exc
+
+    for _ in range(3):
+        if not path.exists():
+            break
+        shutil.rmtree(path, onexc=_onexc)
+    with contextlib.suppress(FileNotFoundError):
+        (path.parent / f"._{path.name}").unlink()  # exFAT AppleDouble sidecar
+    if path.exists():
+        raise OSError(f"could not fully remove {path}")
+
+
 def move_experiment(
     src_run: Path | str,
     dst_root: Path | str,
@@ -215,7 +240,8 @@ def move_experiment(
 
     partial = dst_root / f"{name}.partial"
     final = dst_root / name
-    shutil.rmtree(partial, ignore_errors=True)
+    with contextlib.suppress(OSError):
+        _remove_tree(partial)  # clear any leftover half-copy from a previous interrupted move
     try:
         done = 0
         for sp in sorted(src_run.rglob("*")):
@@ -232,11 +258,16 @@ def move_experiment(
         reason = verify_copy(src_run, partial)
         if reason is not None:
             raise RuntimeError(f"copy verification failed: {reason}")
+        # A prior failed move can leave the run already at the target; os.replace cannot rename onto
+        # a non-empty directory (Errno 66), so clear a stale destination first, then rename in.
+        if final.exists():
+            _remove_tree(final)
         os.replace(partial, final)  # atomic on the target filesystem
     except BaseException:
-        shutil.rmtree(partial, ignore_errors=True)  # never leave a half-copy behind
+        with contextlib.suppress(OSError):
+            _remove_tree(partial)  # never leave a half-copy behind; don't mask the original error
         raise
-    shutil.rmtree(src_run)  # the only deletion, after verify + rename
+    _remove_tree(src_run)  # the only deletion of the source, after verify + rename
     if on_progress is not None:
         on_progress(total, total)
     return final
