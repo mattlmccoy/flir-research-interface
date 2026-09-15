@@ -21,6 +21,26 @@ if (Test-Path (Join-Path $Dest ".git")) { git -C $Dest pull --ff-only } else { g
 Say "Python environment"
 Push-Location (Join-Path $Dest "backend"); uv sync --inexact -q; Pop-Location
 
+Say "GIF optimizer (gifsicle)"
+# gifsicle isn't reliably on winget, so drop the standalone win64 binary into the operator venv's
+# Scripts dir (on PATH when it runs). Without it, GIF export still works but falls back to
+# downscaling for size instead of full-resolution lossy compression.
+if (-not (Get-Command gifsicle -ErrorAction SilentlyContinue)) {
+  try {
+    $gz = Join-Path $env:TEMP "gifsicle-win64.zip"
+    Invoke-WebRequest "https://eternallybored.org/misc/gifsicle/releases/gifsicle-1.95-win64.zip" -OutFile $gz
+    $gdir = Join-Path $env:TEMP "gifsicle-extract"; Expand-Archive $gz -DestinationPath $gdir -Force
+    $exe = Get-ChildItem $gdir -Recurse -Filter "gifsicle.exe" | Select-Object -First 1
+    $scripts = Join-Path $Dest "backend\.venv\Scripts"
+    if ($exe -and (Test-Path $scripts)) {
+      Copy-Item $exe.FullName (Join-Path $scripts "gifsicle.exe") -Force
+      Write-Host "installed gifsicle.exe into the operator environment"
+    }
+  } catch {
+    Write-Warning "gifsicle not installed ($($_.Exception.Message)); GIF exports fall back to downscaling. Optional: 'scoop install gifsicle' or 'choco install gifsicle'."
+  }
+}
+
 Say "Spinnaker SDK"
 $pyspinOk = $false
 try { Push-Location (Join-Path $Dest "backend"); uv run python -c "import PySpin" 2>$null; $pyspinOk = ($LASTEXITCODE -eq 0) } finally { Pop-Location }
