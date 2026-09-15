@@ -70,6 +70,7 @@ def main(argv: list[str] | None = None) -> int:
         site_origin=args.site_origin or None,
         preview_factory=default_preview_factory(dotenv),
         experiments_root=Path(exp_root) if exp_root else None,
+        autoconnect=True,  # operator auto-connects the real camera on startup + auto-reconnects
     )
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     return 0

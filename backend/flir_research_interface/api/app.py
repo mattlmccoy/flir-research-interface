@@ -7,6 +7,7 @@ and authentication are Milestone 10 concerns (brief §5).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
@@ -282,6 +283,7 @@ def create_app(
     visible_factory: Callable[[], Any] | None = None,
     site_origin: str | None = None,
     preview_factory: Callable[[], Any] | None = None,
+    autoconnect: bool = False,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
@@ -294,6 +296,10 @@ def create_app(
         app.state.rf_link_pending = None  # RF metadata for the next arm-loop rf-triggered start
         app.state.live_rois = []  # server-side copy of the on-screen ROIs, for the control feed
         app.state.control_last = None  # last control-telemetry the RF controller posted
+        # Auto-connect the real camera on startup (best effort, in the background so it never delays
+        # serving). Only the operator opts in (autoconnect=True); tests never touch the hardware.
+        if autoconnect and os.environ.get("FRI_NO_AUTOCONNECT") != "1":
+            asyncio.create_task(_auto_connect())
         yield
         await _finalize_recording()
         svc: AcquisitionService | None = app.state.service
@@ -314,6 +320,35 @@ def create_app(
 
     def recorder() -> Recorder | None:
         return app.state.recorder  # type: ignore[no-any-return]
+
+    def _make_service(cam: CameraBackend) -> AcquisitionService:
+        """Every operator-owned camera runs resiliently: it retries the first connect and, if the
+        stream drops or stalls, reconnects the same camera with backoff (state -> reconnecting)."""
+        return AcquisitionService(cam, auto_reconnect=True, connect_retries=3)
+
+    async def _auto_connect() -> None:
+        """On startup, connect the real camera if one is present, so a reboot comes back streaming
+        with no clicks. Best-effort: no camera / no SDK / any error just leaves it disconnected."""
+        if "spinnaker" not in CAMERA_BACKENDS or app.state.service is not None:
+            return
+        cam: CameraBackend | None = None
+        try:
+            cam = _make_backend("spinnaker", sim_fps=app.state.sim_fps)
+            devs = await run_in_threadpool(cam.enumerate)
+            if not devs:
+                cam.disconnect()
+                return
+            svc = _make_service(cam)
+            await run_in_threadpool(svc.connect, devs[0])
+            svc.start()
+            app.state.service = svc
+            app.state.backend_name = "spinnaker"
+            logger.info("auto-connected %s %s on startup", devs[0].model, devs[0].serial)
+        except Exception as exc:  # noqa: BLE001 - best effort; leave disconnected for manual connect
+            logger.info("startup auto-connect skipped: %s", exc)
+            if cam is not None:
+                with contextlib.suppress(Exception):
+                    cam.disconnect()
 
     def _export_roi_series(exp_dir: Path) -> None:
         """Write exports/roi_series.csv for the ROIs stored with the recording (if any)."""
@@ -563,7 +598,7 @@ def create_app(
             )
             if chosen is None:
                 raise HTTPException(404, f"no camera with serial {req.serial!r}")
-            svc = AcquisitionService(cam)
+            svc = _make_service(cam)
             await run_in_threadpool(svc.connect, chosen)
             svc.start()
         except CameraError as exc:

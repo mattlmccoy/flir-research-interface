@@ -25,18 +25,40 @@ class ServiceState(str, enum.Enum):
     DISCONNECTED = "disconnected"
     CONNECTED = "connected"
     ACQUIRING = "acquiring"
+    RECONNECTING = "reconnecting"  # lost the camera mid-stream; retrying with backoff
     ERROR = "error"
 
 
-class AcquisitionService:
-    """Single-camera acquisition with explicit state and counters."""
+#: Backoff between reconnect attempts (seconds), capped at the last value.
+_RECONNECT_DELAYS = (1.0, 2.0, 5.0, 10.0, 20.0, 30.0)
 
-    def __init__(self, backend: CameraBackend, *, fps_window: int = 30) -> None:
+
+class AcquisitionService:
+    """Single-camera acquisition with explicit state and counters.
+
+    With ``auto_reconnect`` the acquisition thread supervises the stream: if the camera errors or
+    stalls (no frame for ``stall_timeout_s``), it disconnects, waits with backoff, reconnects the
+    same device, and resumes — surfacing ``RECONNECTING`` so the UI shows the self-healing. Default
+    off, so the bare service keeps its simple connect→acquire→error semantics.
+    """
+
+    def __init__(
+        self,
+        backend: CameraBackend,
+        *,
+        fps_window: int = 30,
+        auto_reconnect: bool = False,
+        stall_timeout_s: float = 10.0,
+        reconnect_delays: tuple[float, ...] = _RECONNECT_DELAYS,
+        max_reconnect_attempts: int | None = None,
+        connect_retries: int = 0,
+    ) -> None:
         self._backend = backend
         self._state = ServiceState.DISCONNECTED
         self._lock = threading.Lock()
         self._cond = threading.Condition(self._lock)
         self._thread: threading.Thread | None = None
+        self._watchdog: threading.Thread | None = None
         self._stop_evt = threading.Event()
         self._latest: Frame | None = None
         self._latest_consumed = True
@@ -46,6 +68,12 @@ class AcquisitionService:
         self._ts_window: deque[int] = deque(maxlen=fps_window)
         self._device: DeviceDescriptor | None = None
         self._listeners: list[Callable[[Frame], None]] = []
+        self._auto_reconnect = auto_reconnect
+        self._stall_timeout_s = stall_timeout_s
+        self._reconnect_delays = reconnect_delays or (1.0,)
+        self._max_reconnect_attempts = max_reconnect_attempts
+        self._connect_retries = connect_retries
+        self._last_frame_at = 0.0
 
     # -- state ---------------------------------------------------------------------------
 
@@ -67,7 +95,21 @@ class AcquisitionService:
         return self._backend.enumerate()
 
     def connect(self, descriptor: DeviceDescriptor) -> None:
-        self._backend.connect(descriptor)
+        # Retry the initial connect a few times: a just-powered GigE camera often isn't ready on the
+        # first GVCP round-trip. The last failure is raised so a truly-absent camera still errors.
+        attempts = self._connect_retries + 1
+        for i in range(attempts):
+            try:
+                self._backend.connect(descriptor)
+                break
+            except Exception as exc:  # noqa: BLE001 - retry transient connect failures
+                if i + 1 >= attempts:
+                    raise
+                delay = self._reconnect_delays[min(i, len(self._reconnect_delays) - 1)]
+                logger.warning("connect attempt %d/%d failed (%s); retrying in %.1fs",
+                               i + 1, attempts, exc, delay)
+                if self._stop_evt.wait(delay):
+                    raise
         self._device = descriptor
         with self._lock:
             self._state = ServiceState.CONNECTED
@@ -80,20 +122,27 @@ class AcquisitionService:
         if self._thread is not None and self._thread.is_alive():
             return
         self._stop_evt.clear()
+        self._last_frame_at = time.monotonic()
         self._thread = threading.Thread(target=self._run, name="camera-acquisition", daemon=True)
         with self._lock:
             self._state = ServiceState.ACQUIRING
         self._thread.start()
+        if self._auto_reconnect and self._stall_timeout_s > 0:
+            self._watchdog = threading.Thread(
+                target=self._watchdog_loop, name="camera-watchdog", daemon=True
+            )
+            self._watchdog.start()
         logger.info("acquisition started")
 
     def stop(self) -> None:
         self._stop_evt.set()
-        t = self._thread
-        if t is not None and t.is_alive():
-            t.join(timeout=5.0)
+        for t in (self._thread, self._watchdog):
+            if t is not None and t.is_alive() and t is not threading.current_thread():
+                t.join(timeout=6.0)
         self._thread = None
+        self._watchdog = None
         with self._lock:
-            if self._state == ServiceState.ACQUIRING:
+            if self._state in (ServiceState.ACQUIRING, ServiceState.RECONNECTING):
                 self._state = ServiceState.CONNECTED
             self._cond.notify_all()
         logger.info("acquisition stopped")
@@ -155,35 +204,104 @@ class AcquisitionService:
 
     # -- camera thread -------------------------------------------------------------------
 
+    def _set_state(self, state: ServiceState, error: str | None = None) -> None:
+        with self._cond:
+            self._state = state
+            if error is not None:
+                self._last_error = error
+            elif state == ServiceState.ACQUIRING:
+                self._last_error = None
+            self._cond.notify_all()
+
+    def _acquire_frames(self) -> int:
+        """Pump frames from the backend until stopped or the stream ends/errors. Returns the number
+        of frames delivered (0 means the camera never produced one this attempt)."""
+        n = 0
+        for frame in self._backend.frames():
+            if self._stop_evt.is_set():
+                break
+            self._last_frame_at = time.monotonic()
+            for fn in self._listeners:
+                try:
+                    fn(frame)
+                except Exception:  # noqa: BLE001 - a listener must not kill acquisition
+                    logger.exception("frame listener failed")
+            with self._cond:
+                if self._latest is not None and not self._latest_consumed:
+                    self._viz_dropped += 1
+                self._latest = frame
+                self._latest_consumed = False
+                self._frames_received += 1
+                self._ts_window.append(frame.device_timestamp_ns)
+                self._cond.notify_all()
+            n += 1
+        return n
+
     def _run(self) -> None:
-        try:
-            for frame in self._backend.frames():
+        # Supervise the stream. Without auto_reconnect this is a single pass that surfaces any
+        # failure as ERROR (unchanged behaviour). With it, a failure/stall triggers a backoff +
+        # reconnect of the same camera, retrying until it returns (or max attempts).
+        attempt = 0
+        while not self._stop_evt.is_set():
+            reason: str | None = None
+            try:
+                if self._acquire_frames() > 0:
+                    attempt = 0  # frames flowed → the connection is healthy again
                 if self._stop_evt.is_set():
                     break
-                for fn in self._listeners:
-                    try:
-                        fn(frame)
-                    except Exception:  # noqa: BLE001 - a listener must not kill acquisition
-                        logger.exception("frame listener failed")
-                with self._cond:
-                    if self._latest is not None and not self._latest_consumed:
-                        self._viz_dropped += 1
-                    self._latest = frame
-                    self._latest_consumed = False
-                    self._frames_received += 1
-                    self._ts_window.append(frame.device_timestamp_ns)
-                    self._cond.notify_all()
-        except Exception as exc:  # noqa: BLE001 - surface any backend failure as ERROR state
-            logger.exception("acquisition thread failed")
-            with self._cond:
-                self._last_error = f"{type(exc).__name__}: {exc}"
-                self._state = ServiceState.ERROR
-                self._cond.notify_all()
-            return
+                reason = "camera stream ended"
+            except Exception as exc:  # noqa: BLE001 - any backend failure is a candidate to recover
+                logger.exception("acquisition failed")
+                reason = f"{type(exc).__name__}: {exc}"
+
+            if self._stop_evt.is_set():
+                break
+            if not self._auto_reconnect:
+                self._set_state(ServiceState.ERROR, reason)
+                return
+            attempt += 1
+            if self._max_reconnect_attempts is not None and attempt > self._max_reconnect_attempts:
+                self._set_state(
+                    ServiceState.ERROR, f"gave up after {self._max_reconnect_attempts} "
+                    f"reconnect attempts: {reason}")
+                return
+            delay = self._reconnect_delays[min(attempt - 1, len(self._reconnect_delays) - 1)]
+            self._set_state(ServiceState.RECONNECTING, f"{reason}; reconnecting in {delay:.0f}s")
+            if self._stop_evt.wait(delay):
+                break
+            try:
+                try:
+                    self._backend.disconnect()
+                except Exception:  # noqa: BLE001 - a lost camera may already be gone
+                    pass
+                if self._device is not None:
+                    self._backend.connect(self._device)
+                self._last_frame_at = time.monotonic()
+                self._set_state(ServiceState.ACQUIRING)
+            except Exception as exc:  # noqa: BLE001 - reconnect failed; loop retries with backoff
+                self._set_state(ServiceState.RECONNECTING, f"reconnect failed: {exc}")
+
         with self._cond:
-            if self._state == ServiceState.ACQUIRING:
+            if self._state in (ServiceState.ACQUIRING, ServiceState.RECONNECTING):
                 self._state = ServiceState.CONNECTED
             self._cond.notify_all()
+
+    def _watchdog_loop(self) -> None:
+        # A stalled GigE stream blocks in ``frames()`` without raising, so nothing above notices.
+        # Detect "no frame for stall_timeout_s while acquiring" and break the stream by
+        # disconnecting the backend — the supervisor then reconnects.
+        poll = min(self._stall_timeout_s / 2, 1.0)
+        while not self._stop_evt.wait(poll):
+            with self._lock:
+                acquiring = self._state == ServiceState.ACQUIRING
+            if acquiring and (time.monotonic() - self._last_frame_at) > self._stall_timeout_s:
+                logger.warning("camera stalled (no frame for %.1fs); forcing reconnect",
+                               self._stall_timeout_s)
+                self._last_frame_at = time.monotonic()  # avoid re-firing before the reconnect
+                try:
+                    self._backend.disconnect()  # unblock the frames() generator
+                except Exception:  # noqa: BLE001
+                    pass
 
 
 __all__ = ["AcquisitionService", "ServiceState"]

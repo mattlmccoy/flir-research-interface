@@ -96,3 +96,94 @@ def test_camera_error_moves_to_error_state() -> None:
     assert _wait(lambda: svc.state == ServiceState.ERROR)
     assert "boom" in (svc.stats()["last_error"] or "")
     svc.disconnect()
+
+
+class _Flaky(SimulatedCameraBackend):
+    """Simulated backend whose frames() raises the first ``fail_times`` calls, then streams."""
+
+    def __init__(self, *, fail_times: int, **kw) -> None:  # type: ignore[no-untyped-def]
+        super().__init__(scene=UniformScene(25.0), width=8, height=8, fps=200.0,
+                         realtime=True, **kw)
+        self._fail_left = fail_times
+
+    def frames(self):  # type: ignore[no-untyped-def]
+        if self._fail_left > 0:
+            self._fail_left -= 1
+            raise RuntimeError("camera dropped")
+        yield from super().frames()
+
+
+def test_auto_reconnect_recovers_after_a_transient_drop() -> None:
+    svc = AcquisitionService(
+        _Flaky(fail_times=2), auto_reconnect=True, reconnect_delays=(0.01,),
+    )
+    svc.connect(svc.enumerate()[0])
+    svc.start()
+    # after two failed attempts it reconnects and streams again
+    assert _wait(lambda: svc.state == ServiceState.ACQUIRING and svc.stats()["frames_received"] > 0)
+    svc.disconnect()
+
+
+def test_auto_reconnect_gives_up_after_max_attempts() -> None:
+    class Broken(SimulatedCameraBackend):
+        def frames(self):  # type: ignore[no-untyped-def]
+            raise RuntimeError("boom")
+
+    svc = AcquisitionService(
+        Broken(scene=UniformScene(25.0), width=8, height=8),
+        auto_reconnect=True, reconnect_delays=(0.01,), max_reconnect_attempts=2,
+    )
+    svc.connect(svc.enumerate()[0])
+    svc.start()
+    assert _wait(lambda: svc.state == ServiceState.ERROR)
+    assert "gave up" in (svc.stats()["last_error"] or "")
+    svc.disconnect()
+
+
+def test_stall_detection_forces_a_reconnect() -> None:
+    import threading as _t
+
+    class _Stalls(SimulatedCameraBackend):
+        """Yields one frame then blocks; disconnect() releases the block so frames() ends."""
+
+        def __init__(self, **kw) -> None:  # type: ignore[no-untyped-def]
+            super().__init__(scene=UniformScene(25.0), width=8, height=8, fps=200.0, **kw)
+            self._release = _t.Event()
+
+        def frames(self):  # type: ignore[no-untyped-def]
+            it = super().frames()
+            yield next(it)               # one real frame
+            self._release.wait(2.0)      # then stall until disconnect() releases us
+            self._release.clear()
+
+        def disconnect(self) -> None:
+            self._release.set()
+            super().disconnect()
+
+    svc = AcquisitionService(
+        _Stalls(), auto_reconnect=True, stall_timeout_s=0.15, reconnect_delays=(0.01,),
+    )
+    svc.connect(svc.enumerate()[0])
+    svc.start()
+    # recovered after the stall was detected and the stream reconnected
+    assert _wait(lambda: svc.stats()["frames_received"] >= 2, timeout_s=4.0)
+    svc.disconnect()
+
+
+def test_connect_retries_with_backoff_before_failing() -> None:
+    class _HardToConnect(SimulatedCameraBackend):
+        def __init__(self, *, fail_times: int, **kw) -> None:  # type: ignore[no-untyped-def]
+            super().__init__(scene=UniformScene(25.0), width=8, height=8, **kw)
+            self._fail_left = fail_times
+
+        def connect(self, descriptor) -> None:  # type: ignore[no-untyped-def]
+            if self._fail_left > 0:
+                self._fail_left -= 1
+                raise RuntimeError("not ready")
+            super().connect(descriptor)
+
+    cam = _HardToConnect(fail_times=2)
+    svc = AcquisitionService(cam, connect_retries=3, reconnect_delays=(0.01,))
+    svc.connect(svc.enumerate()[0])  # must retry past the two failures, not raise
+    assert svc.state == ServiceState.CONNECTED
+    svc.disconnect()
