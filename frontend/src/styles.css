@@ -313,6 +313,11 @@ button:disabled .spinner { opacity: 0.7; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 1.6s; } }
 
+/* ---- Load / error overlay over a view (e.g. a frame that is fetching or failed) ----- */
+.load-overlay { position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: var(--scrim); color: var(--muted); font-family: var(--font-mono); font-size: 12px; text-align: center; padding: 12px; pointer-events: none; }
+.load-overlay.error { color: var(--err); pointer-events: auto; }
+.load-overlay button { pointer-events: auto; margin-top: 4px; }
+
 /* ---- Determinate / indeterminate progress bar --------------------------------------- */
 .progressbar { height: 8px; background: var(--line-control); border-radius: 4px; overflow: hidden; }
 .progressbar-fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.3s ease; }

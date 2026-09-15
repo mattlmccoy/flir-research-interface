@@ -112,6 +112,23 @@ def test_verify_copy_ok_and_detects_size_and_content_mismatch(tmp_path: Path) ->
     assert "chunk" in (verify_copy(src, dst) or "")
 
 
+def test_verify_copy_full_checksums_every_file(tmp_path: Path) -> None:
+    # A same-size bit-flip in a bulk data chunk passes the default (size-only) check but a full
+    # verify must catch it by hashing every file.
+    from flir_research_interface.storage import verify_copy
+
+    src = tmp_path / "a"
+    dst = tmp_path / "b"
+    for d in (src, dst):
+        (d / "thermal.zarr").mkdir(parents=True)
+        (d / "metadata.json").write_text('{"x":1}')
+        (d / "thermal.zarr" / "0.0.0").write_bytes(b"0123456789")
+    (dst / "thermal.zarr" / "0.0.0").write_bytes(b"012345678X")  # same size, one byte differs
+    assert verify_copy(src, dst) is None  # default: size-only, does not notice
+    reason = verify_copy(src, dst, full=True)
+    assert reason is not None and "0.0.0" in reason  # full: checksum mismatch caught
+
+
 def _make_run(root: Path, name: str = "run1") -> Path:
     run = root / name
     (run / "thermal.zarr").mkdir(parents=True)
@@ -231,7 +248,7 @@ def test_move_leaves_source_intact_and_cleans_partial_on_verify_failure(
     dst_root = tmp_path / "drive"
     dst_root.mkdir(parents=True)
     run = _make_run(src_root)
-    monkeypatch.setattr(storage, "verify_copy", lambda a, b: "boom: pretend corruption")
+    monkeypatch.setattr(storage, "verify_copy", lambda a, b, **k: "boom: pretend corruption")
     with pytest.raises(RuntimeError):
         storage.move_experiment(run, dst_root)
     assert run.exists()  # source never deleted

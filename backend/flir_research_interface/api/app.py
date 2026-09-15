@@ -235,6 +235,7 @@ class RegisterDriveRequest(BaseModel):
 
 class MoveRequest(BaseModel):
     to: str  # "drive" | "local"
+    full_verify: bool = False  # SHA-256 every file (slower) vs size + critical-file checksums
 
 
 class ForceIpRequest(BaseModel):
@@ -1247,6 +1248,7 @@ def create_app(
 
         job: dict[str, Any] = {
             "state": "running", "to": req.to, "done": 0, "total": 0, "error": None,
+            "full_verify": req.full_verify,
         }
         app.state.move_jobs[name] = job
 
@@ -1254,7 +1256,9 @@ def create_app(
             def _cb(done: int, total: int) -> None:
                 job["done"], job["total"] = done, total
 
-            storage.move_experiment(src, dst_root, on_progress=_cb)
+            storage.move_experiment(
+                src, dst_root, on_progress=_cb, full_verify=req.full_verify
+            )
 
         async def _job() -> None:
             try:

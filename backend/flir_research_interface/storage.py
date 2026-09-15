@@ -180,11 +180,13 @@ def _is_os_junk(name: str) -> bool:
     return name.startswith("._") or name in _JUNK_NAMES
 
 
-def verify_copy(src: Path | str, dst: Path | str) -> str | None:
+def verify_copy(src: Path | str, dst: Path | str, *, full: bool = False) -> str | None:
     """Confirm ``dst`` is a faithful copy of ``src``. Returns ``None`` when good, else a reason.
 
-    Every file under ``src`` must exist in ``dst`` with the same size; the integrity-critical small
-    files (metadata/manifest) are additionally SHA-256 compared to catch same-size corruption.
+    Every file under ``src`` must exist in ``dst`` with the same size. The integrity-critical small
+    files (metadata/manifest) are always SHA-256 compared to catch same-size corruption. With
+    ``full=True`` every file is SHA-256 compared — slower, but catches silent bit-rot in the bulk
+    zarr chunks too (useful when shuttling a run between machines).
     """
     src, dst = Path(src), Path(dst)
     for sp in src.rglob("*"):
@@ -196,7 +198,7 @@ def verify_copy(src: Path | str, dst: Path | str) -> str | None:
             return f"missing in copy: {rel}"
         if sp.stat().st_size != dp.stat().st_size:
             return f"size mismatch: {rel}"
-        if sp.name in CRITICAL_FILES and _sha256(sp) != _sha256(dp):
+        if (full or sp.name in CRITICAL_FILES) and _sha256(sp) != _sha256(dp):
             return f"checksum mismatch: {rel}"
     return None
 
@@ -236,6 +238,7 @@ def move_experiment(
     dst_root: Path | str,
     *,
     on_progress: Callable[[int, int], None] | None = None,
+    full_verify: bool = False,
 ) -> Path:
     """Move one run folder to ``dst_root`` safely: copy → verify → atomic rename → delete source.
 
@@ -274,7 +277,7 @@ def move_experiment(
             done += sp.stat().st_size
             if on_progress is not None:
                 on_progress(done, total)
-        reason = verify_copy(src_run, partial)
+        reason = verify_copy(src_run, partial, full=full_verify)
         if reason is not None:
             raise RuntimeError(f"copy verification failed: {reason}")
         # A prior failed move can leave the run already at the target; os.replace cannot rename onto

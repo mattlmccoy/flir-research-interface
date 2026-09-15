@@ -76,6 +76,9 @@ export function PlaybackPage(p: Props) {
   const [err, setErr] = useState<string | null>(null);
   const [stats, setStats] = useState<StatsMap>(new Map());
   const [series, setSeries] = useState<RoiSeries | null>(null);
+  const [seriesStatus, setSeriesStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [frameStatus, setFrameStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [frameErr, setFrameErr] = useState<string | null>(null);
   const [control, setControl] = useState<ControlSeries | null>(null);
   const [showRf, setShowRf] = useState(true);
   const [showMedia, setShowMedia] = useState(false);
@@ -107,10 +110,13 @@ export function PlaybackPage(p: Props) {
 
   // Whole-recording ROI series from the backend; debounced so a drag does not fire per pixel.
   useEffect(() => {
-    if (!info || p.rois.rois.length === 0) { setSeries(null); return; }
+    if (!info || p.rois.rois.length === 0) { setSeries(null); setSeriesStatus("idle"); return; }
     let alive = true;
+    setSeriesStatus("loading");
     const id = window.setTimeout(() => {
-      api.series(p.name, p.rois.rois, p.layout.segment.on ? { min: p.layout.segment.min, max: p.layout.segment.max } : null, 800).then((s) => { if (alive) setSeries(s); }).catch((e) => { if (alive) setErr(String(e)); });
+      api.series(p.name, p.rois.rois, p.layout.segment.on ? { min: p.layout.segment.min, max: p.layout.segment.max } : null, 800)
+        .then((s) => { if (alive) { setSeries(s); setSeriesStatus("idle"); } })
+        .catch((e) => { if (alive) { setSeriesStatus("error"); setErr(String(e)); } });
     }, 250);
     return () => { alive = false; window.clearTimeout(id); };
   }, [p.name, info, p.rois.rois, p.layout.segment.on, p.layout.segment.min, p.layout.segment.max]);
@@ -155,7 +161,11 @@ export function PlaybackPage(p: Props) {
   useEffect(() => {
     if (!info || n === 0) return;
     let alive = true;
-    load(index).then((m) => { if (alive) setFrame(m); }).catch((e) => setErr(String(e)));
+    const hit = cache.current.get(index);
+    if (!hit) setFrameStatus("loading");  // only show the spinner when we actually have to fetch
+    load(index)
+      .then((m) => { if (alive) { setFrame(m); setFrameStatus("ready"); setFrameErr(null); } })
+      .catch((e) => { if (alive) { setFrameStatus("error"); setFrameErr(String(e)); } });
     // prefetch the next block once we're into the current one, so playback never waits
     const blockStart = Math.floor(index / BLOCK) * BLOCK;
     if (index - blockStart >= BLOCK - 20 && blockStart + BLOCK < n) void ensureBlock(blockStart + BLOCK).catch(() => undefined);
@@ -294,7 +304,16 @@ export function PlaybackPage(p: Props) {
           <button aria-label="Regenerate derived exports" data-tip="Regenerate derived exports (plot + CSV + preview) — asks first" disabled={n === 0 || regenBusy} onClick={quickRegenerate}>{regenBusy ? <span className="spinner" /> : <IconRefresh />}</button>
         </>} />}
       center={
-        <div className={`center-split ${p.layout.visibleMode === "side" && hasVideo ? "on" : ""}`}>
+        <div className={`center-split ${p.layout.visibleMode === "side" && hasVideo ? "on" : ""}`} style={{ position: "relative" }}>
+          {frameStatus === "error" ? (
+            <div className="load-overlay error" role="alert">
+              <div>couldn’t load frame {index + 1}</div>
+              <div className="hint">{frameErr}</div>
+              <button className="secondary" onClick={() => { cache.current.delete(index); inflight.current.delete(Math.floor(index / BLOCK) * BLOCK); setFrameStatus("loading"); load(index).then((m) => { setFrame(m); setFrameStatus("ready"); setFrameErr(null); }).catch((e) => { setFrameStatus("error"); setFrameErr(String(e)); }); }}>retry</button>
+            </div>
+          ) : frameStatus === "loading" && !frame ? (
+            <div className="load-overlay"><span className="spinner" /> loading frame {index + 1}…</div>
+          ) : null}
           <ThermalView frame={frame} palette={p.palette} scaleMode={p.scaleMode} manual={p.manual} onScale={setShown} setManual={p.setManual} setScaleMode={p.setScaleMode}
             rois={p.rois.rois} selected={p.rois.selected} selectedIds={p.rois.selectedIds} tool={p.layout.tool} roisHidden={p.layout.roisHidden} labelScope={`exp.${p.name}`} zoom={p.layout.zoom} onRoi={p.roiDispatch} onStats={onStats} rad={rad} extremes={p.layout.extremes} isotherm={p.layout.isotherm} onField={setField} reference={reference} hold={p.layout.hold} flipH={p.layout.flipH} flipV={p.layout.flipV} agc={p.layout.agc} filter={p.layout.filter} units={p.layout.units} valid={p.layout.segment.on ? { min: p.layout.segment.min, max: p.layout.segment.max } : null}
             overlay={p.layout.visibleMode === "overlay" && hasVideo ? <VisibleVideo plain name={p.name} t={t} playing={playing} speed={speed} /> : undefined} overlayStyle={p.layout.overlay} overlayH={overlayH} />
@@ -306,7 +325,11 @@ export function PlaybackPage(p: Props) {
           controls={hasRf ? <label className="hint" title="Overlay the RF forward power (right axis, W) recorded from the RF generator, aligned to the temperature."><input type="checkbox" checked={showRf} onChange={(e) => setShowRf(e.target.checked)} /> RF power</label> : undefined}>
           <TimePlot traces={withDelta} markers={markers} window={{ t0: 0, t1: Math.max(info?.duration_s ?? 0, 0.001) }} cursorT={t}
             rightTraces={rightTraces} rightUnits="W"
-            emptyText={p.rois.rois.length ? "loading series…" : "add a spot or rectangle ROI to plot it over the whole recording"}
+            emptyText={
+              !p.rois.rois.length ? "add a spot or rectangle ROI to plot it over the whole recording"
+              : seriesStatus === "error" ? "couldn’t load the series — check the operator, then adjust an ROI to retry"
+              : "loading series over the whole recording… (long recordings can take several seconds)"
+            }
             onSeek={(tt) => { if (tl) { setPlaying(false); setIndex(nearestIndex(tl.t_s, tt)); } }} />
         </PlotDock>
       }

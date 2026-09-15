@@ -11,6 +11,13 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) 
   const [err, setErr] = useState<string | null>(null);
   const [sort, setSort] = useState<Sort>("newest");
   const [q, setQ] = useState("");
+  const [fullVerify, setFullVerify] = useState(() => {
+    try { return localStorage.getItem("fri.fullVerify") === "1"; } catch { return false; }
+  });
+  const toggleFullVerify = (on: boolean) => {
+    setFullVerify(on);
+    try { localStorage.setItem("fri.fullVerify", on ? "1" : "0"); } catch { /* ignore */ }
+  };
   const load = useCallback(() => {
     api.experiments().then(setItems).catch((e) => setErr(String(e)));
   }, []);
@@ -50,6 +57,12 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) 
       <div className="exp-head">
         <span>{items ? (filtering ? `${shown.length} / ${summaryLabel(breakdown, driveConnected)}` : summaryLabel(breakdown, driveConnected)) : "loading…"}</span>
         <span className="right">
+          {driveConnected && (
+            <label className="hint" title="Checksum every file (SHA-256) when moving a run, not just its size + metadata. Slower, but catches silent corruption when shuttling between machines." style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+              <input type="checkbox" checked={fullVerify} onChange={(e) => toggleFullVerify(e.target.checked)} />
+              full verify
+            </label>
+          )}
           <input type="text" placeholder="filter" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 160 }} />
           <select value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
             <option value="newest">newest</option>
@@ -76,7 +89,7 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) 
       {items && items.length > 0 && shown.length === 0 && <div className="muted">No experiments match the filter.</div>}
       <div className="exp-grid">
         {shown.map((e) => (
-          <ExperimentCard key={e.name} exp={e} onOpen={() => onOpen(e.name)} onChanged={load} driveConnected={driveConnected} />
+          <ExperimentCard key={`${e.library ?? "local"}:${e.name}`} exp={e} onOpen={() => onOpen(e.name)} onChanged={load} driveConnected={driveConnected} fullVerify={fullVerify} />
         ))}
       </div>
     </div>

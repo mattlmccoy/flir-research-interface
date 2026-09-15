@@ -197,8 +197,8 @@ export const api = {
   registerDrive: (mount: string) =>
     j<StorageInfo>(req("/api/storage/drive", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ mount }) })),
   forgetDrive: () => j<StorageInfo>(req("/api/storage/drive", { method: "DELETE" })),
-  moveExperiment: (name: string, to: "drive" | "local") =>
-    j<MoveJob>(req(`/api/experiments/${encodeURIComponent(name)}/move`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ to }) })),
+  moveExperiment: (name: string, to: "drive" | "local", fullVerify = false) =>
+    j<MoveJob>(req(`/api/experiments/${encodeURIComponent(name)}/move`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ to, full_verify: fullVerify }) })),
   moveStatus: (name: string) =>
     j<MoveJob>(req(`/api/experiments/${encodeURIComponent(name)}/move/status`)),
   revealRoot: () => j<RevealResult>(req("/api/experiments/reveal-root", { method: "POST" })),

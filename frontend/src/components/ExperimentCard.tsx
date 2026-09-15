@@ -3,11 +3,11 @@ import { api, type Experiment, type Previews } from "../lib/api.ts";
 import { formatSeconds, keyframeBackgroundPosition, keyframeIndex } from "../lib/keyframes.ts";
 import { hasRois, loadRois, roisDifferFromStored } from "../lib/roi.ts";
 
-interface Props { exp: Experiment; onOpen: () => void; onChanged: () => void; driveConnected?: boolean; }
+interface Props { exp: Experiment; onOpen: () => void; onChanged: () => void; driveConnected?: boolean; fullVerify?: boolean; }
 
 const roiStorage: Storage | null = (() => { try { return typeof localStorage !== "undefined" ? localStorage : null; } catch { return null; } })();
 
-export function ExperimentCard({ exp, onOpen, onChanged, driveConnected = false }: Props) {
+export function ExperimentCard({ exp, onOpen, onChanged, driveConnected = false, fullVerify = false }: Props) {
   // Flag runs whose ROIs have been edited since their exports were built: the run has a saved
   // working set that differs from the ROIs stored (and exported) with the recording.
   const scope = `exp.${exp.name}`;
@@ -22,7 +22,7 @@ export function ExperimentCard({ exp, onOpen, onChanged, driveConnected = false 
   async function moveTo(to: "drive" | "local") {
     setBusy(true); setNote(null); setMove({ done: 0, total: 0 });
     try {
-      await api.moveExperiment(exp.name, to);
+      await api.moveExperiment(exp.name, to, fullVerify);
       for (;;) {
         await new Promise((r) => setTimeout(r, 600));
         const jb = await api.moveStatus(exp.name);
