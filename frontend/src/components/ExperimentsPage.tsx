@@ -29,7 +29,7 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) 
   const [selecting, setSelecting] = useState(false);
   const [sel, dispatch] = useReducer(selectionReducer, { anchor: null, selected: new Set() } as SelectionState);
   const [bulkBusy, setBulkBusy] = useState(false);
-  const [bulkProgress, setBulkProgress] = useState<string | null>(null);
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number; verb: string } | null>(null);
   const [bulkTagOpen, setBulkTagOpen] = useState(false);
 
   const setSortP = (s: Sort) => { setSort(s); ls.set("fri.sort", s); };
@@ -76,48 +76,40 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) 
     }
   }
 
+  // Run one async op over each target with live "verb k/N" progress in the selection bar. Best
+  // effort: a failure is collected and the batch continues.
+  async function runBulk(targets: Experiment[], verb: string, fn: (e: Experiment) => Promise<void>) {
+    if (targets.length === 0) return;
+    setBulkBusy(true); setErr(null);
+    const fails: string[] = [];
+    for (let i = 0; i < targets.length; i++) {
+      setBulkProgress({ done: i, total: targets.length, verb });
+      try { await fn(targets[i]); } catch (err) { fails.push(`${targets[i].name}: ${err}`); }
+    }
+    setBulkProgress({ done: targets.length, total: targets.length, verb });
+    setBulkBusy(false); setBulkProgress(null); clearSelection(); load();
+    if (fails.length) setErr(`${fails.length} of ${targets.length} failed to ${verb} — ${fails[0]}`);
+  }
+
+  const libOf = (e: Experiment) => (e.library === "drive" ? "drive" : "local");
+
   async function bulkMove(to: "drive" | "local") {
     // only runs on the opposite side can move that direction; skip the rest to avoid "already there"
     const targets = selectedItems().filter((e) => (to === "drive" ? e.library !== "drive" : e.library === "drive"));
-    if (targets.length === 0) { setErr(`nothing selected is on ${to === "drive" ? "local" : "the drive"}`); return; }
-    setBulkBusy(true); setErr(null);
-    let done = 0; const fails: string[] = [];
-    for (const e of targets) {
-      setBulkProgress(`moving ${done + 1}/${targets.length}…`);
-      try { await moveOne(e.name, to); } catch (err) { fails.push(`${e.name}: ${err}`); }
-      done += 1;
-    }
-    setBulkBusy(false); setBulkProgress(null); clearSelection(); load();
-    if (fails.length) setErr(`${fails.length} move(s) failed — ${fails[0]}`);
+    if (targets.length === 0) { setErr(`nothing selected is on ${to === "drive" ? "local disk" : "the drive"}`); return; }
+    await runBulk(targets, to === "drive" ? "move to drive" : "restore to local", (e) => moveOne(e.name, to));
   }
 
   async function bulkStar(on: boolean) {
-    setBulkBusy(true); setErr(null);
-    const fails: string[] = [];
-    for (const e of selectedItems()) {
-      try {
-        await api.setLabels(e.name, { starred: on, tags: e.tags ?? [], library: e.library === "drive" ? "drive" : "local" });
-      } catch (err) { fails.push(String(err)); }
-    }
-    setBulkBusy(false); clearSelection(); load();
-    if (fails.length) setErr(`${fails.length} update(s) failed`);
+    await runBulk(selectedItems(), on ? "star" : "unstar",
+      (e) => api.setLabels(e.name, { starred: on, tags: e.tags ?? [], library: libOf(e) }).then(() => {}));
   }
 
   async function bulkAddTags(add: string[]) {
     setBulkTagOpen(false);
     if (add.length === 0) return;
-    setBulkBusy(true); setErr(null);
-    const fails: string[] = [];
-    for (const e of selectedItems()) {
-      try {
-        await api.setLabels(e.name, {
-          starred: !!e.starred, tags: mergeTags(e.tags ?? [], add),
-          library: e.library === "drive" ? "drive" : "local",
-        });
-      } catch (err) { fails.push(String(err)); }
-    }
-    setBulkBusy(false); clearSelection(); load();
-    if (fails.length) setErr(`${fails.length} tag update(s) failed`);
+    await runBulk(selectedItems(), "tag",
+      (e) => api.setLabels(e.name, { starred: !!e.starred, tags: mergeTags(e.tags ?? [], add), library: libOf(e) }).then(() => {}));
   }
 
   async function bulkDelete() {
@@ -125,13 +117,7 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) 
     if (targets.length === 0) return;
     const names = targets.map((e) => e.name).join("\n");
     if (!window.confirm(`Delete ${targets.length} run(s) for good?\n\n${names}\n\nThis removes each run folder entirely. There is no undo.`)) return;
-    setBulkBusy(true); setErr(null);
-    const fails: string[] = [];
-    for (const e of targets) {
-      try { await api.deleteExperiment(e.name); } catch (err) { fails.push(String(err)); }
-    }
-    setBulkBusy(false); clearSelection(); load();
-    if (fails.length) setErr(`${fails.length} delete(s) failed`);
+    await runBulk(targets, "delete", (e) => api.deleteExperiment(e.name).then(() => {}));
   }
 
   return (
@@ -146,11 +132,11 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) 
             <input type="checkbox" checked={starredOnly} onChange={(e) => setStarredP(e.target.checked)} /> ★ starred
           </label>
           {driveConnected && (
-            <label className="hint" title="Checksum every file (SHA-256) when moving a run. Slower, but catches silent corruption between machines." style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
-              <input type="checkbox" checked={fullVerify} onChange={(e) => toggleFullVerify(e.target.checked)} /> full verify
+            <label className="hint" title="How thoroughly a move to/from the drive is checked before the original is deleted. OFF (default): every file must match by size, plus a checksum of the metadata — fast, catches truncated/missing files. ON: re-reads and SHA-256-checksums every byte of every file — much slower, but catches rare silent corruption. Worth turning on when shuttling irreplaceable runs between machines." style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+              <input type="checkbox" checked={fullVerify} onChange={(e) => toggleFullVerify(e.target.checked)} /> verify every byte on move (?)
             </label>
           )}
-          <input type="text" placeholder="filter (name or tag)" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 170 }} />
+          <input type="text" placeholder="🔍 search name or tag" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 190 }} />
           <select value={sort} onChange={(e) => setSortP(e.target.value as Sort)}>
             <option value="newest">newest</option>
             <option value="starred">starred first</option>
@@ -201,14 +187,14 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) 
         })}
       </div>
 
-      {selecting && sel.selected.size > 0 && (
+      {selecting && (
         <>
           <SelectionBar
             count={sel.selected.size} driveConnected={driveConnected} busy={bulkBusy} progress={bulkProgress}
             onMove={bulkMove} onTag={() => setBulkTagOpen(true)} onStar={bulkStar} onDelete={bulkDelete}
             onSelectAll={() => dispatch({ type: "selectAll", names: shownIds })} onClear={() => { clearSelection(); setSelecting(false); }}
           />
-          {bulkTagOpen && (
+          {bulkTagOpen && sel.selected.size > 0 && (
             <div className="bulk-tag-pop">
               <TagPopover tags={[]} universe={universe} addOnly onChange={bulkAddTags} onClose={() => setBulkTagOpen(false)} />
             </div>
