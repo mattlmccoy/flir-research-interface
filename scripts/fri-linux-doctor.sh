@@ -48,8 +48,12 @@ sudo ausearch -m avc -ts recent 2>/dev/null | grep -iE 'execstack|execmod|textre
   || echo "(no matching AVC denials or ausearch unavailable)"
 
 echo
-echo "### 5. missing shared-object deps for libSpinnaker"
-ldd /opt/spinnaker/lib/libSpinnaker.so 2>&1 | grep -iE 'not found' || echo "(no 'not found' deps)"
+echo "### 5. missing shared-object deps (the _PySpin extension + libSpinVideo)"
+ext="$(find "$FRI_HOME/backend/.venv" -name '_PySpin*.so' 2>/dev/null | head -1)"
+echo "extension: ${ext:-not found}"
+[ -n "$ext" ] && { ldd "$ext" 2>&1 | grep -iE 'not found' || echo "  _PySpin: (no 'not found' deps)"; }
+ldd /opt/spinnaker/lib/libSpinVideo.so 2>&1 | grep -iE 'not found' \
+  || echo "  libSpinVideo: (no 'not found' deps)"
 
 echo
 echo "### 6. environment"

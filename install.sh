@@ -128,7 +128,9 @@ _extract_spinnaker_libs_from_deb() {
   tar -xzf "$tmp/sdk.tar.gz" -C "$tmp"
   local sdkdir d deb x
   sdkdir="$(echo "$tmp"/spinnaker-*-"${debarch}")"
-  for d in libgentl libspinnaker libspinnaker-c libspinvideo libspinvideo-c; do
+  # These carry every .so the PySpin extension links: libSpinnaker, libSpinnaker_C, libSpinVideo,
+  # libSpinVideo_C, libGenTL, and libSpinUpdate (from the 'spinupdate' package — _PySpin needs it).
+  for d in libgentl libspinnaker libspinnaker-c libspinvideo libspinvideo-c spinupdate; do
     deb="$(ls "$sdkdir/${d}_"*.deb 2>/dev/null | head -1)"
     [ -n "$deb" ] || continue
     x="$(mktemp -d)"
@@ -145,7 +147,29 @@ _extract_spinnaker_libs_from_deb() {
       echo "     sudo dnf install -y execstack && sudo execstack -c /opt/spinnaker/lib/*.so*"
     }
   fi
+  _link_ffmpeg_compat
   echo "installed Spinnaker libraries to /opt/spinnaker/lib"
+}
+
+# libSpinVideo (pulled in by the PySpin extension) links the ffmpeg 6 sonames; Fedora ships
+# ffmpeg 7. Point the names it wants at whatever ffmpeg is installed so the loader can resolve
+# libSpinVideo. We never call SpinVideo (its one symbol in _PySpin is a lazily-bound constructor),
+# so any ABI drift on that unused path never executes.
+_link_ffmpeg_compat() {
+  local want base sys
+  for want in libavcodec.so.60 libavutil.so.58 libavformat.so.60 libswscale.so.7; do
+    [ -e "/opt/spinnaker/lib/$want" ] && continue
+    base="${want%.so.*}.so."
+    sys="$(ldconfig -p 2>/dev/null | awk -v b="$base" '$1 ~ b {print $NF; exit}')"
+    if [ -n "$sys" ] && [ -e "$sys" ]; then
+      sudo ln -sf "$sys" "/opt/spinnaker/lib/$want"
+      echo "linked $want -> $sys (ffmpeg compat for the unused SpinVideo path)"
+    else
+      echo "!! no system $base* found to satisfy libSpinVideo; install ffmpeg if PySpin import"
+      echo "   later complains about $want"
+    fi
+  done
+  sudo ldconfig
 }
 
 # Install the PySpin wheel into the operator venv. The wheel is arch-specific; we look on the SDK
