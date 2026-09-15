@@ -13,6 +13,7 @@ from flir_research_interface.install import (
     LAB_RTSP_USER,
     LABEL,
     doctor,
+    install_systemd,
     launchd_plist,
     main,
     systemd_unit,
@@ -72,6 +73,20 @@ def test_pressing_enter_at_prompts_writes_the_baked_lab_credentials(
     assert "FRI_CAMERA_HOST=192.168.8.2" in env
     assert "FRI_RTSP_USER=rtsp" in env
     assert "FRI_RTSP_PASSWORD=ktEmIrar" in env
+
+
+def test_install_systemd_restarts_so_updates_take_effect(tmp_path: Path, monkeypatch) -> None:
+    # `enable --now` does NOT restart an already-running service, so re-installing (update) would
+    # keep the old operator alive. install_systemd must issue an explicit restart.
+    monkeypatch.setattr(install_mod.Path, "home", classmethod(lambda cls: tmp_path))
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        return None
+
+    install_systemd(tmp_path / "backend", port=8000, site_origin="https://x", run=fake_run)
+    assert ["systemctl", "--user", "restart", "fri-operator.service"] in calls
 
 
 def test_systemd_unit_runs_fri_serve_and_restarts(tmp_path: Path) -> None:

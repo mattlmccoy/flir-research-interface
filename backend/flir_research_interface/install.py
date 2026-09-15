@@ -116,7 +116,10 @@ def install_systemd(
         systemd_unit(uv=uv, backend_dir=backend_dir, port=port, site_origin=site_origin)
     )
     run(["systemctl", "--user", "daemon-reload"], check=True)
-    run(["systemctl", "--user", "enable", "--now", "fri-operator.service"], check=True)
+    run(["systemctl", "--user", "enable", "fri-operator.service"], check=True)
+    # restart (not `enable --now`) so re-running the installer to UPDATE actually swaps the code —
+    # enable --now leaves an already-running operator on the old version.
+    run(["systemctl", "--user", "restart", "fri-operator.service"], check=True)
     run(["loginctl", "enable-linger", getpass.getuser()], check=False, capture_output=True)
     return unit
 
