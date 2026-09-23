@@ -131,3 +131,44 @@ def test_announces_no_ip_is_diagnosed_instead_of_a_host_fix() -> None:
         "ip": "192.168.7.2", "subnet_mask": "255.255.255.0", "gateway": "0.0.0.0"
     }
     assert gvcp.diagnose(gvcp.DiscoveryHit(iface, _dev()))["problem"] is None
+
+
+# Captured from `networksetup -listnetworkserviceorder` on the lab Mac (2026-09-23): the camera's
+# USB-Ethernet dongle came back as a DUPLICATE service "USB 10/100/1000 LAN 2" on en10, while the
+# original "USB 10/100/1000 LAN" service (holding the static 192.168.8.1) stayed bound to en13.
+SERVICE_ORDER = """An asterisk (*) denotes that a network service is disabled.
+(1) Wi-Fi
+(Hardware Port: Wi-Fi, Device: en0)
+
+(2) USB 10/100/1000 LAN
+(Hardware Port: USB 10/100/1000 LAN, Device: en13)
+
+(4) AX88772A
+(Hardware Port: AX88772A, Device: en16)
+
+(8) USB 10/100/1000 LAN 2
+(Hardware Port: USB 10/100/1000 LAN, Device: en10)
+
+(*) Old Dongle
+(Hardware Port: Old Dongle, Device: en20)
+
+(9) Some VPN
+(Hardware Port: , Device: )
+"""
+
+
+def test_service_order_maps_devices_to_service_names_not_hardware_ports() -> None:
+    names = gvcp.parse_service_order(SERVICE_ORDER)
+    # the duplicate-service case: en10 must map to the "... 2" SERVICE, not the hardware port name
+    assert names["en10"] == "USB 10/100/1000 LAN 2"
+    assert names["en13"] == "USB 10/100/1000 LAN"
+    assert names["en0"] == "Wi-Fi"
+    assert names["en20"] == "Old Dongle"  # disabled services are still named
+    assert "" not in names  # services without a device (VPNs) are skipped
+
+
+def test_mac_fix_command_targets_the_resolved_service() -> None:
+    dev = _dev(current_ip="192.168.8.2", source_ip="192.168.8.2")
+    cmd = host_fix_commands(dev, system="Darwin", interface="en10",
+                            service_name=gvcp.parse_service_order(SERVICE_ORDER)["en10"])
+    assert cmd[0].startswith('sudo networksetup -setmanual "USB 10/100/1000 LAN 2" ')

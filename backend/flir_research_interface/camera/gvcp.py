@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ipaddress
 import platform
+import re
 import socket
 import struct
 import subprocess
@@ -178,21 +179,46 @@ class HostInterface:
     service_name: str | None
 
 
+#: networksetup lives in /usr/sbin, which is NOT on the launchd PATH the operator runs under — call
+#: it by absolute path or the lookup silently fails and fix commands fall back to the device name.
+_NETWORKSETUP = "/usr/sbin/networksetup"
+_SERVICE_RE = re.compile(r"^\((?:\d+|\*)\)\s+(.+?)\s*$")
+_PORT_RE = re.compile(r"^\(Hardware Port:\s*(.*?),\s*Device:\s*(.*?)\)\s*$")
+
+
+def parse_service_order(text: str) -> dict[str, str]:
+    """Map BSD device -> network SERVICE name from ``networksetup -listnetworkserviceorder``.
+
+    Service names are what ``networksetup -setmanual`` takes. They usually equal the hardware port
+    name, but when macOS duplicates a service (a USB dongle re-enumerated on another port becomes
+    e.g. "USB 10/100/1000 LAN 2"), the hardware-port name points at the OLD service — so a fix
+    built from it silently configures the wrong adapter. Disabled services ("(*)") still count;
+    services with no device (VPNs) are skipped.
+    """
+    names: dict[str, str] = {}
+    service: str | None = None
+    for line in text.splitlines():
+        m = _SERVICE_RE.match(line.strip())
+        if m:
+            service = m.group(1)
+            continue
+        p = _PORT_RE.match(line.strip())
+        if p and service:
+            device = p.group(2).strip()
+            if device:
+                names[device] = service
+            service = None
+    return names
+
+
 def _macos_service_names() -> dict[str, str]:
     try:
         out = subprocess.run(
-            ["networksetup", "-listallhardwareports"], capture_output=True, text=True, timeout=5
+            [_NETWORKSETUP, "-listnetworkserviceorder"], capture_output=True, text=True, timeout=5
         ).stdout
     except (OSError, subprocess.TimeoutExpired):
         return {}
-    names: dict[str, str] = {}
-    port = None
-    for line in out.splitlines():
-        if line.startswith("Hardware Port:"):
-            port = line.split(":", 1)[1].strip()
-        elif line.startswith("Device:") and port:
-            names[line.split(":", 1)[1].strip()] = port
-    return names
+    return parse_service_order(out)
 
 
 def host_interfaces() -> list[HostInterface]:
