@@ -284,6 +284,8 @@ def create_app(
     site_origin: str | None = None,
     preview_factory: Callable[[], Any] | None = None,
     autoconnect: bool = False,
+    autoconnect_backend: str = "spinnaker",
+    autoconnect_interval_s: float = 10.0,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
@@ -296,11 +298,18 @@ def create_app(
         app.state.rf_link_pending = None  # RF metadata for the next arm-loop rf-triggered start
         app.state.live_rois = []  # server-side copy of the on-screen ROIs, for the control feed
         app.state.control_last = None  # last control-telemetry the RF controller posted
-        # Auto-connect the real camera on startup (best effort, in the background so it never delays
-        # serving). Only the operator opts in (autoconnect=True); tests never touch the hardware.
+        app.state.autoconnect_paused = False  # set by a user disconnect, cleared by a user connect
+        # Auto-connect the real camera on startup and keep retrying while none is connected (best
+        # effort, in the background so it never delays serving). Only the operator opts in
+        # (autoconnect=True); tests never touch the hardware.
+        task = None
         if autoconnect and os.environ.get("FRI_NO_AUTOCONNECT") != "1":
-            asyncio.create_task(_auto_connect())
+            task = asyncio.create_task(_auto_connect_loop())
         yield
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
         await _finalize_recording()
         svc: AcquisitionService | None = app.state.service
         if svc is not None:
@@ -326,29 +335,50 @@ def create_app(
         stream drops or stalls, reconnects the same camera with backoff (state -> reconnecting)."""
         return AcquisitionService(cam, auto_reconnect=True, connect_retries=3)
 
-    async def _auto_connect() -> None:
-        """On startup, connect the real camera if one is present, so a reboot comes back streaming
-        with no clicks. Best-effort: no camera / no SDK / any error just leaves it disconnected."""
-        if "spinnaker" not in CAMERA_BACKENDS or app.state.service is not None:
-            return
+    async def _auto_connect() -> bool:
+        """Connect the camera if one is present, so a reboot or a replugged cable comes back
+        streaming with no clicks. Best-effort: no camera / no SDK / any error leaves it
+        disconnected. Returns whether it connected."""
         cam: CameraBackend | None = None
         try:
-            cam = _make_backend("spinnaker", sim_fps=app.state.sim_fps)
+            cam = _make_backend(autoconnect_backend, sim_fps=app.state.sim_fps)
             devs = await run_in_threadpool(cam.enumerate)
             if not devs:
                 cam.disconnect()
-                return
+                return False
             svc = _make_service(cam)
             await run_in_threadpool(svc.connect, devs[0])
+            if app.state.service is not None or app.state.autoconnect_paused:
+                await run_in_threadpool(svc.disconnect)  # the user acted while we were connecting
+                return False
             svc.start()
             app.state.service = svc
-            app.state.backend_name = "spinnaker"
-            logger.info("auto-connected %s %s on startup", devs[0].model, devs[0].serial)
+            app.state.backend_name = autoconnect_backend
+            logger.info("auto-connected %s %s", devs[0].model, devs[0].serial)
+            return True
         except Exception as exc:  # noqa: BLE001 - best effort; leave disconnected for manual connect
-            logger.info("startup auto-connect skipped: %s", exc)
+            logger.debug("auto-connect attempt failed: %s", exc)
             if cam is not None:
                 with contextlib.suppress(Exception):
                     cam.disconnect()
+            return False
+
+    async def _auto_connect_loop() -> None:
+        """Retry every ``autoconnect_interval_s`` while no camera is connected, unless the user
+        disconnected on purpose. Once connected, the service's own supervisor handles drops."""
+        if autoconnect_backend not in CAMERA_BACKENDS:
+            return
+        misses = 0
+        while True:
+            if app.state.service is None and not app.state.autoconnect_paused:
+                if await _auto_connect():
+                    misses = 0
+                else:
+                    misses += 1
+                    if misses == 1:
+                        logger.info("no camera yet; auto-connect will keep retrying every %.0fs",
+                                    autoconnect_interval_s)
+            await asyncio.sleep(autoconnect_interval_s)
 
     def _export_roi_series(exp_dir: Path) -> None:
         """Write exports/roi_series.csv for the ROIs stored with the recording (if any)."""
@@ -609,11 +639,13 @@ def create_app(
             raise
         app.state.service = svc
         app.state.backend_name = req.backend
+        app.state.autoconnect_paused = False
         return {"state": svc.state.value, "device": chosen.__dict__}
 
     @app.post("/api/camera/disconnect")
     async def disconnect() -> dict[str, Any]:
         await _finalize_recording()  # never lose a recording because the operator disconnected
+        app.state.autoconnect_paused = True  # a deliberate disconnect must stick
         svc = service()
         if svc is None:
             return {"state": ServiceState.DISCONNECTED.value}
