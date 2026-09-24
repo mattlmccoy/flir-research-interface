@@ -125,7 +125,18 @@ def readme_text(reader: ExperimentReader) -> str:
             + (f" ({e['note']})" if e.get("note") else "")
         )
     lines.append("")
-    lines.append(f"Visible camera video: {'yes (visible.mp4)' if reader.visible else 'no'}")
+    vis = reader.visible or {}
+    segs = vis.get("segments") or []
+    if len(segs) > 1:
+        names = ", ".join(str(s.get("file")) for s in segs)
+        lines.append(f"Visible camera video: yes, {len(segs)} segments ({names})")
+    else:
+        lines.append(f"Visible camera video: {'yes (visible.mp4)' if reader.visible else 'no'}")
+    for g in vis.get("gaps") or []:
+        lines.append(
+            f"  stream gap at {g.get('start_s', 0):.1f} s for {g.get('duration_s', 0):.1f} s"
+            " (camera link lost; no visible video there)"
+        )
     lines.append(f"Visible-IR alignment stored: {'yes' if m.get('visible_alignment') else 'no'}")
     lines.append("")
     lines.append("Files")

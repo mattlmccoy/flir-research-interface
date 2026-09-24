@@ -300,3 +300,140 @@ def test_probe_failure_does_not_break_stop(tmp_path: Path) -> None:
     rec.start(tmp_path)
     info = rec.stop()
     assert info["returncode"] == 0 and info["measured_fps"] is None
+
+
+# -- mid-recording stream loss: reconnect into new segments (2026-09-23 run 20260923_175956) ----
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.t = 1000.0
+
+    def __call__(self) -> float:
+        return self.t
+
+
+def _write(proc: FakeProc, n: int = 100) -> None:
+    proc.out.write_bytes(b"\x00\x00\x00\x1cftypisom" + b"x" * n)
+
+
+def _drops(proc: FakeProc, rc: int = 0) -> None:
+    """ffmpeg hit the 5 s socket timeout after a GigE blip: it finalises the MP4 and exits 0."""
+    _write(proc)
+    proc.returncode = rc
+
+
+def test_mid_recording_rc0_exit_relaunches_into_a_new_segment(tmp_path: Path) -> None:
+    FakeProc.instances.clear()
+    clock = _Clock()
+    rec = VisibleRecorder(ffmpeg="/opt/ffmpeg", url="rtsp://h/avc/ch1", popen=FakeProc, clock=clock)
+    rec.start(tmp_path)
+    first = FakeProc.instances[-1]
+    clock.t += 60.0
+    _drops(first)
+    first_bytes = (tmp_path / "visible.mp4").read_bytes()
+    st = rec.stats()
+    assert st["state"] == "recording" and st["reconnecting"] is True and st["error"] is None
+    assert len(FakeProc.instances) == 1  # waits for the first backoff step
+    clock.t += 1.0
+    st = rec.stats()
+    assert len(FakeProc.instances) == 2 and st["reconnecting"] is False
+    assert FakeProc.instances[-1].args[-1] == str(tmp_path / "visible_001.mp4")
+    assert st["segments"] == 2
+    info = rec.stop()
+    assert (tmp_path / "visible.mp4").read_bytes() == first_bytes  # never overwritten
+    assert (tmp_path / "visible_001.mp4").is_file()
+    assert info["error"] is None and info["file"] == "visible.mp4"
+    assert [s["file"] for s in info["segments"]] == ["visible.mp4", "visible_001.mp4"]
+    s0, s1 = info["segments"]
+    assert s0["returncode"] == 0 and s0["offset_s"] == 0.0 and s1["offset_s"] > 0.0
+    assert s0["stopped_host_ns"] <= s1["started_host_ns"]
+    assert len(info["gaps"]) == 1
+    gap = info["gaps"][0]
+    assert gap["start_host_ns"] == s0["stopped_host_ns"]
+    assert gap["end_host_ns"] == s1["started_host_ns"]
+    assert gap["duration_s"] >= 0.0 and gap["after_segment"] == 0
+    side = json.loads((tmp_path / "visible.json").read_text())
+    assert side["segments"] == info["segments"] and side["gaps"] == info["gaps"]
+
+
+def test_reconnect_backs_off_1_2_5_10_and_never_gives_up_while_recording(tmp_path: Path) -> None:
+    FakeProc.instances.clear()
+    clock = _Clock()
+    rec = VisibleRecorder(ffmpeg="/opt/ffmpeg", url="rtsp://h/avc/ch1", popen=FakeProc, clock=clock)
+    rec.start(tmp_path)
+    _drops(FakeProc.instances[-1])
+    rec.stats()  # notices the exit, schedules attempt 1
+    for delay in (1.0, 2.0, 5.0, 10.0, 10.0, 10.0):
+        n = len(FakeProc.instances)
+        clock.t += delay - 0.01
+        rec.stats()
+        assert len(FakeProc.instances) == n, f"relaunched before the {delay}s backoff"
+        clock.t += 0.01
+        rec.stats()
+        assert len(FakeProc.instances) == n + 1
+        attempt = FakeProc.instances[-1]
+        assert attempt.args[-1] == str(tmp_path / "visible_001.mp4")
+        attempt.out.write_bytes(b"")  # camera still unreachable: nothing written
+        attempt.returncode = 1
+        st = rec.stats()
+        assert st["state"] == "recording" and st["reconnecting"] is True
+    assert not (tmp_path / "visible_001.mp4").exists()  # failed attempts leave no empty file
+    info = rec.stop()
+    assert info["error"] is None and [s["file"] for s in info["segments"]] == ["visible.mp4"]
+    # the loss runs to the end of the recording: the gap closes at stop
+    assert len(info["gaps"]) == 1 and info["gaps"][0]["end_host_ns"] == info["stopped_host_ns"]
+
+
+def test_backoff_resets_after_a_segment_records(tmp_path: Path) -> None:
+    FakeProc.instances.clear()
+    clock = _Clock()
+    rec = VisibleRecorder(ffmpeg="/opt/ffmpeg", url="rtsp://h/avc/ch1", popen=FakeProc, clock=clock)
+    rec.start(tmp_path)
+    for k in (1, 2):
+        _drops(FakeProc.instances[-1])
+        rec.stats()
+        clock.t += 1.0  # first step of the ladder each time
+        rec.stats()
+        assert FakeProc.instances[-1].args[-1] == str(tmp_path / f"visible_00{k}.mp4")
+    info = rec.stop()
+    assert len(info["segments"]) == 3 and len(info["gaps"]) == 2
+
+
+def test_normal_stop_keeps_single_segment_layout(tmp_path: Path) -> None:
+    rec = VisibleRecorder(ffmpeg="/opt/ffmpeg", url="rtsp://h/avc/ch1", popen=FakeProc)
+    rec.start(tmp_path)
+    info = rec.stop()
+    assert info["returncode"] == 0 and info["error"] is None and info["gaps"] == []
+    assert [s["file"] for s in info["segments"]] == ["visible.mp4"]
+
+
+def test_watchdog_relaunches_without_anyone_polling(tmp_path: Path) -> None:
+    FakeProc.instances.clear()
+    rec = VisibleRecorder(
+        ffmpeg="/opt/ffmpeg",
+        url="rtsp://h/avc/ch1",
+        popen=FakeProc,
+        backoff_s=(0.05,),
+        watch_interval_s=0.01,
+    )
+    rec.start(tmp_path)
+    _drops(FakeProc.instances[-1])
+    deadline = time.monotonic() + 2.0
+    while len(FakeProc.instances) < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert len(FakeProc.instances) == 2
+    info = rec.stop()
+    assert len(info["segments"]) == 2
+
+
+def test_segment_video_is_served_by_index(tmp_path: Path) -> None:
+    exp = tmp_path / "20260923_175956_Run"
+    exp.mkdir()
+    (exp / "visible.mp4").write_bytes(b"seg0")
+    (exp / "visible_001.mp4").write_bytes(b"seg1")
+    with _client(tmp_path) as c:
+        assert c.get(f"/api/experiments/{exp.name}/visible/0").content == b"seg0"
+        assert c.get(f"/api/experiments/{exp.name}/visible/1").content == b"seg1"
+        assert c.get(f"/api/experiments/{exp.name}/visible/2").status_code == 404
+        assert c.get(f"/api/experiments/{exp.name}/visible.mp4").content == b"seg0"

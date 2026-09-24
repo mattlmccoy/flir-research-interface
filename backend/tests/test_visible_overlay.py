@@ -37,3 +37,30 @@ def test_blend_visible_opacity_bounds() -> None:
     assert int(full[0, 0, 0]) == 200  # full opacity = the visible frame
     half = blend_visible(body, warped, 0.5)
     assert 95 <= int(half[0, 0, 0]) <= 105  # 50% blend
+
+
+def test_segment_windows_legacy_single_file_uses_thermal_time() -> None:
+    from flir_research_interface.analysis.visible_overlay import segment_windows
+
+    assert segment_windows({"file": "visible.mp4"}, 2.0, 5.0) == [("visible.mp4", 2.0, 3.0, 2.0)]
+
+
+def test_segment_windows_split_across_a_stream_gap() -> None:
+    """Run 20260923_175956: the stream dropped ~85 s in and reconnected into visible_001.mp4."""
+    from flir_research_interface.analysis.visible_overlay import segment_windows
+
+    vis = {
+        "file": "visible.mp4",
+        "segments": [
+            {"file": "visible.mp4", "offset_s": 0.0, "duration_s": 77.0},
+            {"file": "visible_001.mp4", "offset_s": 95.0, "duration_s": 160.0},
+        ],
+    }
+    assert segment_windows(vis, 70.0, 100.0) == [
+        ("visible.mp4", 70.0, 7.0, 70.0),
+        ("visible_001.mp4", 0.0, 5.0, 95.0),
+    ]
+    assert segment_windows(vis, 80.0, 90.0) == []  # entirely inside the gap
+    # an unprobed segment runs until the next one starts (or forever for the last)
+    vis["segments"][1]["duration_s"] = None
+    assert segment_windows(vis, 300.0, 310.0) == [("visible_001.mp4", 205.0, 10.0, 300.0)]

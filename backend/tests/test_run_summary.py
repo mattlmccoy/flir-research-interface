@@ -114,3 +114,15 @@ def test_write_run_summary_puts_both_files_in_exports_and_skips_plot_without_roi
     }
     r2 = _exp(tmp_path / "b", rois=None)
     assert write_run_summary(r2) == {"readme": str(r2.path / "README.txt"), "roi_plot": None}
+
+
+def test_readme_reports_visible_stream_gaps(tmp_path: Path) -> None:
+    r = _exp(tmp_path)
+    r.visible = {
+        "file": "visible.mp4",
+        "segments": [{"file": "visible.mp4"}, {"file": "visible_001.mp4"}],
+        "gaps": [{"after_segment": 0, "start_s": 85.2, "duration_s": 9.8}],
+    }
+    txt = readme_text(r)
+    assert "2 segments" in txt and "visible_001.mp4" in txt
+    assert "stream gap at 85.2 s for 9.8 s" in txt

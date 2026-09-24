@@ -49,6 +49,31 @@ def _warp(frame_rgb: np.ndarray, coeffs: tuple[float, ...], out_w: int, out_h: i
     return np.asarray(warped, dtype=np.uint8)
 
 
+def segment_windows(
+    vis: dict[str, Any], t0: float, t1: float
+) -> list[tuple[str, float, float, float]]:
+    """Which visible files cover thermal time [t0, t1]: ``(file, local_start, duration, t_start)``.
+
+    A recording made before segmenting (no ``segments`` in visible.json) is one file whose time
+    equals thermal time. Otherwise each segment starts ``offset_s`` after the first; a segment
+    with no probed duration runs until the next one starts.
+    """
+    segs = vis.get("segments")
+    if not segs:
+        return [(vis.get("file") or "visible.mp4", t0, t1 - t0, t0)]
+    out: list[tuple[str, float, float, float]] = []
+    for i, seg in enumerate(segs):
+        o = float(seg.get("offset_s") or 0.0)
+        d = seg.get("duration_s")
+        end = o + float(d) if d else (
+            float(segs[i + 1].get("offset_s") or 0.0) if i + 1 < len(segs) else float("inf")
+        )
+        a, b = max(t0, o), min(t1, end)
+        if b > a:
+            out.append((str(seg["file"]), a - o, b - a, a))
+    return out
+
+
 class VisibleSource:
     """Pre-extracts the window's visible frames (one ffmpeg pass) and serves warped frames by time.
 
@@ -63,32 +88,38 @@ class VisibleSource:
         self._times: list[float] = []
         self._files: list[str] = []
         self._cache: dict[int, np.ndarray] = {}
-        vis = reader.metadata.get("visible") or {}
+        vis = getattr(reader, "visible", None) or reader.metadata.get("visible") or {}
         align = reader.metadata.get("visible_alignment") or {}
         h_matrix = align.get("H")
-        path = reader.path / (vis.get("file") or "visible.mp4")
-        if not path.is_file() or not h_matrix:
+        windows = [
+            w for w in segment_windows(vis, t0, t1) if (reader.path / w[0]).is_file()
+        ]
+        if not windows or not h_matrix:
             return  # no video or no alignment → overlay stays off
         vis_w = int(vis.get("width") or 1280)
         vis_h = int(vis.get("height") or 960)
         self._coeffs = ir_to_visible_coeffs(h_matrix, out_w, out_h, vis_w, vis_h)
         fps = min(_MAX_EXTRACT_FPS, max(1.0, float(vis.get("measured_fps") or 6.0)))
-        dur = max(1.0 / fps, t1 - t0)
-        cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-ss", f"{t0:.3f}", "-i", str(path),
-               "-t", f"{dur:.3f}", "-vf", f"fps={fps:g}", "-q:v", "3",
-               str(Path(self._dir) / "f_%05d.jpg")]
-        try:
-            subprocess.run(cmd, check=True, capture_output=True, timeout=600)
-        except (subprocess.SubprocessError, OSError) as exc:  # keep export working without visible
-            logger.warning("visible-overlay extract failed: %s", exc)
-            return
-        self._files = sorted(str(p) for p in Path(self._dir).glob("f_*.jpg"))
-        self._times = [t0 + i / fps for i in range(len(self._files))]
+        for k, (name, ss, dur, g0) in enumerate(windows):
+            cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-ss", f"{ss:.3f}",
+                   "-i", str(reader.path / name), "-t", f"{max(1.0 / fps, dur):.3f}",
+                   "-vf", f"fps={fps:g}", "-q:v", "3", str(Path(self._dir) / f"s{k:03d}_%05d.jpg")]
+            try:
+                subprocess.run(cmd, check=True, capture_output=True, timeout=600)
+            except (subprocess.SubprocessError, OSError) as exc:  # export works without visible
+                logger.warning("visible-overlay extract failed for %s: %s", name, exc)
+                continue
+            files = sorted(str(p) for p in Path(self._dir).glob(f"s{k:03d}_*.jpg"))
+            self._files += files
+            self._times += [g0 + i / fps for i in range(len(files))]
+        self._gap_tol = 1.0 / fps
 
     def warped_at(self, t: float) -> np.ndarray | None:
         if not self._files:
             return None
         i = min(range(len(self._times)), key=lambda k: abs(self._times[k] - t))
+        if abs(self._times[i] - t) > 2 * self._gap_tol:
+            return None  # inside a stream gap: show the thermal frame alone
         cached = self._cache.get(i)
         if cached is not None:
             return cached
@@ -124,4 +155,4 @@ def blend_visible(body: np.ndarray, warped: np.ndarray, opacity: float) -> np.nd
     return out.astype(np.uint8)
 
 
-__all__ = ["VisibleSource", "ir_to_visible_coeffs", "blend_visible"]
+__all__ = ["VisibleSource", "blend_visible", "ir_to_visible_coeffs", "segment_windows"]

@@ -1925,6 +1925,18 @@ def create_app(
             raise HTTPException(404, "this recording has no visible video")
         return FileResponse(path, media_type="video/mp4", headers={"Accept-Ranges": "bytes"})
 
+    @app.get("/api/experiments/{name}/visible/{index}")
+    def experiment_visible_segment(name: str, index: int) -> Response:
+        """One visible segment: 0 is visible.mp4, k > 0 the reconnect after the k-th stream loss."""
+        from starlette.responses import FileResponse
+
+        from flir_research_interface.visible.recorder import segment_file
+
+        path = _exp_dir(name) / segment_file(index) if index >= 0 else None
+        if path is None or not path.is_file():
+            raise HTTPException(404, f"this recording has no visible segment {index}")
+        return FileResponse(path, media_type="video/mp4", headers={"Accept-Ranges": "bytes"})
+
     @app.get("/api/experiments/{name}/preview.png")
     def experiment_preview(name: str, request: Request) -> Response:
         return _png_response(_exp_dir(name) / "preview.png", request)

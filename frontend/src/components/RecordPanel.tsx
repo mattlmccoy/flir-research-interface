@@ -194,6 +194,8 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: Roi
           <b>Visible video failed</b> — {vis.error ?? "ffmpeg stopped"}. The thermal recording continues; this run will have no visible.mp4{(vis.restarts ?? 0) > 0 ? ` (retried ${vis.restarts}×)` : ""}.
         </div>
       )}
+      {recording && vis?.state === "recording" && vis.reconnecting && <div className="warnbox"><b>Visible stream lost</b> — reconnecting (retries back off to every 10 s). The thermal recording continues; the gap is recorded in visible.json.</div>}
+      {recording && vis?.state === "recording" && !vis.reconnecting && (vis.gaps ?? 0) > 0 && <div className="hint">Visible stream dropped {vis.gaps}× and reconnected; now writing segment {vis.segments}.</div>}
       {recording && vis?.state === "recording" && (vis.restarts ?? 0) > 0 && <div className="warnbox">Visible stream needed {vis.restarts} retr{vis.restarts === 1 ? "y" : "ies"} to open; the first {vis.restarts} second{vis.restarts === 1 ? "" : "s"} may be missing from visible.mp4.</div>}
       {status.experiment_dir && <div className="muted" style={{ fontSize: 12, wordBreak: "break-all" }}>{status.experiment_dir}</div>}
       {status.error && <div className="errbox">{status.error}</div>}

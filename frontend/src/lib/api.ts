@@ -1,4 +1,5 @@
 import { apiUrl, loadOperatorBase, saveOperatorBase } from "./operator.ts";
+import type { VisibleGap, VisibleSegment } from "./visibleSegments.ts";
 
 /** Site mode: the UI is served from GitHub Pages and talks to a local operator (spec §6.3). */
 export const SITE_MODE = import.meta.env.VITE_SITE_MODE === "1";
@@ -36,7 +37,7 @@ async function j<T>(r: Promise<Response>): Promise<T> {
   }
   return (await res.json()) as T;
 }
-export interface VisibleStatus { state: string; restarts?: number; file?: string | null; started_host_ns?: number | null; url?: string; error?: string | null; reason?: string; }
+export interface VisibleStatus { state: string; restarts?: number; reconnecting?: boolean; segments?: number; gaps?: number; file?: string | null; started_host_ns?: number | null; url?: string; error?: string | null; reason?: string; }
 export interface ArmedStatus { trigger: Record<string, unknown>; machine: { state: string; frames_recorded: number; reason: string | null; sustain: number }; watched_value: number | null; watched_roi: number | null; ring_frames: number; pretrigger_frames: number; }
 export interface RecordingStatus { state: string; armed?: ArmedStatus; visible?: VisibleStatus; experiment_dir?: string | null; frames_received?: number; frames_written?: number; queue_depth?: number; queue_dropped?: number; frame_id_gaps?: number; repeated_frames?: number; every_nth?: number; frames_skipped_interval?: number; duration_s?: number; recorded_fps?: number | null; free_space_gb?: number | null; min_free_gb?: number; error?: string | null; experiments_root?: string; }
 export interface Previews {
@@ -101,7 +102,7 @@ export interface Experiment {
   root?: string;
 }
 
-export interface ExperimentInfo { name: string; path: string; n_frames: number; size_bytes?: number; width: number; height: number; duration_s: number; complete: boolean; ir_format: string | null; conversion: Record<string, unknown> | null; experiment: Record<string, unknown> | null; camera: Record<string, unknown> | null; software: Record<string, unknown> | null; started_utc: string | null; events?: Record<string, unknown>[]; manifest: Record<string, unknown> | null; visible?: { file?: string | null; measured_fps?: number | null; error?: string | null } | null; visible_alignment?: Record<string, unknown> | null; rois?: Record<string, unknown>[] | null; thermal_preview?: { path: string; bytes: number } | null; exports?: { name: string; bytes: number }[]; }
+export interface ExperimentInfo { name: string; path: string; n_frames: number; size_bytes?: number; width: number; height: number; duration_s: number; complete: boolean; ir_format: string | null; conversion: Record<string, unknown> | null; experiment: Record<string, unknown> | null; camera: Record<string, unknown> | null; software: Record<string, unknown> | null; started_utc: string | null; events?: Record<string, unknown>[]; manifest: Record<string, unknown> | null; visible?: { file?: string | null; measured_fps?: number | null; error?: string | null; segments?: VisibleSegment[] | null; gaps?: VisibleGap[] | null } | null; visible_alignment?: Record<string, unknown> | null; rois?: Record<string, unknown>[] | null; thermal_preview?: { path: string; bytes: number } | null; exports?: { name: string; bytes: number }[]; }
 export interface Timeline { t_s: number[]; frame_id: number[]; }
 export interface ExperimentEvent { t_s?: number; type?: string; name?: string; [k: string]: unknown; }
 export interface RoiSeries {
@@ -180,6 +181,7 @@ export const api = {
   experiments: () => j<Experiment[]>(req("/api/experiments")),
   previewUrl: (name: string) => u(`/api/experiments/${encodeURIComponent(name)}/preview.png`),
   visibleVideoUrl: (name: string) => u(`/api/experiments/${encodeURIComponent(name)}/visible.mp4`),
+  visibleSegmentUrl: (name: string, index: number) => u(`/api/experiments/${encodeURIComponent(name)}/visible/${index}`),
   visibleLiveUrl: () => u("/api/visible/live.mjpeg"),
   getAlignment: () => j<Record<string, unknown>>(req("/api/calibration/visible")),
   putAlignment: (doc: Record<string, unknown>) =>
