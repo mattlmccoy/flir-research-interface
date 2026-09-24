@@ -1215,8 +1215,8 @@ def create_app(
     def _roots() -> list[tuple[str, Path]]:
         """(library, root) pairs to resolve runs in: always local, plus the drive when mounted."""
         roots: list[tuple[str, Path]] = [("local", Path(app.state.experiments_root))]
-        drive = storage.load_storage_config(app.state.experiments_root)["drive"]
-        if drive and Path(drive["root"]).is_dir():  # only when the registered drive is connected
+        drive = storage.connected_drive(app.state.experiments_root)  # None when unplugged
+        if drive:
             roots.append(("drive", Path(drive["root"])))
         return roots
 
@@ -1265,7 +1265,7 @@ def create_app(
     def storage_volumes() -> list[dict[str, Any]]:
         """External drives that can be registered as the offload target (filtered, writable)."""
         drives = storage.selectable_drives(sys.platform)
-        cfg = storage.load_storage_config(app.state.experiments_root)["drive"]
+        cfg = storage.connected_drive(app.state.experiments_root)
         registered = cfg["mount"] if cfg else None
         for d in drives:
             d["is_registered"] = d["mount"] == registered
@@ -1280,12 +1280,12 @@ def create_app(
             "total_bytes": int(shutil.disk_usage(probe).total) if probe.exists() else 0,
         }
         drive = storage.load_storage_config(root)["drive"]
-        connected = bool(drive and Path(drive["root"]).is_dir())
+        live = storage.connected_drive(root)
         drive_info = None
         if drive:
-            drive_info = {**drive, "connected": connected}
-            if connected:
-                du = shutil.disk_usage(drive["mount"])
+            drive_info = {**drive, **(live or {}), "connected": live is not None}
+            if live:
+                du = shutil.disk_usage(live["mount"])
                 drive_info["free_bytes"], drive_info["total_bytes"] = int(du.free), int(du.total)
         return {"local": local, "drive": drive_info}
 
@@ -1326,9 +1326,10 @@ def create_app(
         existing = app.state.move_jobs.get(name)
         if existing is not None and existing["state"] == "running":
             return existing
-        cfg = storage.load_storage_config(app.state.experiments_root)["drive"]
-        if not cfg or not Path(cfg["root"]).is_dir():
+        cfg = storage.connected_drive(app.state.experiments_root)
+        if not cfg:
             raise HTTPException(409, "no external drive is connected; register one first")
+        await run_in_threadpool(storage.adopt_marker, app.state.experiments_root)
         dst_root = Path(cfg["root"]) if req.to == "drive" else Path(app.state.experiments_root)
         if contained(dst_root, src):
             raise HTTPException(409, f"{name} is already on the {req.to} storage")

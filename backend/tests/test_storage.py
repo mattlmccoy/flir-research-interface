@@ -84,6 +84,60 @@ def test_register_drive_creates_folder_and_persists(tmp_path: Path) -> None:
         register_drive(local, "/nonexistent/xyz-should-not-exist")
 
 
+def test_register_drive_writes_the_shared_marker_and_remembers_the_drive_id(
+    tmp_path: Path,
+) -> None:
+    import json
+
+    from flir_research_interface.storage import load_storage_config, register_drive
+
+    local = tmp_path / "local"
+    local.mkdir()
+    drive = tmp_path / "FieldData"
+    drive.mkdir()
+    register_drive(local, str(drive))
+    marker = json.loads((drive / ".lab-storage.json").read_text())
+    assert marker["tools"]["flir"] == {"folder": "FLIR-recordings"}
+    assert load_storage_config(local)["drive"]["drive_id"] == marker["drive_id"]
+
+
+def test_connected_drive_follows_the_marker_when_the_mount_path_changes(
+    tmp_path: Path, monkeypatch  # type: ignore[no-untyped-def]
+) -> None:
+    # Renamed volume / another OS: the saved mount path is gone, but the drive is found by its id.
+    from flir_research_interface import storage
+
+    local = tmp_path / "local"
+    local.mkdir()
+    old = tmp_path / "FieldData"
+    old.mkdir()
+    storage.register_drive(local, str(old))
+    new = tmp_path / "FieldData 1"
+    old.rename(new)
+    monkeypatch.setattr(storage, "_external_mounts", lambda: [str(new)])
+    d = storage.connected_drive(local)
+    assert d is not None and d["root"] == str(new / "FLIR-recordings")
+    monkeypatch.setattr(storage, "_external_mounts", lambda: [])
+    assert storage.connected_drive(local) is None  # unplugged
+
+
+def test_legacy_config_is_adopted_into_the_marker(tmp_path: Path) -> None:
+    # Configs written before lab-storage have only {mount, root}; the first write operation adopts
+    # the existing FLIR-recordings folder untouched and records the drive id.
+    from flir_research_interface import storage
+
+    local = tmp_path / "local"
+    local.mkdir()
+    drive = tmp_path / "FieldData"
+    (drive / "FLIR-recordings" / "run1").mkdir(parents=True)
+    storage.save_storage_config(
+        local, {"drive": {"mount": str(drive), "root": str(drive / "FLIR-recordings")}}
+    )
+    storage.adopt_marker(local)
+    assert storage.load_storage_config(local)["drive"]["drive_id"]
+    assert (drive / "FLIR-recordings" / "run1").is_dir()
+
+
 def test_forget_drive_clears_config_without_touching_files(tmp_path: Path) -> None:
     from flir_research_interface.storage import (
         DRIVE_SUBDIR,
@@ -211,24 +265,59 @@ def test_move_carries_the_labels_sidecar(tmp_path: Path) -> None:
     assert read_labels(dest) == {"starred": True, "tags": ["doped"]}
 
 
-def test_move_overwrites_a_stale_destination_folder(tmp_path: Path) -> None:
-    # exFAT/regression: a prior failed move can leave the run already on the target. os.replace onto
-    # a non-empty dir raised "Directory not empty" (Errno 66); the move must overwrite it instead.
+def test_move_never_overwrites_a_differing_destination(tmp_path: Path) -> None:
+    # lab-storage: a destination holding DIFFERENT content for the run is a conflict, never
+    # silently replaced (the old FLIR mover deleted it). Both copies are kept, nothing is lost.
+    from flir_research_interface.storage import MoveConflictError, move_experiment
+
+    src_root = tmp_path / "local"
+    dst_root = tmp_path / "drive"
+    dst_root.mkdir(parents=True)
+    other = dst_root / "run1"
+    (other / "thermal.zarr").mkdir(parents=True)
+    (other / "old.txt").write_text("different")
+    run = _make_run(src_root)
+    with pytest.raises(MoveConflictError, match="different"):
+        move_experiment(run, dst_root)
+    assert (run / "metadata.json").exists()  # source intact
+    assert (other / "old.txt").read_text() == "different"  # destination intact
+
+
+def test_move_finishes_when_destination_already_holds_an_identical_copy(tmp_path: Path) -> None:
+    # An earlier interrupted move may have left a complete, identical copy: finish by removing the
+    # source (after hashing both), not by failing or re-copying.
     from flir_research_interface.storage import move_experiment
 
     src_root = tmp_path / "local"
     dst_root = tmp_path / "drive"
     dst_root.mkdir(parents=True)
-    stale = dst_root / "run1"  # leftover copy from an earlier failed move
-    (stale / "thermal.zarr").mkdir(parents=True)
-    (stale / "old.txt").write_text("stale")
     run = _make_run(src_root)
-    dest = move_experiment(run, dst_root)
-    assert dest == dst_root / "run1"
-    assert not run.exists()  # source removed
-    assert not (dst_root / "run1" / "old.txt").exists()  # stale content replaced
-    assert (dst_root / "run1" / "metadata.json").read_text() == '{"a":1}'
-    assert not (dst_root / "run1.partial").exists()
+    shutil.copytree(run, dst_root / "run1")
+    assert move_experiment(run, dst_root) == dst_root / "run1"
+    assert not run.exists()
+
+
+def test_space_check_counts_allocation_units(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    # exFAT SSDs use 1 MiB clusters: 50 tiny files need ~50 MiB, not ~50 bytes. The old check
+    # (1.05 x bytes) would have started this copy on a drive that cannot hold it.
+    from flir_research_interface import storage
+
+    src_root = tmp_path / "local"
+    dst_root = tmp_path / "drive"
+    dst_root.mkdir(parents=True)
+    run = _make_run(src_root)
+    for i in range(50):
+        (run / "thermal.zarr" / f"{i}.1.0").write_bytes(b"y")
+
+    class _DU:
+        total = 10**12
+        free = 10 * 1024 * 1024  # 10 MiB: plenty by bytes, far too little by clusters
+
+    monkeypatch.setattr(storage.shutil, "disk_usage", lambda p: _DU())
+    monkeypatch.setattr(storage, "_alloc_unit", lambda p: 1024 * 1024)
+    with pytest.raises(ValueError, match="allocation unit"):
+        storage.move_experiment(run, dst_root)
+    assert run.exists()
 
 
 def test_move_deletes_source_and_its_appledouble_sidecar(tmp_path: Path) -> None:
@@ -276,8 +365,18 @@ def test_move_leaves_source_intact_and_cleans_partial_on_verify_failure(
     dst_root = tmp_path / "drive"
     dst_root.mkdir(parents=True)
     run = _make_run(src_root)
-    monkeypatch.setattr(storage, "verify_copy", lambda a, b, **k: "boom: pretend corruption")
-    with pytest.raises(RuntimeError):
+    import lab_storage.transfer as lt
+
+    real = lt.copy_tree
+
+    def corrupt(*a, **k):  # type: ignore[no-untyped-def]
+        res = real(*a, **k)
+        res.errors.append("boom: pretend corruption")  # the device re-read did not match
+        return res
+
+    monkeypatch.setattr(lt, "copy_tree", corrupt)
+    with pytest.raises(RuntimeError, match="verif"):
         storage.move_experiment(run, dst_root)
     assert run.exists()  # source never deleted
-    assert not (dst_root / "run1").exists() and not (dst_root / "run1.partial").exists()
+    assert not (dst_root / "run1").exists()
+    assert [p.name for p in dst_root.iterdir()] == []  # no staging left behind

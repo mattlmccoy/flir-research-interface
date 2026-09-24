@@ -1,8 +1,11 @@
-"""External-drive offload storage.
+"""External-drive offload storage — FLIR's adapter over the shared ``lab-storage`` library.
 
 Detects user-selectable external drives across macOS/Windows/Linux, remembers one registered
-drive, and moves a run to it copy → verify → delete-source so science data is never lost. Recording
-always stays on local disk; this module only offloads finished runs. See the design spec at
+drive, and moves a finished run to it and back. The move itself (copy with a streamed SHA-256 →
+device flush → cache-bypassing re-read → atomic rename → source deleted last), drive detection,
+the shared drive marker and exFAT quirks live in ``lab_storage``
+(https://github.com/mattlmccoy/lab-storage); this module keeps FLIR's config file and the API the
+routes use. Recording always stays on local disk. Design history:
 ``docs/superpowers/specs/2026-09-03-external-drive-storage-design.md``.
 """
 
@@ -11,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import logging
 import os
 import shutil
 import tempfile
@@ -19,14 +23,27 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import psutil
+import lab_storage
+from lab_storage import drives as _drives
+from lab_storage import fsutil as _fsutil
+
+logger = logging.getLogger(__name__)
 
 #: Folder created on a registered drive to hold offloaded runs.
 DRIVE_SUBDIR = "FLIR-recordings"
 #: Sidecar in the local root that remembers the registered drive (git-ignored).
 CONFIG_NAME = ".storage.json"
-#: Small integrity-critical files that are hash-verified after a copy (the rest are size-verified).
+#: This tool's name in the shared drive marker (``<mount>/.lab-storage.json``).
+TOOL = "flir"
+#: Small integrity-critical files that ``verify_copy`` always hash-compares.
 CRITICAL_FILES = frozenset({"metadata.json", "manifest.json"})
+#: Files FLIR rewrites inside a run after recording (stars/tags, exports); a conflict that differs
+#: only in these is reported as sidecar-only.
+MUTABLE_PATHS = ("labels.json", "exports/*")
+
+
+class MoveConflictError(RuntimeError):
+    """The destination already holds this run with different content; both copies were kept."""
 
 
 @dataclass(frozen=True)
@@ -39,16 +56,8 @@ class _Part:
     opts: str
 
 
-def _live_parts() -> list[_Part]:
-    return [
-        _Part(p.device, p.mountpoint, p.fstype, p.opts)
-        for p in psutil.disk_partitions(all=False)
-    ]
-
-
-def _default_usage(mount: str) -> tuple[int, int]:
-    du = shutil.disk_usage(mount)
-    return du.total, du.free
+def _alloc_unit(path: str | Path) -> int:
+    return int(_drives.alloc_unit(str(path)))
 
 
 def selectable_drives(
@@ -56,50 +65,35 @@ def selectable_drives(
     parts: list[_Part] | None = None,
     usage: Callable[[str], tuple[int, int]] | None = None,
 ) -> list[dict[str, Any]]:
-    """User-selectable external drives for offload, filtered from every mounted volume.
+    """User-selectable external drives for offload (writable, not system/hidden volumes).
 
-    ``platform`` is ``sys.platform`` ("darwin"/"linux"/"win32"). ``parts``/``usage`` default to the
-    live system; tests pass captured samples. Read-only mounts (system volumes, mounted DMGs,
-    read-only NTFS) are excluded — an offload target must be writable.
+    ``platform`` is ``sys.platform``. ``parts``/``usage`` default to the live system; tests pass
+    captured samples (``usage`` returns ``(total, free)``).
     """
-    parts = _live_parts() if parts is None else parts
-    usage = usage or _default_usage
-    out: list[dict[str, Any]] = []
-    for p in parts:
-        if not _is_external(platform, p):
-            continue
-        try:
-            total, free = usage(p.mountpoint)
-        except OSError:
-            continue  # a volume that vanished between listing and stat
-        out.append(
-            {
-                "label": Path(p.mountpoint).name or p.device,
-                "mount": p.mountpoint,
-                "fstype": p.fstype,
-                "total_bytes": total,
-                "free_bytes": free,
-            }
-        )
-    return out
+    kw: dict[str, Any] = {}
+    if parts is not None:
+        kw["parts"] = [_drives.Partition(p.device, p.mountpoint, p.fstype, p.opts) for p in parts]
+    if usage is not None:
+        def _u(m: str) -> tuple[int, int, int]:
+            total, free = usage(m)
+            return total, total - free, free
+
+        kw["usage"] = _u
+        kw["alloc"] = lambda m: 4096  # injected samples have no real volume to statvfs
+    return [
+        {
+            "label": d.label,
+            "mount": d.mount,
+            "fstype": d.fs_type,
+            "total_bytes": d.total_bytes,
+            "free_bytes": d.free_bytes,
+        }
+        for d in lab_storage.list_external_drives(platform, **kw)
+    ]
 
 
-def _is_external(platform: str, p: _Part) -> bool:
-    opts = p.opts.split(",")
-    if "ro" in opts:
-        return False  # read-only mounts are never offload targets
-    if platform == "darwin":
-        if "dontbrowse" in opts:
-            return False  # hidden system volumes (Recovery) and DMGs; Recovery is mounted rw
-        return p.mountpoint.startswith("/Volumes/") and Path(p.mountpoint).name != "Macintosh HD"
-    if platform == "linux":
-        prefixes = ("/media/", "/run/media/", "/mnt/")
-        return any(p.mountpoint.startswith(pre) for pre in prefixes)
-    if platform.startswith("win"):
-        # NOTE: verify on a real Windows box before shipping (see the spec's verification plan).
-        drive = p.mountpoint.rstrip("\\/").upper()
-        return ("removable" in opts) or (drive not in ("", "C:") and p.fstype != "")
-    return False
+def _external_mounts() -> list[str]:
+    return [d.mount for d in lab_storage.list_external_drives()]
 
 
 # -- registered-drive config -------------------------------------------------------------------
@@ -126,16 +120,26 @@ def save_storage_config(local_root: Path | str, cfg: dict[str, Any]) -> None:
             f.write(json.dumps(cfg, indent=2))
         os.replace(tmp, path)
     except BaseException:
-        try:
+        with contextlib.suppress(FileNotFoundError):
             os.unlink(tmp)
-        except FileNotFoundError:
-            pass
         raise
+
+
+def _ensure_marker(mount: Path) -> str | None:
+    """Add FLIR to the drive's shared marker (created if absent, existing folders untouched).
+    Best effort: a read-only or corrupt marker leaves the drive registered by path only."""
+    try:
+        m = lab_storage.ensure_marker(mount, TOOL, DRIVE_SUBDIR, label=mount.name)
+        return str(m["drive_id"])
+    except (lab_storage.MarkerError, OSError) as exc:
+        logger.warning("drive marker not written on %s: %s", mount, exc)
+        return None
 
 
 def register_drive(local_root: Path | str, mount: str) -> dict[str, Any]:
     """Register ``mount`` as the offload drive: create ``<mount>/FLIR-recordings/``, write-probe it,
-    and persist. Raises ``ValueError`` if the drive is missing or not writable."""
+    record FLIR in the drive marker, and persist. Raises ``ValueError`` if the drive is missing or
+    not writable."""
     mount_path = Path(mount)
     if not mount_path.is_dir():
         raise ValueError(f"{mount} is not a mounted folder")
@@ -147,19 +151,67 @@ def register_drive(local_root: Path | str, mount: str) -> dict[str, Any]:
         probe.unlink()
     except OSError as exc:
         raise ValueError(f"{mount} is not writable: {exc}") from exc
-    cfg = {"drive": {"mount": str(mount_path), "root": str(root)}}
+    drive: dict[str, Any] = {"mount": str(mount_path), "root": str(root)}
+    drive_id = _ensure_marker(mount_path)
+    if drive_id:
+        drive["drive_id"] = drive_id
+    cfg = {"drive": drive}
     save_storage_config(local_root, cfg)
     return cfg
 
 
+def adopt_marker(local_root: Path | str) -> None:
+    """Give a pre-lab-storage registration (``{mount, root}`` only) a drive id, if its drive is
+    connected. Call from write operations only (a scan never writes to the drive)."""
+    cfg = load_storage_config(local_root)
+    drive = cfg["drive"]
+    if not drive or drive.get("drive_id") or not Path(drive["root"]).is_dir():
+        return
+    drive_id = _ensure_marker(Path(drive["mount"]))
+    if drive_id:
+        save_storage_config(local_root, {"drive": {**drive, "drive_id": drive_id}})
+
+
+def connected_drive(local_root: Path | str) -> dict[str, Any] | None:
+    """The registered drive's ``{mount, root}`` if it is connected, else ``None``. The saved mount
+    path is tried first; if it is gone (volume renamed, other OS), external drives are searched for
+    the marker with the saved drive id."""
+    drive = load_storage_config(local_root)["drive"]
+    if not drive:
+        return None
+    drive_id = drive.get("drive_id")
+    if Path(drive["root"]).is_dir():
+        marker = _read_marker(drive["mount"])
+        if not drive_id or marker is None or marker.get("drive_id") == drive_id:
+            return {"mount": drive["mount"], "root": drive["root"]}
+    if not drive_id:
+        return None
+    for mount in _external_mounts():
+        marker = _read_marker(mount)
+        if marker and marker.get("drive_id") == drive_id:
+            folder = marker.get("tools", {}).get(TOOL, {}).get("folder", DRIVE_SUBDIR)
+            root = Path(mount) / folder
+            if root.is_dir():
+                return {"mount": mount, "root": str(root)}
+    return None
+
+
+def _read_marker(mount: str) -> dict[str, Any] | None:
+    try:
+        m = lab_storage.read_marker(mount)
+        return dict(m) if m is not None else None
+    except (lab_storage.MarkerError, OSError):
+        return None
+
+
 def forget_drive(local_root: Path | str) -> dict[str, Any]:
-    """Forget the registered drive (leaves its files in place)."""
+    """Forget the registered drive (leaves its files and marker in place)."""
     cfg = {"drive": None}
     save_storage_config(local_root, cfg)
     return cfg
 
 
-# -- move: copy → verify → delete source -------------------------------------------------------
+# -- verification helper (kept for callers/tests; moves verify inside lab-storage) ---------------
 
 
 def _sha256(path: Path) -> str:
@@ -170,26 +222,13 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-#: OS bookkeeping files that are not experiment data — never copied, verified, or counted, so they
-#: cannot fail an integrity check or propagate between machines. Note ``._`` is AppleDouble; zarr's
-#: own ``.zarray`` / ``.zattrs`` / ``.zgroup`` do NOT start with ``._`` and are kept.
-_JUNK_NAMES = frozenset(
-    {".DS_Store", ".Spotlight-V100", ".Trashes", ".fseventsd", "System Volume Information"}
-)
-
-
 def _is_os_junk(name: str) -> bool:
-    return name.startswith("._") or name in _JUNK_NAMES
+    return bool(_fsutil.is_junk(name))
 
 
 def verify_copy(src: Path | str, dst: Path | str, *, full: bool = False) -> str | None:
     """Confirm ``dst`` is a faithful copy of ``src``. Returns ``None`` when good, else a reason.
-
-    Every file under ``src`` must exist in ``dst`` with the same size. The integrity-critical small
-    files (metadata/manifest) are always SHA-256 compared to catch same-size corruption. With
-    ``full=True`` every file is SHA-256 compared — slower, but catches silent bit-rot in the bulk
-    zarr chunks too (useful when shuttling a run between machines).
-    """
+    Sizes always; SHA-256 for metadata/manifest, or for every file with ``full=True``."""
     src, dst = Path(src), Path(dst)
     for sp in src.rglob("*"):
         if not sp.is_file() or _is_os_junk(sp.name):
@@ -205,34 +244,7 @@ def verify_copy(src: Path | str, dst: Path | str, *, full: bool = False) -> str 
     return None
 
 
-def _tree_bytes(root: Path) -> int:
-    return sum(
-        p.stat().st_size for p in root.rglob("*") if p.is_file() and not _is_os_junk(p.name)
-    )
-
-
-def _remove_tree(path: Path) -> None:
-    """Delete a run folder robustly on exFAT / removable drives.
-
-    ``shutil.rmtree`` races on exFAT: macOS AppleDouble ``._`` sidecars and lazy metadata make it
-    try to unlink an entry that has already vanished, raising ``FileNotFoundError`` (the Errno 2
-    seen when restoring a run to local left the drive copy behind). ENOENT means the entry is
-    already gone — success — so we ignore it and retry until the tree is actually removed. We also
-    delete the sibling ``._<name>`` AppleDouble file macOS leaves next to the folder on exFAT.
-    """
-
-    def _onexc(_func: Any, _p: Any, exc: BaseException) -> None:
-        if not isinstance(exc, FileNotFoundError):
-            raise exc
-
-    for _ in range(3):
-        if not path.exists():
-            break
-        shutil.rmtree(path, onexc=_onexc)
-    with contextlib.suppress(FileNotFoundError):
-        (path.parent / f"._{path.name}").unlink()  # exFAT AppleDouble sidecar
-    if path.exists():
-        raise OSError(f"could not fully remove {path}")
+# -- move ----------------------------------------------------------------------------------------
 
 
 def move_experiment(
@@ -240,67 +252,61 @@ def move_experiment(
     dst_root: Path | str,
     *,
     on_progress: Callable[[int, int], None] | None = None,
-    full_verify: bool = False,
+    full_verify: bool = False,  # noqa: ARG001 - lab-storage always re-reads every file
 ) -> Path:
-    """Move one run folder to ``dst_root`` safely: copy → verify → atomic rename → delete source.
+    """Move one run folder into ``dst_root`` via ``lab_storage.move_dataset``.
 
-    The source is deleted **only** after the copy is verified and atomically renamed into place, so
-    a failure (or a drive disconnecting mid-copy) never leaves the run missing from both places.
-    Raises ``ValueError`` when the target lacks space and ``RuntimeError`` when verification fails.
-    Returns the final destination path. ``on_progress(bytes_done, bytes_total)`` reports progress.
+    Every file is hashed while copying and re-read from the device before the source is deleted
+    (so ``full_verify`` is always on). Raises ``ValueError`` when the move was refused before
+    starting (e.g. not enough space, counted in allocation units), ``MoveConflictError`` when a
+    different copy already sits at the destination (both kept), and ``RuntimeError`` for other
+    failures; the source is intact in every error case. Returns the destination path.
     """
-    src_run = Path(src_run)
-    dst_root = Path(dst_root)
+    src_run, dst_root = Path(src_run), Path(dst_root)
     dst_root.mkdir(parents=True, exist_ok=True)
     name = src_run.name
-    total = _tree_bytes(src_run)
-    if shutil.disk_usage(dst_root).free < int(total * 1.05):
-        raise ValueError(f"not enough space on the target for {name} ({total / 1e9:.1f} GB)")
-
-    partial = dst_root / f"{name}.partial"
-    final = dst_root / name
-    with contextlib.suppress(OSError):
-        _remove_tree(partial)  # clear any leftover half-copy from a previous interrupted move
+    dst = dst_root / name
     try:
-        done = 0
-        for sp in sorted(src_run.rglob("*")):
-            if _is_os_junk(sp.name):
-                continue  # don't copy OS bookkeeping files (AppleDouble, .DS_Store, …)
-            rel = sp.relative_to(src_run)
-            dp = partial / rel
-            if sp.is_dir():
-                dp.mkdir(parents=True, exist_ok=True)
-                continue
-            dp.parent.mkdir(parents=True, exist_ok=True)
-            # copy (data + mode), not copy2 (adds xattrs): writing xattrs to exFAT makes macOS spawn
-            # AppleDouble "._" sidecars that clutter the drive. The run's timestamps live in its
-            # manifest, not file mtimes, so dropping mtime is harmless.
-            shutil.copy(sp, dp)
-            done += sp.stat().st_size
-            if on_progress is not None:
-                on_progress(done, total)
-        reason = verify_copy(src_run, partial, full=full_verify)
-        if reason is not None:
-            raise RuntimeError(f"copy verification failed: {reason}")
-        # A prior failed move can leave the run already at the target; os.replace cannot rename onto
-        # a non-empty directory (Errno 66), so clear a stale destination first, then rename in.
-        if final.exists():
-            _remove_tree(final)
-        os.replace(partial, final)  # atomic on the target filesystem
-    except BaseException:
-        with contextlib.suppress(OSError):
-            _remove_tree(partial)  # never leave a half-copy behind; don't mask the original error
-        raise
-    _remove_tree(src_run)  # the only deletion of the source, after verify + rename
+        unit = _alloc_unit(dst_root)
+    except OSError as exc:
+        raise ValueError(f"cannot read the destination's allocation unit: {exc}") from exc
+    try:
+        res = lab_storage.move_dataset(
+            src_run, dst, key=name, on_progress=on_progress, mutable_paths=MUTABLE_PATHS,
+            alloc_unit=unit, free_bytes=shutil.disk_usage(dst_root).free,
+        )
+    except lab_storage.Refused as exc:
+        raise ValueError(str(exc)) from exc
+    except lab_storage.ConflictError as exc:
+        raise MoveConflictError(f"{exc}; both copies were kept") from exc
+    except lab_storage.VerifyError as exc:
+        raise RuntimeError(f"copy verification failed: {exc}") from exc
+    except lab_storage.SourceNotRemoved as exc:
+        try:  # copy verified and in place; retry removing the original once
+            res = lab_storage.finish_source_removal(exc.remaining, dst, key=name)
+        except Exception as again:  # noqa: BLE001 - report both; the copy is safe
+            raise RuntimeError(
+                f"{name} was copied and verified, but the original could not be removed "
+                f"({again}); it is at {exc.remaining}"
+            ) from again
+    except (lab_storage.SourceChanged, lab_storage.NotDurable) as exc:
+        raise RuntimeError(str(exc)) from exc
+    # lab-storage renames the source before deleting it, so an exFAT "._<name>" AppleDouble sidecar
+    # next to the original folder can be left behind; it is OS junk, never data.
+    with contextlib.suppress(FileNotFoundError):
+        (src_run.parent / f"._{name}").unlink()
     if on_progress is not None:
-        on_progress(total, total)
-    return final
+        on_progress(res.size_bytes, res.size_bytes)
+    return dst
 
 
 __all__ = [
     "CONFIG_NAME",
     "CRITICAL_FILES",
     "DRIVE_SUBDIR",
+    "MoveConflictError",
+    "adopt_marker",
+    "connected_drive",
     "forget_drive",
     "load_storage_config",
     "move_experiment",
