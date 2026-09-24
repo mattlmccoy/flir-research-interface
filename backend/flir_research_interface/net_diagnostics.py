@@ -28,9 +28,11 @@ def subnet_warnings(
     ``host_interfaces`` entries carry ``name``/``ip``/``netmask``; ``gvcp_devices`` entries carry
     ``camera_ip`` as ``"<ip>/<mask>"``. Malformed rows are skipped; an empty list means no conflict.
     """
-    nets = [(h.get("name"), _network(h.get("ip", ""), h.get("netmask", "")))
-            for h in host_interfaces]
-    nets = [(name, n) for name, n in nets if n is not None]
+    nets: list[tuple[Any, ipaddress.IPv4Network]] = []
+    for h in host_interfaces:
+        n = _network(h.get("ip", ""), h.get("netmask", ""))
+        if n is not None:
+            nets.append((h.get("name"), n))
 
     out: list[dict[str, Any]] = []
     seen: set[str] = set()

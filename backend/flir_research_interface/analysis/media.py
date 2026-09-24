@@ -13,16 +13,15 @@ import re
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from flir_research_interface.analysis.thermal_video import (
-    FFMPEG_CANDIDATES,
     _encode_tmp,
     _finalize_encode,
     encode_command,
@@ -35,6 +34,7 @@ from flir_research_interface.analysis.thermal_video import (
 from flir_research_interface.playback.reader import ExperimentReader
 from flir_research_interface.radiometry.overrange import over_range_mask
 from flir_research_interface.radiometry.temperature_linear import IRFormat, counts_to_celsius
+from flir_research_interface.visible.recorder import FFMPEG_CANDIDATES
 from flir_research_interface.visible.rtsp import find_ffprobe
 
 logger = logging.getLogger(__name__)
@@ -285,7 +285,12 @@ def _nice_ticks(lo: float, hi: float, target: int = 4) -> list[float]:
 
 # Each stat gets a distinct line style + marker so several stats of one ROI (same color) read
 # apart: mean = solid + circle, max = dashed + up-triangle, min = dotted + down-triangle.
-_STAT_STYLE = {
+class _StatStyle(TypedDict):
+    dash: tuple[int, int] | None
+    marker: str
+
+
+_STAT_STYLE: dict[str, _StatStyle] = {
     "mean": {"dash": None, "marker": "o"},
     "max": {"dash": (9, 5), "marker": "^"},
     "min": {"dash": (2, 4), "marker": "v"},
@@ -302,7 +307,7 @@ def _dashed(d: ImageDraw.ImageDraw, pts: list[tuple[float, float]], col: tuple[i
         d.line(pts, fill=col, width=width)
         return
     on, off = dash
-    draw_on, rem = True, on
+    draw_on, rem = True, float(on)
     for (x1, y1), (x2, y2) in zip(pts, pts[1:], strict=False):
         seg = math.hypot(x2 - x1, y2 - y1)
         done = 0.0
@@ -335,8 +340,8 @@ def _draw_panel(d: ImageDraw.ImageDraw, traces: list[dict[str, Any]], cur_t: flo
                 y0: int, w: int, h: int, font: ImageFont.FreeTypeFont) -> None:
     """A full-width, multi-line plot over time, drawn up to ``cur_t`` (seconds), with °C y-ticks,
     a wrapping legend, and a distinct line style + marker per stat."""
-    finite = [x for tr in traces for x in tr["v"] if x == x]
-    all_t = [t for tr in traces for t in tr["t"]]
+    finite: list[float] = [x for tr in traces for x in tr["v"] if x == x]
+    all_t: list[float] = [t for tr in traces for t in tr["t"]]
     if not finite or not all_t:
         return
     lo, hi = min(finite), max(finite)
@@ -358,7 +363,9 @@ def _draw_panel(d: ImageDraw.ImageDraw, traces: list[dict[str, Any]], cur_t: flo
         c = cur_val(tr)
         txt = f"{tr['label']}  {c:.1f}°" if c is not None else str(tr["label"])
         entries.append((tr, txt, 20 + int(d.textlength(txt, font=font)) + 14))
-    rows, row, rw = [], [], 0
+    rows: list[list[tuple[dict[str, Any], str, int]]] = []
+    row: list[tuple[dict[str, Any], str, int]] = []
+    rw = 0
     for e in entries:
         if row and rw + e[2] > w - 4:
             rows.append(row)
@@ -481,7 +488,7 @@ def render_clip(
         stem = _slug(opts.title or f"clip_{opts.start}-{stop}")
         total = len(indices)
 
-        def _frames() -> np.ndarray:
+        def _frames() -> Iterator[tuple[int, np.ndarray]]:
             for k, idx in enumerate(indices):
                 rgb = (first if k == 0 else
                        _compose(reader, idx, vmin, vmax, scale, rois, opts, traces,

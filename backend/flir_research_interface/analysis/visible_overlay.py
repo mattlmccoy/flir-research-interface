@@ -45,7 +45,8 @@ def ir_to_visible_coeffs(
 
 def _warp(frame_rgb: np.ndarray, coeffs: tuple[float, ...], out_w: int, out_h: int) -> np.ndarray:
     img = Image.fromarray(frame_rgb)
-    warped = img.transform((out_w, out_h), Image.PERSPECTIVE, coeffs, resample=Image.BILINEAR)
+    warped = img.transform((out_w, out_h), Image.Transform.PERSPECTIVE, coeffs,
+                            resample=Image.Resampling.BILINEAR)
     return np.asarray(warped, dtype=np.uint8)
 
 

@@ -871,7 +871,9 @@ def create_app(
         recording = rec is not None and rec.state == RecorderState.RECORDING
         if recording and rec is not None:
             stored = rec.note_event("control", sample)  # stamps frame_id + t_utc
-            _append_control_csv(rec.experiment_dir, stored)
+            exp_dir = rec.experiment_dir  # always set while RECORDING
+            if exp_dir is not None:
+                _append_control_csv(exp_dir, stored)
         return {"recording": recording, "stored": sample}
 
     @app.get("/api/control/status")
@@ -1334,7 +1336,7 @@ def create_app(
             and rec.experiment_dir.resolve() == src.resolve()
         ):
             raise HTTPException(409, "this run is being recorded right now")
-        existing = app.state.move_jobs.get(name)
+        existing: dict[str, Any] | None = app.state.move_jobs.get(name)
         if existing is not None and existing["state"] == "running":
             return existing
         cfg = storage.connected_drive(app.state.experiments_root)
@@ -1519,7 +1521,7 @@ def create_app(
         from flir_research_interface.analysis.thermal_video import render_thermal_video
 
         _exp_dir(name)  # 404 early if the run is gone
-        existing = app.state.derived_jobs.get(name)
+        existing: dict[str, Any] | None = app.state.derived_jobs.get(name)
         if existing is not None and existing["state"] == "running":
             return existing
         job: dict[str, Any] = {"state": "running", "step": "starting", "done": 0, "total": 0,
@@ -1578,7 +1580,7 @@ def create_app(
         _exp_dir(name)
         if req.rois is not None:
             set_experiment_rois(_exp_dir(name), _rois_with_labels(req.rois))
-        existing = app.state.media_jobs.get(name)
+        existing: dict[str, Any] | None = app.state.media_jobs.get(name)
         if existing is not None and existing["state"] == "running":
             return existing
         job: dict[str, Any] = {"state": "running", "step": "starting", "done": 0, "total": 0,
@@ -1640,7 +1642,7 @@ def create_app(
         n = reader.n_frames
         if _range_ready(reader):
             return {"state": "done", "done": n, "total": n, "error": None}
-        existing = app.state.range_jobs.get(name)
+        existing: dict[str, Any] | None = app.state.range_jobs.get(name)
         if existing is not None and existing["state"] == "running":
             return existing
         job: dict[str, Any] = {"state": "running", "done": 0, "total": n, "error": None}
@@ -1670,7 +1672,7 @@ def create_app(
     def range_status(name: str) -> dict[str, Any]:
         reader = _open(name)
         n = reader.n_frames
-        job = app.state.range_jobs.get(name)
+        job: dict[str, Any] | None = app.state.range_jobs.get(name)
         if job is not None:
             return job
         if _range_ready(reader):
