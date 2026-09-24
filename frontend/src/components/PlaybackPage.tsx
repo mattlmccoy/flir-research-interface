@@ -31,6 +31,7 @@ import { MetadataEditor } from "./MetadataEditor.tsx";
 import { VisiblePanel, VisibleVideo } from "./VisiblePanel.tsx";
 import { loadAlignment, parseAlignment } from "../lib/alignment.ts";
 import { TimePlot, type Trace } from "./TimePlot.tsx";
+import { rightAxis, rightAxisOptions, type RightAxisMode } from "../lib/controlOverlay.ts";
 import { StudioFrame } from "./studio/StudioFrame.tsx";
 import { ToolStrip } from "./studio/ToolStrip.tsx";
 import { IconClip, IconRefresh } from "./studio/StripIcons.tsx";
@@ -80,7 +81,7 @@ export function PlaybackPage(p: Props) {
   const [frameStatus, setFrameStatus] = useState<"loading" | "ready" | "error">("loading");
   const [frameErr, setFrameErr] = useState<string | null>(null);
   const [control, setControl] = useState<ControlSeries | null>(null);
-  const [showRf, setShowRf] = useState(true);
+  const [rightMode, setRightMode] = useState<RightAxisMode>("rf");
   const [showMedia, setShowMedia] = useState(false);
   const [regenBusy, setRegenBusy] = useState(false);
   const cache = useRef(new Map<number, FrameMessage>());
@@ -216,11 +217,12 @@ export function PlaybackPage(p: Props) {
   const recordedH = info?.visible_alignment ? parseAlignment(info.visible_alignment).H : null;
   const overlayH = recordedH ?? loadAlignment(typeof localStorage !== "undefined" ? localStorage : null).H;
   const traces = seriesTraces(series, p.rois);
-  // RF forward power on the secondary axis (frame-aligned to the temperature trace).
-  const hasRf = !!control && Array.isArray(control.forward_w) && control.forward_w.some((v) => v != null);
-  const rightTraces: Trace[] = hasRf && showRf
-    ? [{ id: -100, label: "RF power", color: "var(--warn)", t: control!.t_s, v: (control!.forward_w!).map((v) => (v == null ? NaN : v)) }]
-    : [];
+  // Secondary (right) axis, frame-aligned to the temperature trace: RF forward power (W) or the AIT
+  // tune/load capacitor positions (%). One unit per axis, so they are alternatives.
+  const axisOpts = rightAxisOptions(control);
+  const axisMode: RightAxisMode = rightMode === "off" ? "off"
+    : axisOpts.includes(rightMode) ? rightMode : (axisOpts[0] ?? "off");
+  const right = rightAxis(control, axisMode);
   // Derived files (ROI plot, peak frames, ROI video, roi_series.csv) are stale when the ROIs on
   // screen no longer match the ones stored with the recording; badge the export section so it's
   // visible even when collapsed.
@@ -322,9 +324,21 @@ export function PlaybackPage(p: Props) {
       }
       dock={
         <PlotDock title="temperature vs time (whole recording)" foot={transport} onCollapse={() => p.dispatch({ type: "toggle", panel: "dock" })}
-          controls={hasRf ? <label className="hint" title="Overlay the RF forward power (right axis, W) recorded from the RF generator, aligned to the temperature."><input type="checkbox" checked={showRf} onChange={(e) => setShowRf(e.target.checked)} /> RF power</label> : undefined}>
+          controls={axisOpts.length ? (
+            <label className="hint" title="What the right axis overlays, aligned to the temperature: the RF forward power (W) recorded from the generator, or the AIT matching-network tune/load capacitor positions (%) that TC-POWER reports.">
+              right axis{" "}
+              <select value={axisMode} onChange={(e) => setRightMode(e.target.value as RightAxisMode)} aria-label="right axis overlay">
+                <option value="off">off</option>
+                {axisOpts.includes("rf") && <option value="rf">RF power (W)</option>}
+                {axisOpts.includes("caps") && <option value="caps">cap positions (%)</option>}
+              </select>
+              {right.traces.map((tr) => (
+                <span key={tr.id} style={{ color: tr.color, marginLeft: 8, whiteSpace: "nowrap" }}>━ {tr.label}</span>
+              ))}
+            </label>
+          ) : undefined}>
           <TimePlot traces={withDelta} markers={markers} window={{ t0: 0, t1: Math.max(info?.duration_s ?? 0, 0.001) }} cursorT={t}
-            rightTraces={rightTraces} rightUnits="W"
+            rightTraces={right.traces} rightUnits={right.units || "W"}
             emptyText={
               !p.rois.rois.length ? "add a spot or rectangle ROI to plot it over the whole recording"
               : seriesStatus === "error" ? "couldn’t load the series — check the operator, then adjust an ROI to retry"
