@@ -98,8 +98,12 @@ export interface Experiment {
   /** ROIs stored with the recording (what its derived files were built from). */
   rois?: Record<string, unknown>[] | null;
   /** Which storage the run lives in, and its root (from the union list). */
-  library?: "local" | "drive";
+  library?: "local" | "drive" | "offline";
   root?: string;
+  /** Offline = last-seen entry for the registered drive while it is unplugged (not readable). */
+  offline?: boolean;
+  drive_label?: string;
+  last_seen_utc?: string | null;
 }
 
 export interface ExperimentInfo { name: string; path: string; n_frames: number; size_bytes?: number; width: number; height: number; duration_s: number; complete: boolean; ir_format: string | null; conversion: Record<string, unknown> | null; experiment: Record<string, unknown> | null; camera: Record<string, unknown> | null; software: Record<string, unknown> | null; started_utc: string | null; events?: Record<string, unknown>[]; manifest: Record<string, unknown> | null; visible?: { file?: string | null; measured_fps?: number | null; error?: string | null; segments?: VisibleSegment[] | null; gaps?: VisibleGap[] | null } | null; visible_alignment?: Record<string, unknown> | null; rois?: Record<string, unknown>[] | null; thermal_preview?: { path: string; bytes: number } | null; exports?: { name: string; bytes: number }[]; }
@@ -201,8 +205,8 @@ export const api = {
   registerDrive: (mount: string) =>
     j<StorageInfo>(req("/api/storage/drive", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ mount }) })),
   forgetDrive: () => j<StorageInfo>(req("/api/storage/drive", { method: "DELETE" })),
-  moveExperiment: (name: string, to: "drive" | "local", fullVerify = false) =>
-    j<MoveJob>(req(`/api/experiments/${encodeURIComponent(name)}/move`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ to, full_verify: fullVerify }) })),
+  moveExperiment: (name: string, to: "drive" | "local") =>
+    j<MoveJob>(req(`/api/experiments/${encodeURIComponent(name)}/move`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ to }) })),
   moveStatus: (name: string) =>
     j<MoveJob>(req(`/api/experiments/${encodeURIComponent(name)}/move/status`)),
   setLabels: (name: string, body: { starred: boolean; tags: string[]; library?: "local" | "drive" }) =>

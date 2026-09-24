@@ -20,6 +20,7 @@ import shutil
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -157,6 +158,8 @@ def register_drive(local_root: Path | str, mount: str) -> dict[str, Any]:
         drive["drive_id"] = drive_id
     cfg = {"drive": drive}
     save_storage_config(local_root, cfg)
+    with contextlib.suppress(FileNotFoundError):  # a new drive: rebuilt on the next listing
+        (Path(local_root) / INDEX_NAME).unlink()
     return cfg
 
 
@@ -205,10 +208,64 @@ def _read_marker(mount: str) -> dict[str, Any] | None:
 
 
 def forget_drive(local_root: Path | str) -> dict[str, Any]:
-    """Forget the registered drive (leaves its files and marker in place)."""
+    """Forget the registered drive (leaves its files and marker in place) and its offline index."""
     cfg = {"drive": None}
     save_storage_config(local_root, cfg)
+    with contextlib.suppress(FileNotFoundError):
+        (Path(local_root) / INDEX_NAME).unlink()
     return cfg
+
+
+# -- offline index: remember what is on the drive so an unplugged drive's runs stay listed -------
+
+#: Local snapshot of the registered drive's run cards, refreshed whenever the drive is listed.
+INDEX_NAME = ".drive-index.json"
+
+
+def remember_drive_runs(local_root: Path | str, items: list[dict[str, Any]], label: str) -> None:
+    """Snapshot the connected drive's run summaries (rewritten only when they change)."""
+    runs = sorted(
+        ({k: v for k, v in it.items() if k not in ("root", "library")} for it in items),
+        key=lambda r: str(r.get("name", "")),
+    )
+    path = Path(local_root) / INDEX_NAME
+    old = _read_index(path)
+    if old.get("label") == label and old.get("runs") == runs:
+        return
+    now = datetime.now(UTC).isoformat(timespec="seconds")
+    _atomic_json(path, {"label": label, "last_seen_utc": now, "runs": runs})
+
+
+def offline_runs(local_root: Path | str) -> list[dict[str, Any]]:
+    """The last-seen runs of the registered drive, marked ``library: "offline"`` so they can never
+    be mistaken for runs that are actually readable right now."""
+    idx = _read_index(Path(local_root) / INDEX_NAME)
+    label, seen = idx.get("label", "drive"), idx.get("last_seen_utc")
+    return [
+        {**r, "library": "offline", "offline": True, "drive_label": label, "last_seen_utc": seen}
+        for r in idx.get("runs", [])
+        if isinstance(r, dict) and r.get("name")
+    ]
+
+
+def _read_index(path: Path) -> dict[str, Any]:
+    try:
+        idx = json.loads(path.read_text())
+        return idx if isinstance(idx, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def _atomic_json(path: Path, data: dict[str, Any]) -> None:
+    fd, tmp = tempfile.mkstemp(prefix=path.name, suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, default=str)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(tmp)
+        raise
 
 
 # -- verification helper (kept for callers/tests; moves verify inside lab-storage) ---------------
@@ -308,6 +365,8 @@ __all__ = [
     "adopt_marker",
     "connected_drive",
     "forget_drive",
+    "offline_runs",
+    "remember_drive_runs",
     "load_storage_config",
     "move_experiment",
     "register_drive",

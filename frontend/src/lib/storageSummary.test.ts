@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { storageBreakdown, summaryLabel, type Located } from "./storageSummary.ts";
+import { isOffline, storageBreakdown, summaryLabel, type Located } from "./storageSummary.ts";
 
 const items: Located[] = [
   { library: "local", size_bytes: 2_000_000_000 },
@@ -25,6 +25,27 @@ test("label shows local usage; adds drive only when a drive is connected", () =>
   assert.match(summaryLabel(b, false), /3\.50 GB local/);
   assert.doesNotMatch(summaryLabel(b, false), /drive/);
   assert.match(summaryLabel(b, true), /5\.00 GB on drive/);
+});
+
+test("offline runs (drive unplugged) are counted apart, never as local or on-drive", () => {
+  const b = storageBreakdown([
+    { library: "local", size_bytes: 1_000_000_000 },
+    { library: "offline", size_bytes: 4_000_000_000, drive_label: "FLIR SSD" },
+    { library: "offline", size_bytes: 2_000_000_000, drive_label: "FLIR SSD" },
+  ]);
+  assert.equal(b.total, 3);
+  assert.equal(b.localCount, 1);
+  assert.equal(b.localBytes, 1_000_000_000);
+  assert.equal(b.driveCount, 0);
+  assert.equal(b.offlineCount, 2);
+  assert.equal(b.offlineLabel, "FLIR SSD");
+  assert.match(summaryLabel(b, false), /2 on FLIR SSD \(not connected\)/);
+});
+
+test("isOffline recognises offline cards only", () => {
+  assert.equal(isOffline({ library: "offline" }), true);
+  assert.equal(isOffline({ library: "drive" }), false);
+  assert.equal(isOffline({}), false);
 });
 
 test("empty list is handled", () => {

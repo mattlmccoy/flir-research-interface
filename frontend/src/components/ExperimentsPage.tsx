@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
 import { api, type Experiment } from "../lib/api.ts";
-import { storageBreakdown, summaryLabel } from "../lib/storageSummary.ts";
+import { isOffline, storageBreakdown, summaryLabel } from "../lib/storageSummary.ts";
 import {
   filterExperiments, mergeTags, selectionReducer, sortExperiments, tagUniverse,
   type Sort, type SelectionState,
@@ -25,7 +25,6 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) 
   const [tagFilter, setTagFilter] = useState<string[]>(() => {
     try { return JSON.parse(ls.get("fri.tagFilter", "[]")); } catch { return []; }
   });
-  const [fullVerify, setFullVerify] = useState(() => ls.get("fri.fullVerify", "0") === "1");
   const [selecting, setSelecting] = useState(false);
   const [sel, dispatch] = useReducer(selectionReducer, { anchor: null, selected: new Set() } as SelectionState);
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -35,7 +34,6 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) 
   const setSortP = (s: Sort) => { setSort(s); ls.set("fri.sort", s); };
   const setStarredP = (on: boolean) => { setStarredOnly(on); ls.set("fri.starredOnly", on ? "1" : "0"); };
   const setTagsP = (t: string[]) => { setTagFilter(t); ls.set("fri.tagFilter", JSON.stringify(t)); };
-  const toggleFullVerify = (on: boolean) => { setFullVerify(on); ls.set("fri.fullVerify", on ? "1" : "0"); };
   const addTagFilter = (t: string) => { if (!tagFilter.includes(t)) setTagsP([...tagFilter, t]); };
 
   const load = useCallback(() => {
@@ -58,7 +56,8 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) 
     () => sortExperiments(filterExperiments(items ?? [], { query: q, starredOnly, tags: tagFilter }), sort),
     [items, q, starredOnly, tagFilter, sort],
   );
-  const shownIds = useMemo(() => shown.map(cardId), [shown]);
+  // offline cards (drive unplugged) can be browsed but not selected: every bulk action needs the files
+  const shownIds = useMemo(() => shown.filter((e) => !isOffline(e)).map(cardId), [shown]);
   const byId = useMemo(() => new Map(shown.map((e) => [cardId(e), e])), [shown]);
   const filtering = q.trim().length > 0 || starredOnly || tagFilter.length > 0;
 
@@ -66,7 +65,7 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) 
   const clearSelection = () => dispatch({ type: "clear" });
 
   async function moveOne(name: string, to: "drive" | "local") {
-    await api.moveExperiment(name, to, fullVerify);
+    await api.moveExperiment(name, to);
     for (;;) {
       await new Promise((r) => setTimeout(r, 600));
       const jb = await api.moveStatus(name);
@@ -131,11 +130,6 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) 
           <label className={`chip-toggle${starredOnly ? " on" : ""}`} title="Show starred runs only">
             <input type="checkbox" checked={starredOnly} onChange={(e) => setStarredP(e.target.checked)} /> ★ starred
           </label>
-          {driveConnected && (
-            <label className="hint" title="How thoroughly a move to/from the drive is checked before the original is deleted. OFF (default): every file must match by size, plus a checksum of the metadata — fast, catches truncated/missing files. ON: re-reads and SHA-256-checksums every byte of every file — much slower, but catches rare silent corruption. Worth turning on when shuttling irreplaceable runs between machines." style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
-              <input type="checkbox" checked={fullVerify} onChange={(e) => toggleFullVerify(e.target.checked)} /> verify every byte on move (?)
-            </label>
-          )}
           <input type="text" placeholder="🔍 search name or tag" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 190 }} />
           <select value={sort} onChange={(e) => setSortP(e.target.value as Sort)}>
             <option value="newest">newest</option>
@@ -178,9 +172,9 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string) => void }) 
           return (
             <ExperimentCard
               key={id} exp={e} onOpen={() => onOpen(e.name)} onChanged={load}
-              driveConnected={driveConnected} fullVerify={fullVerify} universe={universe}
+              driveConnected={driveConnected} universe={universe}
               selecting={selecting} selected={sel.selected.has(id)}
-              onToggleSelect={(ev) => dispatch(ev.shiftKey ? { type: "range", name: id, order: shownIds } : { type: "toggle", name: id })}
+              onToggleSelect={isOffline(e) ? undefined : (ev) => dispatch(ev.shiftKey ? { type: "range", name: id, order: shownIds } : { type: "toggle", name: id })}
               onFilterTag={addTagFilter}
             />
           );

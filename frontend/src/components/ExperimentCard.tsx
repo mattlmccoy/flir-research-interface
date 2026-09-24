@@ -2,11 +2,12 @@ import { useState } from "react";
 import { api, type Experiment, type Previews } from "../lib/api.ts";
 import { formatSeconds, keyframeBackgroundPosition, keyframeIndex } from "../lib/keyframes.ts";
 import { hasRois, loadRois, roisDifferFromStored } from "../lib/roi.ts";
+import { isOffline } from "../lib/storageSummary.ts";
 import { TagPopover } from "./TagPopover.tsx";
 
 interface Props {
   exp: Experiment; onOpen: () => void; onChanged: () => void;
-  driveConnected?: boolean; fullVerify?: boolean;
+  driveConnected?: boolean;
   universe?: string[];                              // all tags in use, for autocomplete
   selecting?: boolean;                             // selection mode on?
   selected?: boolean;                              // is this card selected?
@@ -17,7 +18,7 @@ interface Props {
 const roiStorage: Storage | null = (() => { try { return typeof localStorage !== "undefined" ? localStorage : null; } catch { return null; } })();
 
 export function ExperimentCard({
-  exp, onOpen, onChanged, driveConnected = false, fullVerify = false,
+  exp, onOpen, onChanged, driveConnected = false,
   universe = [], selecting = false, selected = false, onToggleSelect, onFilterTag,
 }: Props) {
   // Flag runs whose ROIs have been edited since their exports were built: the run has a saved
@@ -47,7 +48,7 @@ export function ExperimentCard({
   async function moveTo(to: "drive" | "local") {
     setBusy(true); setNote(null); setMove({ done: 0, total: 0 });
     try {
-      await api.moveExperiment(exp.name, to, fullVerify);
+      await api.moveExperiment(exp.name, to);
       for (;;) {
         await new Promise((r) => setTimeout(r, 600));
         const jb = await api.moveStatus(exp.name);
@@ -125,6 +126,38 @@ export function ExperimentCard({
   }
 
   const unitLabel = previews?.units === "counts" ? " (raw counts)" : "";
+
+  // Drive unplugged: a last-seen entry. Browsable (name, details, tags) but nothing that needs the
+  // files is offered, and it is styled apart so it can never pass for a readable run.
+  if (isOffline(exp)) {
+    const label = exp.drive_label ?? "the drive";
+    const seen = exp.last_seen_utc ? new Date(exp.last_seen_utc).toLocaleString() : null;
+    return (
+      <div className="exp-card offline" title={`Stored on ${label}, which is not connected`}>
+        <div className="thumb">
+          <div className="ph">on {label}<br />not connected</div>
+        </div>
+        <div className="body">
+          <span className="name">{exp.starred ? "★ " : ""}{exp.name}</span>
+          <span className="meta">
+            {exp.duration_s != null && <span>{formatSeconds(exp.duration_s)}</span>}
+            <span>{n} fr</span>
+            {exp.size_bytes != null && <span>{exp.size_bytes >= 1e9 ? `${(exp.size_bytes / 1e9).toFixed(2)} GB` : `${(exp.size_bytes / 1e6).toFixed(0)} MB`}</span>}
+            {meta.material != null && <span>{String(meta.material)}</span>}
+          </span>
+          <span><span className="badge offline">Offline · {label}</span></span>
+          {tags.length > 0 && (
+            <div className="tag-row">
+              {tags.map((t) => (
+                <button key={t} className="tag-chip" title={`filter by ${t}`} onClick={() => onFilterTag?.(t)}>{t}</button>
+              ))}
+            </div>
+          )}
+          <div className="hint">Plug in {label} to open, move or delete this run.{seen ? ` Last seen ${seen}.` : ""}</div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className={`exp-card${selected ? " selected" : ""}`}>
       <div className="thumb" onMouseMove={onMove} onMouseLeave={() => setK(null)}

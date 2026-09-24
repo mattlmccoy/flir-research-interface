@@ -1223,12 +1223,23 @@ def create_app(
     @app.get("/api/experiments")
     def experiments() -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
-        for lib, root in _roots():
+        local_root = app.state.experiments_root
+        roots = _roots()
+        for lib, root in roots:
             for it in list_experiments(root, library=lib):
                 run_dir = root / str(it.get("name", ""))
                 it["size_bytes"] = _dir_size(run_dir)
                 it.update(labels_mod.read_labels(run_dir))  # starred + tags
                 items.append(it)
+        drive_root = next((r for lib, r in roots if lib == "drive"), None)
+        if drive_root is not None:  # connected: remember what is on it for when it is unplugged
+            storage.remember_drive_runs(
+                local_root, [it for it in items if it.get("library") == "drive"],
+                label=drive_root.parent.name,
+            )
+        elif storage.load_storage_config(local_root)["drive"]:
+            here = {str(it.get("name")) for it in items}
+            items += [r for r in storage.offline_runs(local_root) if r["name"] not in here]
         # newest first across both libraries (names are timestamped)
         items.sort(key=lambda e: str(e.get("name", "")), reverse=True)
         return items

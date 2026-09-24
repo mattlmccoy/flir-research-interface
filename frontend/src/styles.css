@@ -136,6 +136,7 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 .badge.auto, .badge.ok { background: var(--live-bg); color: var(--live); }
 .badge.manual, .badge.warn { background: var(--warn-bg); color: var(--warn); }
 .badge.lib { background: var(--line-control); color: var(--muted); }
+.badge.offline { background: var(--warn-bg); color: var(--warn); }
 .badge.rec { background: var(--err-bg); color: var(--rec); animation: fri-blink 1s steps(1) infinite; }
 .warnbox { border-left: 3px solid var(--warn); padding: 6px 10px; background: var(--warn-bg); font-size: 12px; }
 .errbox { border-left: 3px solid var(--err); padding: 6px 10px; background: var(--err-bg); font-size: 12px; }
@@ -174,6 +175,10 @@ pre { background: var(--bg-deep); border: 1px solid var(--line); padding: 8px; b
 .exp-card .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .exp-card .thumb .kf { position: absolute; inset: 0; background-repeat: no-repeat; }
 .exp-card .thumb .t { position: absolute; left: 6px; bottom: 6px; background: var(--scrim); color: var(--accent); padding: 2px 6px; font-family: var(--font-mono); font-size: 11px; }
+/* drive unplugged: a last-seen entry, visibly not a readable run */
+.exp-card.offline { border-style: dashed; opacity: 0.72; }
+.exp-card.offline .thumb { cursor: default; display: flex; align-items: center; justify-content: center; }
+.exp-card.offline .ph { text-align: center; color: var(--muted); }
 .exp-card .thumb .ph { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
 .exp-card .body { padding: 10px; display: flex; flex-direction: column; gap: 6px; }
 .exp-card .name { color: var(--fg-strong); font-family: var(--font-read); font-weight: 500; font-size: 13px; letter-spacing: 0.01em; word-break: break-word; }
