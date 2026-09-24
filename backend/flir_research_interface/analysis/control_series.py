@@ -20,6 +20,7 @@ from typing import Any
 NUMERIC_COLUMNS = (
     "forward_w", "reverse_w", "reflected_fraction", "setpoint_c", "measured_c",
     "applied_w", "recommended_w", "error_c",
+    "tune_cap_percent", "load_cap_percent",
 )
 
 

@@ -173,6 +173,8 @@ class MediaRequest(BaseModel):
 _CONTROL_CSV_COLUMNS = (
     "frame_id", "t_utc", "ts", "setpoint_c", "measured_c", "applied_w", "recommended_w",
     "phase", "mode", "armed", "forward_w", "reverse_w", "reflected_fraction", "error_c", "roi",
+    # appended later (keep existing column order stable): AIT matching-network capacitor readback
+    "tune_cap_percent", "load_cap_percent",
 )
 
 
@@ -229,6 +231,8 @@ class ControlTelemetryBody(BaseModel):
     reflected_fraction: float | None = None
     error_c: float | None = None
     roi: str | None = None
+    tune_cap_percent: float | None = None  # AIT tune capacitor position (GT readback, %)
+    load_cap_percent: float | None = None  # AIT load capacitor position (GT readback, %)
 
 
 class RegisterDriveRequest(BaseModel):

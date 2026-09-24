@@ -87,3 +87,30 @@ def test_telemetry_marks_timeline_and_writes_control_csv_while_recording(tmp_pat
         events = json.loads((run / "events.json").read_text())
         control_evs = [e for e in events if e.get("type") == "control"]
         assert len(control_evs) == 2 and control_evs[0]["roi"] == "circle_medium_small"
+
+
+def test_cap_positions_are_recorded_and_unknown_keys_are_tolerated(tmp_path: Path) -> None:
+    # TC-POWER sends the AIT tune/load capacitor readback (percent) on the heartbeat and the
+    # closed-loop row, so an in-run retune shows up in the run record next to the temperatures.
+    with _client(tmp_path) as c:
+        devs = c.get("/api/camera/devices").json()
+        c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        c.post("/api/recording/start", json={"name": "cap trace"})
+        time.sleep(0.2)
+        hb = {"mode": "manual", "forward_w": 200.0, "reverse_w": 8.0, "reflected_fraction": 0.04}
+        r = c.post("/api/control/telemetry",
+                   json={**hb, "tune_cap_percent": 41.5, "load_cap_percent": 63.0})
+        assert r.status_code == 200 and r.json()["stored"]["load_cap_percent"] == 63.0
+        time.sleep(0.1)
+        r = c.post("/api/control/telemetry", json={**hb, "tune_cap_percent": None,
+                                                   "load_cap_percent": 70.25, "future_key": 1})
+        assert r.status_code == 200  # unknown keys are ignored, never a 422
+        c.post("/api/recording/stop")
+        c.post("/api/camera/disconnect")
+        run = next(d for d in tmp_path.iterdir() if d.is_dir() and (d / "events.json").exists())
+
+        rows = list(csv.reader((run / "exports" / "control.csv").open()))
+        assert rows[0][-2:] == ["tune_cap_percent", "load_cap_percent"]  # appended, order kept
+        assert rows[1][-2:] == ["41.5", "63.0"] and rows[2][-2:] == ["", "70.25"]  # null = blank
+        s = c.get(f"/api/experiments/{run.name}/control").json()
+        assert s["load_cap_percent"] == [63.0, 70.25] and s["tune_cap_percent"] == [41.5, None]
