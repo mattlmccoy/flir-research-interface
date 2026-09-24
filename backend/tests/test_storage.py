@@ -46,6 +46,19 @@ def test_darwin_excludes_boot_volume_and_read_only() -> None:
     assert selectable_drives("darwin", parts, lambda m: (10**12, 10**11)) == []
 
 
+def test_darwin_excludes_hidden_system_volumes_marked_dontbrowse() -> None:
+    # Captured from psutil 7.2.2 on the lab Mac (2026-09-23): the APFS Recovery volume is mounted
+    # read-WRITE under /Volumes, so only macOS's `dontbrowse` flag tells it apart from the SSD.
+    parts = [
+        _Part("/dev/disk3s3", "/Volumes/Recovery", "apfs",
+              "rw,local,dovolfs,dontbrowse,journaled,multilabel"),
+        _Part("/dev/disk21s1", "/Volumes/FLIR SSD", "exfat",
+              "rw,nosuid,local,ignore-ownership,noatime"),
+    ]
+    mounts = [d["mount"] for d in selectable_drives("darwin", parts, lambda m: (10**12, 10**11))]
+    assert mounts == ["/Volumes/FLIR SSD"]
+
+
 def test_storage_config_round_trip_and_absent_default(tmp_path: Path) -> None:
     from flir_research_interface.storage import load_storage_config, save_storage_config
 

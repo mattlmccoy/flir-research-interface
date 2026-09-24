@@ -89,6 +89,8 @@ def _is_external(platform: str, p: _Part) -> bool:
     if "ro" in opts:
         return False  # read-only mounts are never offload targets
     if platform == "darwin":
+        if "dontbrowse" in opts:
+            return False  # hidden system volumes (Recovery) and DMGs; Recovery is mounted rw
         return p.mountpoint.startswith("/Volumes/") and Path(p.mountpoint).name != "Macintosh HD"
     if platform == "linux":
         prefixes = ("/media/", "/run/media/", "/mnt/")
