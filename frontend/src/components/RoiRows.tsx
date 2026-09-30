@@ -82,7 +82,12 @@ function OpticsEditor({ r, dispatch }: { r: Roi; dispatch: (a: RoiAction) => voi
         <NumberField id={`dist-${r.id}`} min={0.01} step={0.1} value={r.distance_m ?? null} placeholder="camera" aria-label={`object distance of ${roiLabel(r)} in metres`} onChange={(n) => set({ distance_m: n })} />
         <span className="optics-unit" title="Recorded with the ROI for your own atmospheric correction. Under ~2 m it changes the reading by under a few tenths of a degree.">m</span>
       </div>
-      <div className="optics-foot">Blank = use the camera's global setting.</div>
+      <div className="optics-foot">
+        Blank = use the camera's global setting.{" "}
+        {(r.emissivity !== undefined || r.reflected_c !== undefined || r.distance_m !== undefined) && (
+          <button type="button" className="secondary" onClick={() => set({ emissivity: null, reflected_c: null, distance_m: null })} title="Clear this ROI's emissivity, reflected temperature and distance so it uses the camera's settings">Reset to camera</button>
+        )}
+      </div>
     </div>
   );
 }

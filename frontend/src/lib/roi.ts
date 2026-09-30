@@ -371,11 +371,15 @@ function computeRoiPixels(roi: Roi, w: number, h: number): number[] {
 /** Statistics of `field` (row-major w×h) inside `roi`. Out-of-image pixels count as absent. */
 export function roiStats(field: Float32Array, w: number, h: number, roi: Roi, rad?: Radiometry | null, valid?: Range | null): RoiStats {
   let n = 0, nan = 0, excluded = 0, min = Infinity, max = -Infinity, sum = 0, sq = 0, kMin = -1, kMax = -1;
-  const eps = roi.emissivity;
-  const correct = rad && eps !== undefined && eps > 0 && eps <= 1;
-  const treflK = (roi.reflected_c ?? (rad ? rad.treflCamK - 273.15 : 0)) + 273.15;
+  // Either optic on its own re-corrects (the other falls back to the camera's value), matching
+  // the backend's roi_field; a reflected temperature alone used to be ignored live.
+  const ownEps = roi.emissivity !== undefined && roi.emissivity > 0 && roi.emissivity <= 1;
+  const ownRefl = roi.reflected_c !== undefined && Number.isFinite(roi.reflected_c);
+  const correct = !!rad && (ownEps || ownRefl);
+  const eps = ownEps ? roi.emissivity as number : rad ? rad.epsCam : 1;
+  const treflK = ownRefl ? (roi.reflected_c as number) + 273.15 : rad ? rad.treflCamK : 0;
   for (const k of roiPixels(roi, w, h)) {
-    const v = correct ? recorrectCelsius(field[k], rad, eps, treflK) : field[k];
+    const v = correct && rad ? recorrectCelsius(field[k], rad, eps, treflK) : field[k];
     if (Number.isNaN(v)) { nan++; continue; }
     if (valid && (v < valid.min || v > valid.max)) { excluded++; continue; }
     n++; sum += v; sq += v * v;
@@ -418,6 +422,7 @@ function asRoi(v: unknown): Roi | null {
   if (r.box === 3) (meta as { box?: 3 }).box = 3;
   if (typeof r.emissivity === "number" && r.emissivity > 0 && r.emissivity <= 1) meta.emissivity = r.emissivity;
   if (typeof r.reflected_c === "number" && Number.isFinite(r.reflected_c)) meta.reflected_c = r.reflected_c;
+  if (typeof r.distance_m === "number" && Number.isFinite(r.distance_m) && r.distance_m > 0) meta.distance_m = r.distance_m;
   let shape: Roi | null = null;
   if (r.kind === "spot" && isInt(r.x) && isInt(r.y)) shape = { id: r.id, kind: "spot", x: r.x, y: r.y };
   else if (r.kind === "rect" && isInt(r.x0) && isInt(r.y0) && isInt(r.x1) && isInt(r.y1) && r.x1 > r.x0 && r.y1 > r.y0) {

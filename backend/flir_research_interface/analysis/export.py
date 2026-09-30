@@ -58,6 +58,8 @@ def _roi_optics(r: dict[str, Any]) -> str:
         parts.append(f"emissivity={r['emissivity']:g}")
     if "reflected_c" in r:
         parts.append(f"reflected_c={r['reflected_c']:g}")
+    if "distance_m" in r:
+        parts.append(f"distance_m={r['distance_m']:g}")
     return f" [{', '.join(parts)}]" if parts else ""
 
 
