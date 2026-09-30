@@ -3,6 +3,7 @@ import { markForKey } from "../lib/delta.ts";
 import { useEffect, useState } from "react";
 import { api, DEFAULT_PROFILE, type Profile, type RecordingStatus } from "../lib/api.ts";
 import { ArmPanel } from "./ArmPanel.tsx";
+import { streamStallWarning } from "../lib/streamStall.ts";
 import type { Roi } from "../lib/roi.ts";
 
 
@@ -29,6 +30,7 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: Roi
   }, []);
 
   const recording = status.state === "recording";
+  const stall = streamStallWarning(status);
   const armed = status.armed ?? null;
   async function arm(trigger: unknown) {
     setBusy(true); setErr(null);
@@ -189,6 +191,7 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: Roi
         <span>Camera gaps</span><span className="v" style={{ color: (status.frame_id_gaps ?? 0) > 0 ? "var(--warn)" : undefined }}>{status.frame_id_gaps ?? 0}</span>
         <span>Free disk</span><span className="v" style={{ color: low ? "var(--err)" : undefined }}>{status.free_space_gb != null ? `${status.free_space_gb.toFixed(1)} GB` : "—"}</span>
       </div>
+      {stall && <div className={stall.level === "err" ? "errbox" : "warnbox"} role={stall.level === "err" ? "alert" : undefined}>{stall.text}</div>}
       {recording && vis?.state === "error" && (
         <div className="errbox" role="alert">
           <b>Visible video failed</b> — {vis.error ?? "ffmpeg stopped"}. The thermal recording continues; this run will have no visible.mp4{(vis.restarts ?? 0) > 0 ? ` (retried ${vis.restarts}×)` : ""}.
