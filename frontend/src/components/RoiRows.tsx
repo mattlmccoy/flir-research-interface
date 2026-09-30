@@ -106,7 +106,7 @@ export function RoiRows({ rois, stats, selected, selectedIds, dispatch, extremes
         <li>◯ Circle: drag from the centre outwards. ⬭ Ellipse: drag its bounding box corner to corner.</li>
         <li>╱ Line: drag from one end to the other; the pixels along it are measured.</li>
         <li>⬠ Polygon: click each vertex; double-click places the last one and closes the shape (Enter closes, Esc cancels, Backspace undoes a vertex). ⌇ Spline: the same, but open. ✎ Freehand: hold the mouse and draw; releasing closes the shape.</li>
-        <li>↖ Select: click an ROI, then drag to move it; Delete removes it. Shift-click to select several and drag them together. When a polygon, spline or line is selected, drag its square handles to edit individual vertices.</li>
+        <li>↖ Select: click an ROI, then drag to move it; Delete removes it. Shift-click to select several and drag them together. ROIs stacked on top of each other: press 1–9 to select that row's ROI (or Alt/Option-click to step down through the stack), then drag anywhere inside it, even where others cover it. When a polygon, spline or line is selected, drag its square handles to edit individual vertices.</li>
         <li>Click the color square to recolor, set a per-ROI emissivity and reflected temperature (values are re-corrected from the camera's setting); double-click the name to rename; ◉ hides an ROI on the image and plot without removing it.</li>
       </ul>
     </Disclosure>
@@ -127,7 +127,7 @@ export function RoiRows({ rois, stats, selected, selectedIds, dispatch, extremes
               ) : (
                 <button type="button" className="lbl" style={{ border: "none", padding: 0 }} aria-pressed={isSel(r.id)}
                   onClick={(e) => dispatch(e.shiftKey ? { type: "toggleSelect", id: r.id } : { type: "select", id: selected === r.id && selectedIds?.length === 1 ? null : r.id })} onDoubleClick={() => setEditing(r.id)} title={`${where(r)} · double-click to rename`}>
-                  {roiLabel(r)}{r.name ? <small className="muted"> {roiId(r)}</small> : null}{r.emissivity !== undefined ? <small className="muted" title={`per-ROI emissivity ${r.emissivity}`}> ε{r.emissivity}</small> : null}
+                  {i < 9 ? <small className="muted" title={`press ${i + 1} to select`}>{i + 1}·</small> : null}{roiLabel(r)}{r.name ? <small className="muted"> {roiId(r)}</small> : null}{r.emissivity !== undefined ? <small className="muted" title={`per-ROI emissivity ${r.emissivity}`}> ε{r.emissivity}</small> : null}
                 </button>
               )}
             </span>,

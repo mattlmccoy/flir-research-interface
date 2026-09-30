@@ -17,7 +17,7 @@ import { overRangeMask } from "../lib/overrange.ts";
 import { buildLut, mapToRgba, type PaletteName } from "../lib/palette.ts";
 import { autoScale, resolveScale, type Range, type ScaleMode } from "../lib/scale.ts";
 import { normalizeRect, roiStats, type Roi, type RoiAction, type RoiInput, type RoiStats, visibleRois } from "../lib/roi.ts";
-import { clientToImage, hitTest, vertexHit, type Box, type VertexHit } from "../lib/overlay.ts";
+import { clientToImage, hitTestAll, pickHit, roiForDigit, vertexHit, type Box, type VertexHit } from "../lib/overlay.ts";
 import type { Tool } from "../lib/layout.ts";
 import { RoiOverlay, type Draft } from "./RoiOverlay.tsx";
 import { displaySize, type Zoom } from "../lib/zoom.ts";
@@ -127,6 +127,24 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
 
   useEffect(() => { lutRef.current = buildLut(palette); }, [palette]);
   useEffect(() => { setVertices([]); setDraft(null); dragStart.current = null; }, [tool]);
+  // Number keys 1–9 select the matching row of the ROI list, so an ROI buried under others can be
+  // picked without moving the ones on top; once selected, dragging anywhere inside it moves it.
+  const roisRef = useRef(rois);
+  roisRef.current = rois;
+  useEffect(() => {
+    if (!onRoi) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = e.target;
+      const typing = el instanceof HTMLElement && (el.isContentEditable || el.tagName === "TEXTAREA" || el.tagName === "SELECT"
+        || (el instanceof HTMLInputElement && !["range", "checkbox", "radio", "button"].includes(el.type)));
+      if (typing) return;
+      const id = roiForDigit(roisRef.current, e.key);
+      if (id !== null) onRoi({ type: "select", id });
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onRoi]);
 
   // Track where the (letterboxed) image canvas sits inside the view so the overlay matches it.
   useEffect(() => {
@@ -235,7 +253,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
       const vh = selRoi ? vertexHit(selRoi, p.x, p.y, vtol) : null;
       if (vh) { editing.current = { id: selected, hit: vh }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ } return; }
     }
-    const hit = hitTest(visibleRois(rois), p.x, p.y, HIT_TOL_PX);
+    const hit = pickHit(hitTestAll(visibleRois(rois), p.x, p.y, HIT_TOL_PX), selected, e.altKey);
     if (hit !== null && e.shiftKey) { onRoi({ type: "toggleSelect", id: hit }); return; }
     if (hit !== null) {
       const inGroup = selectedIds.includes(hit) && selectedIds.length > 1;
