@@ -39,6 +39,22 @@ def _kelvin_to_c(v: Any) -> str:
         return str(v)
 
 
+def _completeness(man: dict[str, Any]) -> str:
+    """The Length line's verdict. A stalled camera stream is named, never reported as complete."""
+    stalls = man.get("stream_stalls") or []
+    if stalls:
+        total = sum(float(s.get("duration_s") or 0.0) for s in stalls)
+        tail = next((s for s in stalls if s.get("tail")), None)
+        return (
+            f", NOT complete: camera stream stalled {len(stalls)}x, {total:.1f} s without frames"
+            + (f", last {float(tail['duration_s']):.1f} s before stop" if tail else "")
+            + " (see manifest.json stream_stalls)"
+        )
+    if man.get("complete"):
+        return ", complete"
+    return ", NOT marked complete (see manifest.json)"
+
+
 def readme_text(reader: ExperimentReader) -> str:
     """Plain-prose description of the recording and its files."""
     m = reader.metadata
@@ -56,7 +72,7 @@ def readme_text(reader: ExperimentReader) -> str:
     lines.append(
         f"Length: {reader.n_frames} frames, {dur:.1f} s"
         + (f", recorded at {cam['frame_rate_hz']:g} fps" if cam.get("frame_rate_hz") else "")
-        + (", complete" if man.get("complete") else ", NOT marked complete (see manifest.json)")
+        + _completeness(man)
     )
     lines.append("")
     lines.append("Camera")

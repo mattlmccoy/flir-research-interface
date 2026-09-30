@@ -126,3 +126,23 @@ def test_readme_reports_visible_stream_gaps(tmp_path: Path) -> None:
     txt = readme_text(r)
     assert "2 segments" in txt and "visible_001.mp4" in txt
     assert "stream gap at 85.2 s for 9.8 s" in txt
+
+
+def test_readme_length_line_says_when_the_camera_stream_stalled(tmp_path: Path) -> None:
+    r = _exp(tmp_path)
+    r.manifest = {
+        **(r.manifest or {}),
+        "complete": False,
+        "incomplete_reasons": ["stream_stalled"],
+        "tail_gap_s": 19.447,
+        "stream_stalls": [
+            {"tail": False, "after_frame_id": 3, "resumed_frame_id": 4, "duration_s": 2.5},
+            {"tail": True, "after_frame_id": 9, "duration_s": 19.447},
+        ],
+    }
+    length = next(ln for ln in readme_text(r).splitlines() if ln.startswith("Length:"))
+    assert "NOT complete" in length
+    assert "camera stream stalled 2x" in length
+    assert "21.9 s without frames" in length
+    assert "last 19.4 s before stop" in length
+    assert ", complete" not in length
