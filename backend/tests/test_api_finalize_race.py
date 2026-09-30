@@ -127,3 +127,39 @@ def test_stale_disconnect_leaves_the_new_camera_session_connected(
         time.sleep(0.1)
         st = c.get("/api/recording/status").json()
     assert st["state"] == "recording" and st["frames_written"] > 0
+
+
+def test_stop_returns_before_the_post_stop_exports_finish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The exports are derived and regenerable: Stop must not hold the operator for them."""
+    release = threading.Event()
+    real_summary = run_summary.write_run_summary
+
+    def slow_summary(reader: Any) -> dict[str, Any]:
+        assert release.wait(20), "test never released the slow export"
+        return real_summary(reader)
+
+    monkeypatch.setattr(run_summary, "write_run_summary", slow_summary)
+    app = create_app(
+        default_backend="simulated", sim_fps=60.0, experiments_root=tmp_path, min_free_gb=0.0
+    )
+    with TestClient(app) as c:
+        _connect(c)
+        r = c.post("/api/recording/start", json={"name": "quick stop"})
+        exp_dir = Path(r.json()["experiment_dir"])
+        time.sleep(0.3)
+        out: dict[str, Any] = {}
+        stopper = threading.Thread(target=lambda: out.update(c.post("/api/recording/stop").json()))
+        stopper.start()
+        stopper.join(5)
+        returned_while_blocked = not stopper.is_alive()
+        release.set()
+        stopper.join(20)
+        assert returned_while_blocked, "Stop waited for the post-stop exports"
+        assert out["complete"] is True
+        deadline = time.monotonic() + 10.0  # the export still happens, in the background
+        while not (exp_dir / "README.txt").is_file() and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert (exp_dir / "README.txt").is_file()
+        c.post("/api/camera/disconnect")

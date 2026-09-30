@@ -426,15 +426,22 @@ def create_app(
         if reader.metadata.get("rois"):
             render_thermal_video(reader, with_rois=True)
 
-    def _schedule_thermal_video(exp_dir: Path) -> None:
-        """Render after stop without holding the stop: an encode of a long run takes seconds."""
+    def _schedule_post_stop_exports(exp_dir: Path) -> None:
+        """ROI series, run summary, then the thermal video, without holding the stop: on a long
+        run these take minutes (19k frames: ~7 min), and a Stop/Disconnect that hangs that long
+        invites repeat clicks. All are derived and regenerable from the run's store."""
 
         async def _job() -> None:
-            try:
-                async with app.state.render_locks.get(exp_dir.name):
-                    await run_in_threadpool(_render_thermal_video, exp_dir)
-            except Exception:  # noqa: BLE001 - a convenience file must never surface as an error
-                logger.exception("thermal preview video render failed for %s", exp_dir)
+            async with app.state.render_locks.get(exp_dir.name):
+                for step, fn in (
+                    ("automatic ROI series export", _export_roi_series),
+                    ("run summary", _write_run_summary),
+                    ("thermal preview video render", _render_thermal_video),
+                ):
+                    try:
+                        await run_in_threadpool(fn, exp_dir)
+                    except Exception:  # noqa: BLE001 - a convenience file must never surface
+                        logger.exception("%s failed for %s", step, exp_dir)
 
         task = asyncio.create_task(_job())
         app.state.render_tasks.add(task)
@@ -502,15 +509,7 @@ def create_app(
             if manifest is not None:
                 manifest["visible"] = visible_info
         if manifest is not None and exp_dir is not None:
-            try:
-                await run_in_threadpool(_export_roi_series, exp_dir)
-            except Exception:  # noqa: BLE001 - a convenience file must never fail the finalize
-                logger.exception("automatic ROI series export failed")
-            try:
-                await run_in_threadpool(_write_run_summary, exp_dir)
-            except Exception:  # noqa: BLE001 - a convenience file must never fail the finalize
-                logger.exception("run summary failed")
-            _schedule_thermal_video(exp_dir)
+            _schedule_post_stop_exports(exp_dir)
         return manifest
 
     # -- health / setup --------------------------------------------------------------------
