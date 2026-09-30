@@ -25,6 +25,19 @@ visible recording taken alongside thermal acquisition is a ~12 fps video, which 
 duration and fps are written into `visible.json` at stop. Still to do: playback of the visible
 video beside the thermal image.
 
+**Time alignment (2026-09-30).** Playback places each visible segment on the thermal clock at
+(its first frame's host arrival − thermal frame 0's host arrival), `visible_timeline[].t_start_s`
+(`playback/visible_timing.py`). Before, it assumed visible t=0 = thermal t=0, which was 4 s off on
+every armed run (pre-trigger) and 24 s off on `20260928_193907_Run` (3 failed RTSP opens). The
+first-frame host arrival is `segments[].first_frame_host_ns` in `visible.json`, estimated from
+ffmpeg `-progress` as min(read time − `out_time`) (`visible/progress.py`); runs recorded before it
+fall back to the ffmpeg launch (`started_host_ns`, `anchor: "launch"`). Measured on the A70 (two
+20 s captures): the first frame arrives **1.08 s** after the launch, the lag this removes; with a
+local source and injected connect delays the estimate was within 4 ms of the true first byte. Not
+removed: the camera's encode + network latency before a frame arrives (the thermal frames' GigE
+latency is milliseconds). Playback and export also skip the first 0.25 s of each file, whose frame 0
+is sometimes torn (7 of 18 runs).
+
 ## 1. What the camera offers
 
 | Path | Content | Resolution | Simultaneous with radiometric GigE stream? | Auth |

@@ -95,7 +95,8 @@ experiments/<YYYYMMDD_HHMMSS>_<name>/
                          skipped frames are intentional, not drops), complete flag,
                          file checksums, visible-video summary
   visible.mp4 + .json    the visible camera (H.264 stream copy) when "visible video" was ticked,
-                         with host-clock start/stop, measured fps and hash
+                         with host-clock start/stop, first-frame host arrival per segment
+                         (`first_frame_host_ns`), measured fps and hash
   preview.png, keyframes.png, previews.json   thumbnails (visualization only)
   README.txt             written at stop: the recording described in plain prose (camera,
                          case, object parameters, °C rule, experiment fields, ROIs, marks,
