@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import math
+import threading
+from collections.abc import Iterator
 from typing import Any
 
 import numpy as np
@@ -293,6 +295,90 @@ def roi_index(roi: dict[str, Any], w: int, h: int) -> tuple[np.ndarray, np.ndarr
 def _clean(a: np.ndarray) -> list[float | None]:
     return [None if not math.isfinite(float(v)) else float(v) for v in a]
 
+#: Memory budget for the playback series cache (one recording's strided frames, uint16).
+STRIDE_CACHE_BYTES = 512 * 1024 * 1024
+
+
+class _StrideCache:
+    """The strided frames of ONE recording, reused across ROI edits. Replaced, never grown."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.key: tuple[Any, ...] | None = None
+        self.frames: np.ndarray | None = None
+        # per-ROI results for the cached recording: an unchanged ROI is not recomputed
+        self.results: dict[tuple[Any, ...], dict[str, np.ndarray]] = {}
+
+    def get(self, key: tuple[Any, ...]) -> np.ndarray | None:
+        with self.lock:
+            return self.frames if self.key == key else None
+
+    def put(self, key: tuple[Any, ...], frames: np.ndarray) -> None:
+        with self.lock:
+            if self.key != key:
+                self.results = {}
+            self.key, self.frames = key, frames
+
+    def result(self, key: tuple[Any, ...]) -> dict[str, np.ndarray] | None:
+        with self.lock:
+            return self.results.get(key)
+
+    def put_result(self, key: tuple[Any, ...], value: dict[str, np.ndarray]) -> None:
+        with self.lock:
+            if len(self.results) >= 256:
+                self.results.clear()
+            self.results[key] = value
+
+    def clear(self) -> None:
+        with self.lock:
+            self.key, self.frames, self.results = None, None, {}
+
+
+_STRIDE_CACHE = _StrideCache()
+
+
+def clear_series_cache() -> None:
+    """Release the playback series cache (called when a recording starts, so live acquisition
+    never shares the machine with a stale half-gigabyte of playback frames)."""
+    _STRIDE_CACHE.clear()
+
+
+def _strided_blocks(
+    reader: ExperimentReader, stride: int, batch: int, *, cache: bool
+) -> Iterator[tuple[int, np.ndarray]]:
+    """(first strided position, frames) for every ``stride``-th frame, in batches.
+
+    With ``cache`` the frames are served from / captured into the one-recording memory cache
+    when they fit ``STRIDE_CACHE_BYTES``."""
+    n = reader.n_frames
+    m = len(range(0, n, stride))
+    batch = max(1, batch)
+    key = (str(reader.path), n, stride)
+    if cache:
+        hit = _STRIDE_CACHE.get(key)
+        if hit is not None:
+            for pos in range(0, m, batch):
+                yield pos, hit[pos : pos + batch]
+            return
+    keep: np.ndarray | None = None
+    if cache and m:
+        _, h, w = reader.counts_block(0, 1).shape
+        if m * h * w * 2 <= STRIDE_CACHE_BYTES:
+            keep = np.empty((m, h, w), dtype=np.uint16)
+    step = batch * stride  # read a wide block, keep every stride-th frame from it
+    for start in range(0, n, step):
+        stop = min(n, start + step)
+        pos = start // stride  # first strided position this block writes
+        block = reader.counts_block(start, stop)
+        if stride > 1:
+            block = block[np.arange(start, stop, stride) - start]
+        if keep is not None:
+            keep[pos : pos + len(block)] = block
+        yield pos, block
+    if keep is not None:
+        keep.setflags(write=False)
+        _STRIDE_CACHE.put(key, keep)
+
 
 def roi_series(
     reader: ExperimentReader,
@@ -301,8 +387,13 @@ def roi_series(
     batch: int = 64,
     valid_c: tuple[float, float] | None = None,
     stride: int = 1,
+    cache: bool = False,
 ) -> dict[str, Any]:
     """Per-frame ROI values for every frame of ``reader``.
+
+    ``cache`` keeps the strided frames of the most recent recording in memory (within
+    ``STRIDE_CACHE_BYTES``) so the next call, typically after the operator nudges an ROI in
+    playback, skips re-reading and decompressing the store.
 
     Spots return ``value``; rectangles return ``min``/``max``/``mean``. Batches of frames are
     read at once so the store is touched chunk-wise, never frame-by-frame. ``stride`` keeps every
@@ -331,23 +422,34 @@ def roi_series(
         if r["kind"] not in ("spot", "rect"):
             ys, xs = roi_index(r, w0, h0)
             index[r["id"]] = (ys, xs) if len(ys) else None
-    step = max(1, batch) * stride  # read a wide block, keep every stride-th frame from it
-    for start in range(0, n, step):
-        stop = min(n, start + step)
-        local = np.arange(start, stop, stride) - start  # kept rows within this block
-        pos = start // stride  # first strided position this block writes
-        block = (
-            reader.counts_block(start, stop)[local]
-            if stride > 1
-            else reader.counts_block(start, stop)
-        )
-        field0 = counts_to_celsius(block, fmt) if fmt is not None else block.astype(np.float64)
-        b, h, w = field0.shape  # b == number of kept frames in this block
+    todo = rois
+    rkeys: dict[int, tuple[Any, ...]] = {}
+    if cache:  # reuse the results of ROIs that did not change since the last call
+        todo = []
         for r in rois:
-            field = roi_field(field0, r, cam, fmt is not None)
+            geom = {k: v for k, v in r.items() if k not in ("id", "name", "color")}
+            sig = json.dumps(geom, sort_keys=True)
+            rkeys[r["id"]] = (str(reader.path), n, stride, valid_c, sig)
+            hit = _STRIDE_CACHE.result(rkeys[r["id"]])
+            if hit is not None:
+                acc[r["id"]] = hit
+            else:
+                todo.append(r)
+    blocks = _strided_blocks(reader, stride, batch, cache=cache) if todo else iter(())
+    for pos, block in blocks:
+        b, h, w = block.shape  # b == number of kept frames in this block
+
+        def to_field(raw: np.ndarray, r: dict[str, Any]) -> np.ndarray:
+            # Convert only this ROI's pixels (not the whole frame) — the per-frame work is then
+            # proportional to the ROI, which makes re-running the series after an ROI move fast.
+            f = counts_to_celsius(raw, fmt) if fmt is not None else raw.astype(np.float64)
+            f = roi_field(f, r, cam, fmt is not None)
             if valid_c is not None:  # segmentation: outside the valid range → ignored (NaN)
                 lo, hi = valid_c
-                field = np.where((field >= lo) & (field <= hi), field, np.nan)
+                f = np.where((f >= lo) & (f <= hi), f, np.nan)
+            return f
+
+        for r in todo:
             dst = acc[r["id"]]
             if r["kind"] == "spot":
                 if r.get("box") == 3:
@@ -356,28 +458,30 @@ def roi_series(
                     if y1 > y0 and x1 > x0:
                         with np.errstate(all="ignore"):
                             dst["value"][pos : pos + b] = np.nanmean(
-                                field[:, y0:y1, x0:x1].reshape(b, -1), axis=1
+                                to_field(block[:, y0:y1, x0:x1], r).reshape(b, -1), axis=1
                             )
                 elif 0 <= r["x"] < w and 0 <= r["y"] < h:
-                    dst["value"][pos : pos + b] = field[:, r["y"], r["x"]]
+                    dst["value"][pos : pos + b] = to_field(block[:, r["y"], r["x"]], r)
                 continue
             if r["kind"] == "rect":
                 x0, y0 = max(0, r["x0"]), max(0, r["y0"])
                 x1, y1 = min(w, r["x1"]), min(h, r["y1"])
                 if x1 <= x0 or y1 <= y0:
                     continue
-                sub = field[:, y0:y1, x0:x1].reshape(b, -1)
+                sub = to_field(block[:, y0:y1, x0:x1], r).reshape(b, -1)
             else:
                 ix = index.get(r["id"])
                 if ix is None:
                     continue
-                sub = field[:, ix[0], ix[1]]
+                sub = to_field(block[:, ix[0], ix[1]], r)
             with np.errstate(all="ignore"):
                 dst["min"][pos : pos + b] = np.nanmin(sub, axis=1)
                 dst["max"][pos : pos + b] = np.nanmax(sub, axis=1)
                 dst["mean"][pos : pos + b] = np.nanmean(sub, axis=1)
                 dst["std"][pos : pos + b] = np.nanstd(sub, axis=1)  # population, as the browser
                 dst["n"][pos : pos + b] = np.sum(~np.isnan(sub), axis=1)
+    for r in todo if cache else ():
+        _STRIDE_CACHE.put_result(rkeys[r["id"]], acc[r["id"]])
     tl = reader.timeline()
     return {
         "units": "celsius" if fmt is not None else "counts",
@@ -387,4 +491,12 @@ def roi_series(
     }
 
 
-__all__ = ["MAX_ROIS", "parse_rois", "roi_field", "roi_index", "roi_series"]
+__all__ = [
+    "MAX_ROIS",
+    "STRIDE_CACHE_BYTES",
+    "clear_series_cache",
+    "parse_rois",
+    "roi_field",
+    "roi_index",
+    "roi_series",
+]

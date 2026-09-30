@@ -89,7 +89,8 @@ def test_series_applies_roi_emissivity_and_documents_it(tmp_path) -> None:  # ty
     rois = parse_rois(
         '[{"id":1,"kind":"spot","x":1,"y":1},'
         '{"id":2,"kind":"spot","x":1,"y":1,"emissivity":0.5},'
-        '{"id":3,"kind":"rect","x0":0,"y0":0,"x1":2,"y1":2,"emissivity":0.5,"reflected_c":40}]'
+        '{"id":3,"kind":"rect","x0":0,"y0":0,"x1":2,"y1":2,"emissivity":0.5,"reflected_c":40,'
+        '"distance_m":0.4}]'
     )
     assert rois[1]["emissivity"] == 0.5 and rois[2]["reflected_c"] == 40
     s = roi_series(r, rois)["series"]
@@ -97,6 +98,6 @@ def test_series_applies_roi_emissivity_and_documents_it(tmp_path) -> None:  # ty
     assert s["2"]["value"][0] > 60.0 + 10
     assert s["3"]["mean"][0] < s["2"]["value"][0]  # hotter reflected background
     csv = series_csv(r, rois)
-    assert "emissivity=0.5" in csv and "reflected_c=40" in csv
+    assert "emissivity=0.5" in csv and "reflected_c=40" in csv and "distance_m=0.4" in csv
     with pytest.raises(ValueError):
         parse_rois('[{"id":1,"kind":"spot","x":1,"y":1,"emissivity":1.5}]')

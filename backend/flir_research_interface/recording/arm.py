@@ -26,8 +26,16 @@ from flir_research_interface.recording.recorder import Recorder
 from flir_research_interface.recording.trigger import TriggerMachine, TriggerSpec
 
 
-def watched_value(frame: Frame, roi: dict[str, Any] | None, stat: str) -> float | None:
-    """The ROI statistic (°C) on one frame, or None when it cannot be evaluated."""
+def watched_value(
+    frame: Frame,
+    roi: dict[str, Any] | None,
+    stat: str,
+    index: tuple[np.ndarray, np.ndarray] | None = None,
+) -> float | None:
+    """The ROI statistic (°C) on one frame, or None when it cannot be evaluated.
+
+    ``index`` is the ROI's precomputed ``roi_index`` for this frame size; callers evaluating the
+    same ROI every frame pass it so the pixel mask is not rebuilt on the camera thread."""
     if roi is None:
         return None
     try:
@@ -52,7 +60,7 @@ def watched_value(frame: Frame, roi: dict[str, Any] | None, stat: str) -> float 
             return None
         vals = counts_to_celsius(frame.counts[y0:y1, x0:x1], fmt)
     else:
-        ys, xs = roi_index(roi, w, h)
+        ys, xs = index if index is not None else roi_index(roi, w, h)
         if len(ys) == 0:
             return None
         vals = counts_to_celsius(frame.counts[ys, xs], fmt)
@@ -92,6 +100,7 @@ class Armer:
         self.pretrigger_frames = 0
         self.started_frame_id: int | None = None
         self.ended_frame_id: int | None = None
+        self._index_cache: dict[tuple[int, int, int], tuple[np.ndarray, np.ndarray]] = {}
 
     # -- camera thread -------------------------------------------------------------------------
 
@@ -100,7 +109,7 @@ class Armer:
             state = self.machine.state
             roi = self._start_roi if state == "armed" else self._end_roi
             stat = self.spec.start.stat if state == "armed" else self.spec.end.stat
-            value = watched_value(frame, roi, stat) if roi is not None else None
+            value = watched_value(frame, roi, stat, self._roi_index(roi, frame)) if roi else None
             self.last_value = value
             action = self.machine.feed(self._clock(), self._index, value)
             self._index += 1
@@ -114,6 +123,18 @@ class Armer:
             elif action == "stop":
                 self.ended_frame_id = frame.frame_id
                 self.pending = "stop"
+
+    def _roi_index(
+        self, roi: dict[str, Any], frame: Frame
+    ) -> tuple[np.ndarray, np.ndarray] | None:
+        if roi["kind"] in ("spot", "rect"):
+            return None  # evaluated by slicing; nothing to cache
+        h, w = frame.counts.shape
+        key = (id(roi), w, h)  # the watched ROIs live as long as this Armer
+        idx = self._index_cache.get(key)
+        if idx is None:
+            idx = self._index_cache[key] = roi_index(roi, w, h)
+        return idx
 
     # -- API side ----------------------------------------------------------------------------
 

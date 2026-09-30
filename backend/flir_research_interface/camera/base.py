@@ -114,6 +114,15 @@ class CameraBackend(ABC):
         """Run a command node such as ``NUCAction``. ``ValueError`` for an unknown command."""
         raise CameraError(f"{type(self).__name__} does not support command {command!r}")
 
+    def transport_stats(self) -> dict[str, Any] | None:
+        """Cumulative transport counters (frames lost/dropped/incomplete in the driver, missed
+        packets, resend requests) since the stream opened, or ``None`` when the backend has none.
+
+        These attribute frame-id gaps: ``lost``/``missed_packets`` are the network, ``dropped``
+        is the driver's buffer queue overflowing because the application fell behind.
+        """
+        return None
+
     def __enter__(self) -> CameraBackend:
         return self
 

@@ -447,3 +447,25 @@ test("hasRois reports whether a scope has been persisted", async () => {
   assert.equal(hasRois(storage, "exp.new"), true);
   assert.equal(hasRois(null, "exp.new"), false);
 });
+
+test("per-ROI reflected temperature and distance survive a save/load round trip (a run's stored ROIs)", () => {
+  const store = new Map<string, string>();
+  const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); } } as unknown as Storage;
+  const roi: Roi = { id: 1, kind: "rect", x0: 0, y0: 0, x1: 2, y1: 2, emissivity: 0.9, reflected_c: 35, distance_m: 0.45 };
+  saveRois(storage, { rois: [roi], selected: null, selectedIds: [], nextId: 2 }, "exp.run1");
+  const back = loadRois(storage, "exp.run1").rois[0];
+  assert.equal(back.emissivity, 0.9);
+  assert.equal(back.reflected_c, 35);
+  assert.equal(back.distance_m, 0.45);
+});
+
+test("roiStats re-corrects for a reflected temperature even without a per-ROI emissivity", async () => {
+  const { recorrectCelsius } = await import("./emissivity.ts");
+  const rad = { R: 16556, B: 1428, F: 1, epsCam: 0.95, treflCamK: 293.15 };
+  const field = new Float32Array([100]);
+  const spot: Roi = { id: 1, kind: "spot", x: 0, y: 0, reflected_c: 80 };
+  const got = roiStats(field, 1, 1, spot, rad).mean as number;
+  assert.ok(Math.abs(got - recorrectCelsius(100, rad, 0.95, 353.15)) < 1e-9);
+  assert.notEqual(Math.round(got * 100), 10000, "a hotter reflected source lowers the reading");
+  assert.equal(roiStats(field, 1, 1, { id: 2, kind: "spot", x: 0, y: 0 }, rad).mean, 100, "no optics: unchanged");
+});

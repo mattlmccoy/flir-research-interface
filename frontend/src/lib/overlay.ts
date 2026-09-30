@@ -22,24 +22,51 @@ export function segmentDistance(px: number, py: number, ax: number, ay: number, 
 }
 
 /**
- * Topmost ROI under (x, y). Thin shapes (spots, lines, polylines within `tol`) win over filled
- * ones (rectangles, circles) so a small mark inside a big region stays selectable; later ROIs win ties.
+ * Every ROI under (x, y), topmost first. Thin shapes (spots, lines, polylines within `tol`) come
+ * before filled ones (rectangles, circles) so a small mark inside a big region stays selectable;
+ * within each group later ROIs come first.
  */
+export function hitTestAll(rois: Roi[], x: number, y: number, tol: number): number[] {
+  const out: number[] = [];
+  for (let i = rois.length - 1; i >= 0; i--) {
+    const r = rois[i];
+    if (r.kind === "spot" && Math.abs(r.x - x) <= tol && Math.abs(r.y - y) <= tol) out.push(r.id);
+    else if (r.kind === "line" && segmentDistance(x, y, r.x0, r.y0, r.x1, r.y1) <= tol) out.push(r.id);
+    else if (r.kind === "polyline" && r.points.some((p, i) => i > 0 && segmentDistance(x, y, r.points[i - 1][0], r.points[i - 1][1], p[0], p[1]) <= tol)) out.push(r.id);
+  }
+  for (let i = rois.length - 1; i >= 0; i--) {
+    const r = rois[i];
+    if (r.kind === "rect" && x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1) out.push(r.id);
+    else if (r.kind === "circle" && Math.hypot(x - r.cx, y - r.cy) <= r.r) out.push(r.id);
+    else if (r.kind === "ellipse" && ((x - r.cx) / r.rx) ** 2 + ((y - r.cy) / r.ry) ** 2 <= 1) out.push(r.id);
+    else if (r.kind === "polygon" && pointInPolygon(x, y, r.points)) out.push(r.id);
+  }
+  return out;
+}
+
+/** Topmost ROI under (x, y) (see hitTestAll for the order), or null. */
 export function hitTest(rois: Roi[], x: number, y: number, tol: number): number | null {
-  for (let i = rois.length - 1; i >= 0; i--) {
-    const r = rois[i];
-    if (r.kind === "spot" && Math.abs(r.x - x) <= tol && Math.abs(r.y - y) <= tol) return r.id;
-    if (r.kind === "line" && segmentDistance(x, y, r.x0, r.y0, r.x1, r.y1) <= tol) return r.id;
-    if (r.kind === "polyline" && r.points.some((p, i) => i > 0 && segmentDistance(x, y, r.points[i - 1][0], r.points[i - 1][1], p[0], p[1]) <= tol)) return r.id;
-  }
-  for (let i = rois.length - 1; i >= 0; i--) {
-    const r = rois[i];
-    if (r.kind === "rect" && x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1) return r.id;
-    if (r.kind === "circle" && Math.hypot(x - r.cx, y - r.cy) <= r.r) return r.id;
-    if (r.kind === "ellipse" && ((x - r.cx) / r.rx) ** 2 + ((y - r.cy) / r.ry) ** 2 <= 1) return r.id;
-    if (r.kind === "polygon" && pointInPolygon(x, y, r.points)) return r.id;
-  }
-  return null;
+  return hitTestAll(rois, x, y, tol)[0] ?? null;
+}
+
+/**
+ * Which of the stacked ROIs under the pointer a click should grab. The selected ROI wins while it
+ * is under the pointer, so an ROI buried under others can be dragged once selected (by its number
+ * key or its row). With `cycle` (Alt/Option-click) the click steps to the next ROI down the stack,
+ * wrapping to the top.
+ */
+export function pickHit(hits: number[], selected: number | null, cycle: boolean): number | null {
+  if (hits.length === 0) return null;
+  const at = selected === null ? -1 : hits.indexOf(selected);
+  if (cycle) return hits[(at + 1) % hits.length];
+  return at >= 0 ? hits[at] : hits[0];
+}
+
+/** The ROI a digit key 1–9 selects: the Nth row of the ROI list (hidden ROIs are skipped). */
+export function roiForDigit(rois: Roi[], key: string): number | null {
+  if (!/^[1-9]$/.test(key)) return null;
+  const r = rois[Number(key) - 1];
+  return r && !r.hidden ? r.id : null;
 }
 
 export function pointInPolygon(x: number, y: number, pts: [number, number][]): boolean {

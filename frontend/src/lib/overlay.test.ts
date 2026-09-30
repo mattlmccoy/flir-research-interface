@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { COLOR_PRESETS, clientToImage, hitTest, roiColor, roiLeaderAnchor, traceColor, vertexHit } from "./overlay.ts";
+import { COLOR_PRESETS, clientToImage, hitTest, hitTestAll, pickHit, roiForDigit, roiColor, roiLeaderAnchor, traceColor, vertexHit } from "./overlay.ts";
 import type { Roi } from "./roi.ts";
 
 const RECT = { left: 100, top: 50, width: 320, height: 240 }; // canvas drawn at half size of 640x480
@@ -69,4 +69,34 @@ test("roiLeaderAnchor: circle ties to the ring (centre + radius reach), spot/rec
   assert.deepEqual(roiLeaderAnchor({ id: 2, kind: "spot", x: 3, y: 4 }, 2, 2), [7, 9, 0]);
   // rect ties to the centre with reach 0
   assert.deepEqual(roiLeaderAnchor({ id: 3, kind: "rect", x0: 0, y0: 0, x1: 10, y1: 20 }, 1, 1), [5, 10, 0]);
+});
+
+test("stacked ROIs: hitTestAll lists every ROI under the pointer, topmost first", () => {
+  const rois: Roi[] = [
+    { id: 1, kind: "rect", x0: 0, y0: 0, x1: 100, y1: 100 },
+    { id: 2, kind: "rect", x0: 10, y0: 10, x1: 90, y1: 90 },
+    { id: 3, kind: "spot", x: 50, y: 50 },
+  ];
+  assert.deepEqual(hitTestAll(rois, 50, 50, 2), [3, 2, 1]);
+  assert.deepEqual(hitTestAll(rois, 5, 5, 2), [1]);
+});
+
+test("pickHit: the selected ROI wins when buried, Alt-click cycles down the stack and wraps", () => {
+  const hits = [3, 2, 1];
+  assert.equal(pickHit(hits, null, false), 3);
+  assert.equal(pickHit(hits, 1, false), 1, "a selected ROI under others is grabbed for dragging");
+  assert.equal(pickHit(hits, 7, false), 3, "selection elsewhere: topmost");
+  assert.equal(pickHit(hits, null, true), 3);
+  assert.equal(pickHit(hits, 3, true), 2);
+  assert.equal(pickHit(hits, 1, true), 3);
+  assert.equal(pickHit([], 1, true), null);
+});
+
+test("roiForDigit selects the Nth ROI row and skips hidden ones", () => {
+  const rois: Roi[] = [{ id: 4, kind: "spot", x: 0, y: 0 }, { id: 9, kind: "spot", x: 1, y: 1, hidden: true }];
+  assert.equal(roiForDigit(rois, "1"), 4);
+  assert.equal(roiForDigit(rois, "2"), null);
+  assert.equal(roiForDigit(rois, "3"), null);
+  assert.equal(roiForDigit(rois, "0"), null);
+  assert.equal(roiForDigit(rois, "a"), null);
 });

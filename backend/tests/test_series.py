@@ -238,3 +238,39 @@ def test_roi_series_stride_subsamples_frames_for_the_plot(tmp_path: Path) -> Non
     assert len(strided["t_s"]) == 5 and len(full["t_s"]) == 20
     assert strided["t_s"] == full["t_s"][::4]
     assert strided["series"]["1"]["mean"] == full["series"]["1"]["mean"][::4]
+
+
+def test_cached_series_matches_uncached_and_reuses_unchanged_rois(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The playback cache (strided frames + per-ROI results) must return exactly what a cold
+    computation does, recompute only the ROI that moved, and never serve another run's data."""
+    from flir_research_interface.analysis import series as series_mod
+
+    series_mod.clear_series_cache()
+    d = _make_experiment(tmp_path, n=12)
+    r = ExperimentReader(d)
+    rois = parse_rois(
+        '[{"id":1,"kind":"rect","x0":2,"y0":1,"x1":4,"y1":3},'
+        '{"id":2,"kind":"circle","cx":3,"cy":2,"r":1.5},{"id":3,"kind":"spot","x":0,"y":0}]'
+    )
+    cold = roi_series(r, rois, stride=2)
+    assert roi_series(r, rois, stride=2, cache=True) == cold
+    reads: list[tuple[int, int]] = []
+    orig = ExperimentReader.counts_block
+
+    def spy(self: ExperimentReader, start: int, stop: int) -> np.ndarray:
+        reads.append((start, stop))
+        return orig(self, start, stop)
+
+    monkeypatch.setattr(ExperimentReader, "counts_block", spy)
+    assert roi_series(r, rois, stride=2, cache=True) == cold
+    moved = [dict(x) for x in rois]
+    moved[0]["x0"] = 1
+    warm = roi_series(r, moved, stride=2, cache=True)
+    assert warm == roi_series(r, moved, stride=2)
+    assert warm["series"]["2"] == cold["series"]["2"]
+    assert all(stop - start == 1 for start, stop in reads[:3]), "cached calls only probe the size"
+    other = ExperimentReader(_make_experiment(tmp_path, n=12, name="other"))
+    assert roi_series(other, rois, stride=2, cache=True) == roi_series(other, rois, stride=2)
+    series_mod.clear_series_cache()

@@ -52,6 +52,10 @@ export class TraceBuffer {
 
   get length(): number { return this.n; }
 
+  /** Time / value of the k-th oldest point (0 ≤ k < length), without copying the ring. */
+  tAt(k: number): number { return this.tBuf[(this.start + k) % this.cap]; }
+  vAt(k: number): number { return this.vBuf[(this.start + k) % this.cap]; }
+
   private ordered(src: Float64Array): Float64Array {
     const out = new Float64Array(this.n);
     for (let k = 0; k < this.n; k++) out[k] = src[(this.start + k) % this.cap];
@@ -60,6 +64,8 @@ export class TraceBuffer {
 
   get t(): Float64Array { return this.ordered(this.tBuf); }
   get v(): Float64Array { return this.ordered(this.vBuf); }
+  clear(): void { this.start = 0; this.n = 0; }
+
   get lastT(): number | null { return this.n ? this.tBuf[(this.start + this.n - 1) % this.cap] : null; }
 }
 

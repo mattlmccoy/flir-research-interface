@@ -36,6 +36,10 @@ import { RailSection } from "./components/studio/RailSection.tsx";
 import { PlotDock } from "./components/studio/PlotDock.tsx";
 import { StatusBar } from "./components/studio/StatusBar.tsx";
 import { LiveControlStrip } from "./components/LiveControlStrip.tsx";
+import { useControlStatus } from "./lib/useControlStatus.ts";
+import { LiveControl } from "./lib/liveControl.ts";
+import { evalRateAlarm, loadRateAlarm, saveRateAlarm, slopeOver, type RateAlarmState } from "./lib/rate.ts";
+import { RatePanel } from "./components/RatePanel.tsx";
 
 type Page = "live" | "setup" | "experiments" | "playback";
 const storage = (() => {
@@ -43,6 +47,22 @@ const storage = (() => {
 })();
 /** ~10 min of live trace at 15 Hz per ROI. */
 const MAX_TRACE_POINTS = 9000;
+
+/** Three short tones: the heating-rate alarm (best effort; browsers may block audio until a click). */
+function beep(): void {
+  try {
+    const AC = (globalThis as { AudioContext?: typeof AudioContext }).AudioContext;
+    if (!AC) return;
+    const ctx = new AC();
+    for (let i = 0; i < 3; i++) {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.value = 880; g.gain.value = 0.15;
+      o.connect(g); g.connect(ctx.destination);
+      o.start(ctx.currentTime + i * 0.25); o.stop(ctx.currentTime + i * 0.25 + 0.15);
+    }
+    setTimeout(() => { void ctx.close(); }, 1200);
+  } catch { /* no audio */ }
+}
 
 export function App() {
   const [page, setPage] = useState<Page>("setup");
@@ -109,17 +129,58 @@ export function App() {
   const t0Ref = useRef<number | null>(null);
   const [liveStats, setLiveStats] = useState<StatsMap>(new Map());
   const [liveWindow, setLiveWindow] = useState(60);
+  const nowTRef = useRef(0);
+  // RF power, closed-loop setpoint and RF ON/OFF edges from the linked RF controller (CXN panel),
+  // drawn on the live plot against the ROI temperatures.
+  const liveCtl = useRef(new LiveControl());
+  const ctlStatus = useControlStatus(1000);
+  useEffect(() => { liveCtl.current.ingest(ctlStatus, nowTRef.current); }, [ctlStatus]);
+  // Heating-rate alarm: per-ROI max traces feed the rate (the plot shows means).
+  const maxBuffers = useRef(new Map<number, TraceBuffer>());
+  const [rateCfg, setRateCfg] = useState(() => loadRateAlarm(storage));
+  useEffect(() => { saveRateAlarm(storage, rateCfg); }, [rateCfg]);
+  const rateCfgRef = useRef(rateCfg);
+  rateCfgRef.current = rateCfg;
+  const [rates, setRates] = useState<Map<number, number | null>>(new Map());
   const onStats = useCallback((m: StatsMap, f: FrameMessage) => {
     if (t0Ref.current === null) t0Ref.current = f.header.device_timestamp_ns;
     const t = (f.header.device_timestamp_ns - t0Ref.current) / 1e9;
+    nowTRef.current = t;
     for (const [id, s] of m) {
       let b = buffers.current.get(id);
       if (!b) { b = new TraceBuffer(MAX_TRACE_POINTS); buffers.current.set(id, b); }
       if (b.lastT !== t) b.push(t, s.mean);
+      let bm = maxBuffers.current.get(id);
+      if (!bm) { bm = new TraceBuffer(MAX_TRACE_POINTS); maxBuffers.current.set(id, bm); }
+      if (bm.lastT !== t) bm.push(t, s.max);
     }
     for (const id of Array.from(buffers.current.keys())) if (!m.has(id)) buffers.current.delete(id);
+    for (const id of Array.from(maxBuffers.current.keys())) if (!m.has(id)) maxBuffers.current.delete(id);
+    const rc = rateCfgRef.current;
+    const src = rc.stat === "max" ? maxBuffers.current : buffers.current;
+    const next = new Map<number, number | null>();
+    for (const [id, b] of src) next.set(id, slopeOver(b, rc.windowS));
+    setRates(next);
     setLiveStats(m);
   }, []);
+  const alarmRef = useRef<RateAlarmState>({ tripped: false, roi: null, rate: null });
+  const [alarmLatched, setAlarmLatched] = useState<RateAlarmState | null>(null);
+  const recordingRef = useRef(false);
+  useEffect(() => {
+    const prev = alarmRef.current;
+    const next = evalRateAlarm(rates, rateCfg, prev);
+    alarmRef.current = next;
+    if (next.tripped && !prev.tripped) {
+      setAlarmLatched(next);
+      if (rateCfg.beep) beep();
+      if (rateCfg.mark && recordingRef.current) {
+        const r = rois.rois.find((x) => x.id === next.roi);
+        void api.recordingEvent("rate alarm", `${r ? roiLabel(r) : "ROI"} ${next.rate?.toFixed(2)} °C/s ≥ ${rateCfg.threshold} °C/s (${rateCfg.stat}, ${rateCfg.windowS} s)`).catch(() => undefined);
+      }
+    } else if (next.tripped) {
+      setAlarmLatched((l) => (l && next.rate !== null && next.rate > (l.rate ?? -Infinity) ? { ...l, rate: next.rate } : l));
+    }
+  }, [rates, rateCfg]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refreshInfo = useCallback(() => { api.info().then(setInfo).catch(() => undefined); }, []);
   const [field, setField] = useState<FieldSnapshot | null>(null);
@@ -158,6 +219,8 @@ export function App() {
     await api.disconnect();
     setFrame(null);
     buffers.current.clear();
+    maxBuffers.current.clear();
+    liveCtl.current.clear();
     t0Ref.current = null;
     await refresh();
     setPage("setup");
@@ -167,6 +230,7 @@ export function App() {
   const cam = info ?? {};
   const active = cam.active_case as { low_c?: number; high_c?: number } | undefined;
   const isRecording = recording?.state === "recording";
+  recordingRef.current = isRecording;
   const visibleAvailable = recording?.visible?.state !== "unavailable";
   const nearLimit = hdr && active && hdr.max_c != null && active.high_c != null && hdr.max_c > active.high_c - 10;
   const allHidden = !layout.rail && !layout.dock;
@@ -217,7 +281,10 @@ export function App() {
     </>
   );
 
-  const statusbar = <StatusBar status={status} recording={recording} displayFps={wsFps} stale={stale} extra={page === "live" ? <LiveControlStrip /> : undefined} />;
+  const rateBadge = alarmLatched
+    ? <button type="button" className="badge rec" onClick={() => dispatch({ type: "openSection", section: "measurements" })} title="Heating-rate alarm tripped. Click to open it in the measurements panel.">RATE ALARM {alarmLatched.rate?.toFixed(1)} °C/s</button>
+    : null;
+  const statusbar = <StatusBar status={status} recording={recording} displayFps={wsFps} stale={stale} extra={page === "live" ? <>{rateBadge}<LiveControlStrip /></> : undefined} />;
 
   if (page === "setup") {
     return <StudioFrame layout={layout} page topbar={topbar} statusbar={statusbar}
@@ -251,9 +318,9 @@ export function App() {
           <ThermalView frame={frame} palette={palette} scaleMode={scaleMode} manual={manual} onScale={setShown} setManual={setManual} setScaleMode={setScaleMode}
             rois={rois.rois} selected={rois.selected} selectedIds={rois.selectedIds} tool={layout.tool} roisHidden={layout.roisHidden} labelScope={roiScope} zoom={layout.zoom} onRoi={roiDispatch} onStats={onStats} rad={rad} extremes={layout.extremes} isotherm={layout.isotherm} onField={setField} reference={reference} hold={layout.hold} flipH={layout.flipH} flipV={layout.flipV} agc={layout.agc} filter={layout.filter} units={layout.units} valid={layout.segment.on ? { min: layout.segment.min, max: layout.segment.max } : null}
             overlay={layout.visibleMode === "overlay" && !calibrating && visibleAvailable ? <VisibleLive plain /> : undefined} overlayStyle={layout.overlay} overlayH={align.H}
-            topLayer={calibrating ? <PickLayer label="IR" color="var(--live)" points={align.pairs.map((p) => p.ir)} pending={align.pending?.ir} onPick={(p) => alignDispatch({ type: "pick", side: "ir", p })} /> : undefined} />
+            topLayer={calibrating ? <PickLayer label="IR" flipH={layout.flipH} flipV={layout.flipV} color="var(--live)" points={align.pairs.map((p) => p.ir)} pending={align.pending?.ir} onPick={(p) => alignDispatch({ type: "pick", side: "ir", p })} /> : undefined} />
           {(layout.visibleMode === "side" || calibrating) && visibleAvailable && (
-            <VisibleLive big flipH={layout.flipH} flipV={layout.flipV} topLayer={calibrating ? <PickLayer label="visible" color="var(--accent)" points={align.pairs.map((p) => p.visible)} pending={align.pending?.visible} onPick={(p) => alignDispatch({ type: "pick", side: "visible", p })} /> : undefined} />
+            <VisibleLive big flipH={layout.flipH} flipV={layout.flipV} topLayer={calibrating ? <PickLayer label="visible" flipH={layout.flipH} flipV={layout.flipV} color="var(--accent)" points={align.pairs.map((p) => p.visible)} pending={align.pending?.visible} onPick={(p) => alignDispatch({ type: "pick", side: "visible", p })} /> : undefined} />
           )}
         </div>
       }
@@ -264,7 +331,7 @@ export function App() {
               {WINDOWS.map((w) => <option key={String(w)} value={String(w)}>{windowLabel(w)}</option>)}
             </select>
           }>
-          <TimePlot traces={withDelta} window={visibleWindow(nowT, liveWindow, 0)} emptyText="add a spot or rectangle ROI to plot its temperature" />
+          <TimePlot traces={[...withDelta, ...liveCtl.current.leftTraces()]} rightTraces={liveCtl.current.rightTraces()} rightUnits="W" markers={liveCtl.current.markers} window={visibleWindow(nowT, liveWindow, 0)} emptyText="add a spot or rectangle ROI to plot its temperature" />
         </PlotDock>
       }
       rail={
@@ -286,6 +353,7 @@ export function App() {
             <RoiRows rois={rois.rois} units={layout.units} conv={field?.conv ?? null} stats={liveStats} selected={rois.selected} selectedIds={rois.selectedIds} extremes={layout.extremes} onExtremes={(on) => dispatch({ type: "setExtremes", on })}
               dispatch={roiDispatch} />
             <DeltaPicker rois={rois.rois} delta={layout.delta} onChange={(delta) => dispatch({ type: "setDelta", delta })} />
+            <RatePanel rois={rois.rois} rates={rates} cfg={rateCfg} onCfg={setRateCfg} latched={alarmLatched} onAck={() => setAlarmLatched(null)} />
           </RailSection>
           <RailSection id="profile" title="profile & histogram" open={layout.sections.profile} onToggle={() => dispatch({ type: "toggleSection", section: "profile" })} tag="current frame">
             <ProfilePanel field={field} rois={rois.rois} selected={rois.selected} shown={shown} />

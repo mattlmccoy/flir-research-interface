@@ -7,6 +7,14 @@ interface Props { status: Status; recording: RecordingStatus | null; displayFps?
 function num(v: number | null | undefined, d = 1): string { return v == null || !Number.isFinite(v) ? "—" : v.toFixed(d); }
 function gb(bytes: number | undefined): string { return bytes == null ? "—" : (bytes / 1e9).toFixed(0); }
 
+/** Where this recording's frame-id gaps came from, from the driver's transport counters. */
+function gapTitle(rec: RecordingStatus | null): string {
+  const base = "Frames the camera sent that never arrived (missing frame ids).";
+  const t = rec?.transport;
+  if (!t) return base;
+  return `${base} This run: ${t.lost ?? 0} lost on the network, ${t.dropped ?? 0} dropped by the driver (app fell behind), ${t.incomplete ?? 0} incomplete (discarded), ${t.missed_packets ?? 0} missed packets, ${t.resend_requests ?? 0} resend requests.`;
+}
+
 /**
  * Bottom status bar (spec §3). Never shows green; drops are red, gaps amber. The recorder's
  * counters (rec-drop, gaps) stay visible through recording, finalizing AND error — a crash
@@ -49,14 +57,14 @@ export function StatusBar({ status, recording, displayFps = 0, stale = false, le
           <span>cam <b>{num(status.camera_fps)}</b> fps</span>
           <span>disp <b>{num(displayFps)}</b> fps</span>
           <span>rx <b>{status.frames_received ?? 0}</b></span>
-          <span>viz-drop <b>{status.viz_dropped ?? 0}</b></span>
+          <span title="Frames the live display skipped because it redraws slower than the camera streams. Expected and harmless: recording still receives every frame.">disp-skip <b>{status.viz_dropped ?? 0}</b></span>
           {stale && <span className="bad">NO FRAMES</span>}
         </>
       )}
       {showRecCounters && (
         <>
           <span className={(recording?.queue_dropped ?? 0) > 0 ? "bad" : ""}>rec-drop <b>{recording?.queue_dropped ?? 0}</b></span>
-          <span className={(recording?.frame_id_gaps ?? 0) > 0 ? "warnv" : ""}>gaps <b>{recording?.frame_id_gaps ?? 0}</b></span>
+          <span className={(recording?.frame_id_gaps ?? 0) > 0 ? "warnv" : ""} title={gapTitle(recording)}>gaps <b>{recording?.frame_id_gaps ?? 0}</b></span>
         </>
       )}
       {state === "error" && <span className="bad">REC ERROR — {recording?.error}</span>}

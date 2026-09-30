@@ -143,6 +143,7 @@ class Recorder:
         free_space_gb: Callable[[Path], float] = _default_free_space_gb,
         compressor: Any | None = None,
         flush_interval_s: float = 0.5,
+        transport_stats: Callable[[], dict[str, Any] | None] | None = None,
         stall_threshold_s: float = DEFAULT_STALL_S,
         clock: Callable[[], int] = time.time_ns,
     ) -> None:
@@ -167,6 +168,10 @@ class Recorder:
         self._group: Any = None
         self._listener_attached = False
         self._counts_arr: Any = None
+        if transport_stats is None and service is not None:
+            transport_stats = service.backend.transport_stats
+        self._transport_stats = transport_stats
+        self._transport_start: dict[str, Any] | None = None
         self._reset_counters()
 
     def _reset_counters(self) -> None:
@@ -204,6 +209,7 @@ class Recorder:
         return self._exp_dir
 
     def stats(self) -> dict[str, Any]:
+        transport = self.transport_delta()  # outside the lock: never stall submit() on a node read
         with self._lock:
             dur = (
                 (self._last_ts - self._first_ts) / 1e9
@@ -230,6 +236,7 @@ class Recorder:
                 else None,
                 "min_free_gb": self._min_free_gb,
                 "error": self._error,
+                "transport": transport,
                 **self._live_stall_stats(),
             }
 
@@ -337,6 +344,7 @@ class Recorder:
                 nm, shape=(0,), chunks=(max(self._chunk, 1024),), dtype="int64"
             )
 
+        self._transport_start = self._read_transport()
         self._event("recording_started", {"name": name})
         with self._lock:
             self._state = RecorderState.RECORDING
@@ -349,6 +357,29 @@ class Recorder:
             self._listener_attached = True
         logger.info("recording to %s", exp_dir)
         return exp_dir
+
+    def _read_transport(self) -> dict[str, Any] | None:
+        if self._transport_stats is None:
+            return None
+        try:
+            return self._transport_stats()
+        except Exception:  # noqa: BLE001 - diagnostics must never affect the recording
+            logger.debug("transport counters unavailable", exc_info=True)
+            return None
+
+    def transport_delta(self) -> dict[str, int] | None:
+        """Transport counters accumulated since this recording started (camera/driver-side frame
+        and packet losses), or None when the backend has no such counters."""
+        start = self._transport_start
+        now = self._read_transport() if start is not None else None
+        if start is None or now is None:
+            return None
+        out: dict[str, int] = {}
+        for k, v in now.items():
+            v0 = start.get(k)
+            if isinstance(v, int) and not isinstance(v, bool) and isinstance(v0, int):
+                out[k] = max(0, v - v0)
+        return out
 
     def submit(self, frame: Frame) -> None:
         """Called on the camera thread. Never blocks."""
@@ -627,6 +658,7 @@ class Recorder:
 
     def _write_manifest(self) -> dict[str, Any]:
         assert self._exp_dir is not None
+        transport = self.transport_delta()
         stop_ns = self._stop_ns if self._stop_ns is not None else self._clock()
         with self._lock:
             self._close_frozen()  # a NUC still in progress at stop is still a frozen run
@@ -654,6 +686,8 @@ class Recorder:
                 "frozen_runs": len(self._frozen_runs),
                 "frozen_events": self._frozen_runs,
                 "gap_events": list(self._gap_events),
+                # where the gaps came from: lost/missed_packets = network, dropped = driver queue
+                "transport": transport,
                 "duration_s": dur,
                 "error": self._error,
                 "stall_threshold_s": self._stall_threshold_s,

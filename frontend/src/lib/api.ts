@@ -18,7 +18,9 @@ function req(path: string, init: RequestInit = {}): Promise<Response> {
 }
 
 export interface Device { backend: string; model: string; serial: string; ip_address: string | null; mac_address: string | null; firmware: string | null; interface: string; }
-export interface Status { state: string; backend?: string | null; device?: Device | null; frames_received?: number; viz_dropped?: number; camera_fps?: number | null; last_error?: string | null; }
+/** Cumulative GigE transport counters from the driver (null/absent without a real camera). */
+export interface Transport { lost?: number | null; dropped?: number | null; incomplete?: number | null; missed_packets?: number | null; resend_requests?: number | null; incomplete_seen_by_app?: number | null; }
+export interface Status { state: string; backend?: string | null; device?: Device | null; frames_received?: number; viz_dropped?: number; camera_fps?: number | null; last_error?: string | null; transport?: Transport | null; }
 
 async function j<T>(r: Promise<Response>): Promise<T> {
   const res = await r;
@@ -39,7 +41,7 @@ async function j<T>(r: Promise<Response>): Promise<T> {
 }
 export interface VisibleStatus { state: string; restarts?: number; reconnecting?: boolean; segments?: number; gaps?: number; file?: string | null; started_host_ns?: number | null; url?: string; error?: string | null; reason?: string; }
 export interface ArmedStatus { trigger: Record<string, unknown>; machine: { state: string; frames_recorded: number; reason: string | null; sustain: number }; watched_value: number | null; watched_roi: number | null; ring_frames: number; pretrigger_frames: number; }
-export interface RecordingStatus { state: string; armed?: ArmedStatus; visible?: VisibleStatus; experiment_dir?: string | null; frames_received?: number; frames_written?: number; queue_depth?: number; queue_dropped?: number; frame_id_gaps?: number; repeated_frames?: number; every_nth?: number; frames_skipped_interval?: number; duration_s?: number; recorded_fps?: number | null; free_space_gb?: number | null; min_free_gb?: number; error?: string | null; experiments_root?: string; last_frame_age_s?: number | null; stream_stalled?: boolean; stream_stalls?: number; stall_threshold_s?: number; }
+export interface RecordingStatus { state: string; armed?: ArmedStatus; visible?: VisibleStatus; experiment_dir?: string | null; frames_received?: number; frames_written?: number; queue_depth?: number; queue_dropped?: number; frame_id_gaps?: number; transport?: Transport | null; repeated_frames?: number; every_nth?: number; frames_skipped_interval?: number; duration_s?: number; recorded_fps?: number | null; free_space_gb?: number | null; min_free_gb?: number; error?: string | null; experiments_root?: string; last_frame_age_s?: number | null; stream_stalled?: boolean; stream_stalls?: number; stall_threshold_s?: number; }
 export interface Previews {
   units: "celsius" | "counts";
   preview: { file: string; frame_index: number; t_s: number; size?: [number, number]; units?: string; sha256: string };
