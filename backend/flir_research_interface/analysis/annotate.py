@@ -36,7 +36,8 @@ def colorize(values: npt.NDArray[np.float32], vmin: float, vmax: float) -> npt.N
         if span > 0
         else np.full(v.shape, 128, dtype=np.uint8)
     )
-    return INFERNO_LUT[idx]
+    out: npt.NDArray[np.uint8] = INFERNO_LUT[idx]
+    return out
 
 
 def _font(size: int) -> ImageFont.FreeTypeFont:

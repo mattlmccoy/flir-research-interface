@@ -186,7 +186,11 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: Roi
         </>)}
         <span>Rec. dropped</span><span className="v" style={{ color: (status.queue_dropped ?? 0) > 0 ? "var(--err)" : undefined }}>{status.queue_dropped ?? 0}</span>
         <span title="consecutive frames with identical pixels: the camera repeats its last image during a NUC (~2 s). Kept in the record, logged in events.json as frozen_frames">Frozen frames</span><span className="v" style={{ color: (status.repeated_frames ?? 0) > 0 ? "var(--warn)" : undefined }}>{status.repeated_frames ?? 0}</span>
-        <span>Camera gaps</span><span className="v" style={{ color: (status.frame_id_gaps ?? 0) > 0 ? "var(--warn)" : undefined }}>{status.frame_id_gaps ?? 0}</span>
+        <span title="Frames the camera sent that never arrived (missing frame ids)">Camera gaps</span><span className="v" style={{ color: (status.frame_id_gaps ?? 0) > 0 ? "var(--warn)" : undefined }}>{status.frame_id_gaps ?? 0}</span>
+        {status.transport && (<>
+          <span title="From the camera driver, this run only. Network = lost frames + missed packets on the GigE link (cable, adapter, switch). Driver = frames the driver discarded because its buffers filled while the app fell behind.">Gap source</span>
+          <span className="v">net {status.transport.lost ?? 0} · driver {status.transport.dropped ?? 0} · incompl. {status.transport.incomplete ?? 0}</span>
+        </>)}
         <span>Free disk</span><span className="v" style={{ color: low ? "var(--err)" : undefined }}>{status.free_space_gb != null ? `${status.free_space_gb.toFixed(1)} GB` : "—"}</span>
       </div>
       {recording && vis?.state === "error" && (

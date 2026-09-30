@@ -274,7 +274,10 @@ class SpinnakerCameraBackend(CameraBackend):
             camera exactly as found (read-only inspection).
         pixel_format: pixel format to configure when ``ir_format`` is not ``None``.
         buffer_handling: TL stream ``StreamBufferHandlingMode`` entry.
-        buffer_count: TL stream ``StreamBufferCountManual``.
+        buffer_count: TL stream ``StreamBufferCountManual``. 200 buffers hold ~6.7 s at 30 Hz
+            (~120 MB at 640x480), so a multi-second stall of the Python side (GIL contention from
+            a render or export running alongside live acquisition) no longer overflows the
+            driver's queue and drops frames; the old 30 held only one second.
         grab_timeout_ms: ``GetNextImage`` timeout.
         restore_on_disconnect: put ``IRFormat``/``PixelFormat`` back to the as-found values.
     """
@@ -285,7 +288,7 @@ class SpinnakerCameraBackend(CameraBackend):
         ir_format: IRFormat | None = IRFormat.TEMPERATURE_LINEAR_10MK,
         pixel_format: str = "Mono16",
         buffer_handling: str = "OldestFirst",
-        buffer_count: int = 30,
+        buffer_count: int = 200,
         grab_timeout_ms: int = 2000,
         restore_on_disconnect: bool = True,
     ) -> None:
@@ -460,6 +463,15 @@ class SpinnakerCameraBackend(CameraBackend):
                 )
         except (ps.SpinnakerException, CameraError) as exc:
             logger.warning("stream buffer configuration skipped: %s", exc)
+        # Ask the camera to resend lost GigE packets instead of delivering the frame incomplete
+        # (which is discarded and shows up as a frame-id gap). Spinnaker's default varies by
+        # version; set it explicitly where the node exists.
+        try:
+            node = snm.GetNode("StreamPacketResendEnable")
+            if node is not None and ps.IsWritable(node):
+                ps.CBooleanPtr(node).SetValue(True)
+        except ps.SpinnakerException as exc:
+            logger.warning("packet resend configuration skipped: %s", exc)
 
     def _enumerate_cases(self) -> list[dict[str, Any]]:
         ps, nm = self._ps, self._nodemap
@@ -597,6 +609,11 @@ class SpinnakerCameraBackend(CameraBackend):
         out = {k: _read(self._ps, self._stream_nodemap, n) for k, n in STREAM_COUNTER_NODES.items()}
         out["incomplete_seen_by_app"] = self.incomplete_seen
         return out
+
+    def transport_stats(self) -> dict[str, Any] | None:
+        if self._cam is None:
+            return None
+        return self.stream_stats()
 
     def frames(self) -> Iterator[Frame]:
         self._require_connected()

@@ -664,6 +664,10 @@ def create_app(
         if svc is None:
             return {"state": ServiceState.DISCONNECTED.value, "backend": None, "device": None}
         st = svc.stats()
+        try:
+            st["transport"] = svc.backend.transport_stats()
+        except Exception:  # noqa: BLE001 - diagnostics only
+            st["transport"] = None
         st["backend"] = app.state.backend_name
         st["device"] = svc.device.__dict__ if svc.device else None
         return st
@@ -987,6 +991,7 @@ def create_app(
             experiments_root=app.state.experiments_root,
             min_free_gb=app.state.min_free_gb,
             every_nth=req.every_nth,
+            transport_stats=svc.backend.transport_stats,
         )
         kwargs: dict[str, Any] = {
             "name": req.name,
