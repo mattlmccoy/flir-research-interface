@@ -9,8 +9,8 @@ export interface VisibleSegment { index: number; file: string; offset_s?: number
 export interface VisibleGap { after_segment: number; start_s: number; duration_s: number; }
 export interface VisibleInfo { file?: string | null; segments?: VisibleSegment[] | null; }
 
-/** The A70 stream's opening keyframe sometimes arrives split, so a file's frame 0 is torn and its
- *  second half follows within 0.07 s (7 of 18 runs up to 2026-09-30). Never show earlier than this. */
+/** A file's frame 0 is sometimes torn (7 of 18 runs up to 2026-09-30; likely the opening keyframe
+ *  split across two packets, unverified); from 0.07 s on it decodes clean. Never show earlier than this. */
 export const FRAME0_SKIP_S = 0.25;
 
 const startOf = (s: VisibleSegment): number => s.t_start_s ?? s.offset_s ?? 0;

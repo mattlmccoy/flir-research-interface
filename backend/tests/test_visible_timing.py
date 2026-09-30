@@ -87,6 +87,6 @@ def test_no_visible_video_has_no_segments() -> None:
 
 
 def test_first_frame_skip_is_past_the_torn_keyframe_split() -> None:
-    """The A70 stream's opening keyframe sometimes arrives split: frame 0 is torn and its second
-    half lands as frame 1 within 0.069 s (7 of 18 runs). Shown video never starts before this."""
+    """Frame 0 is sometimes torn and the video decodes clean from 0.07 s on (7 of 18 runs, likely a
+    split opening keyframe, unverified). Shown video never starts before this."""
     assert 0.07 < FRAME0_SKIP_S <= 0.25
