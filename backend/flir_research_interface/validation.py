@@ -13,6 +13,7 @@ import csv
 import logging
 import time
 from collections.abc import Iterable, Sequence
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,7 @@ from flir_research_interface.analysis.stats import (
 )
 from flir_research_interface.camera import create_backend
 from flir_research_interface.camera.base import Frame
+from flir_research_interface.camera.frame_ids import frames_missing
 from flir_research_interface.camera.simulated import HotspotRampScene
 from flir_research_interface.radiometry.temperature_linear import IRFormat, counts_to_celsius
 
@@ -105,7 +107,7 @@ def summarize_rows(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
         "frames": len(rows),
         "duration_s": duration_s,
         "fps_from_device_timestamps": (len(rows) - 1) / duration_s if duration_s > 0 else None,
-        "frame_id_gaps": int(np.sum(np.diff(ids) - 1)) if len(ids) > 1 else 0,
+        "frame_id_gaps": sum(frames_missing(int(a), int(b)) for a, b in pairwise(ids)),
         "center_C_mean": float(center.mean()),
         "center_C_std": float(center.std()),
         "center_C_min": float(center.min()),

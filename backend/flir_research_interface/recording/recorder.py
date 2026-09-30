@@ -49,6 +49,7 @@ from numcodecs import Blosc
 from flir_research_interface import __version__
 from flir_research_interface.acquisition.service import AcquisitionService
 from flir_research_interface.camera.base import Frame
+from flir_research_interface.camera.frame_ids import frames_missing
 from flir_research_interface.radiometry.temperature_linear import (
     KELVIN_OFFSET,
     IRFormat,
@@ -426,14 +427,14 @@ class Recorder:
 
     def _account(self, frame: Frame) -> None:
         with self._lock:
-            if self._last_frame_id is not None and frame.frame_id > self._last_frame_id + 1:
-                missing = frame.frame_id - self._last_frame_id - 1
-                self._gap_events.append({"after_frame_id": self._last_frame_id, "missing": missing})
+            last = self._last_frame_id
+            if last is not None and (missing := frames_missing(last, frame.frame_id)):
+                self._gap_events.append({"after_frame_id": last, "missing": missing})
                 self._events.append(
                     {
                         "t_utc": datetime.now(timezone.utc).isoformat(),
                         "type": "frame_gap",
-                        "after_frame_id": self._last_frame_id,
+                        "after_frame_id": last,
                         "missing": missing,
                     }
                 )

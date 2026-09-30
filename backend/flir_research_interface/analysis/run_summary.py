@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import math
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -181,6 +182,29 @@ def plot_marks(reader: ExperimentReader) -> list[tuple[int, str]]:
     return out
 
 
+def mark_indices(
+    frame_ids: Sequence[int], marks: Sequence[tuple[int, str]]
+) -> list[int | None]:
+    """Frame index of each mark, matched by exact id (events carry the ids of stored frames).
+
+    Ids are not sorted (the 16-bit counter wraps 65535 -> 1) and repeat once a run outlasts one
+    cycle, so each mark takes the occurrence at or after the previous mark, else the nearest one
+    before it. None when the id is not in the recording.
+    """
+    ids = np.asarray(frame_ids, dtype=np.int64)
+    out: list[int | None] = []
+    prev = 0
+    for fid, _ in marks:
+        hits = np.flatnonzero(ids == fid)
+        if hits.size == 0:
+            out.append(None)
+            continue
+        later = hits[hits >= prev]
+        prev = int(later[0]) if later.size else int(hits[-1])
+        out.append(prev)
+    return out
+
+
 def roi_plot_png(reader: ExperimentReader, rois: list[dict[str, Any]]) -> bytes:
     """Traces of every ROI (value, or mean with min–max band) vs time, with operator marks."""
     series = roi_series(reader, rois)
@@ -239,9 +263,9 @@ def roi_plot_png(reader: ExperimentReader, rois: list[dict[str, Any]]) -> bytes:
     d.text((x0, y1 + 48), "time (s)", fill=(200, 200, 200), font=font)
     units = "°C" if (reader.ir_format or "").startswith("TemperatureLinear") else "counts"
     d.text((12, y0 - 44), units, fill=(200, 200, 200), font=font)
-    for frame_id, label in plot_marks(reader):
-        idx = np.searchsorted(np.asarray(series["frame_id"]), frame_id)
-        if idx >= t.size:
+    marks = plot_marks(reader)
+    for idx, (_, label) in zip(mark_indices(series["frame_id"], marks), marks, strict=True):
+        if idx is None or idx >= t.size:
             continue
         x = px(float(t[idx]))
         nuc = label.startswith("NUC")
@@ -293,4 +317,4 @@ def write_run_summary(reader: ExperimentReader) -> dict[str, str | None]:
     return {"readme": str(readme), "roi_plot": str(plot) if plot else None}
 
 
-__all__ = ["plot_marks", "readme_text", "roi_plot_png", "write_run_summary"]
+__all__ = ["mark_indices", "plot_marks", "readme_text", "roi_plot_png", "write_run_summary"]
