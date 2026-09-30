@@ -7,8 +7,9 @@ time they arrived (``host_timestamp_ns``), so a segment starts ``t_start_s`` =
 by the RTSP connect time (not recorded; ~1.5 s on 2026-09-30 runs), so the video may still trail by
 that much. Pre-trigger frames and failed RTSP opens no longer shift it by seconds.
 
-The A70 stream's opening keyframe sometimes arrives split: frame 0 of a file is torn (vertically
-wrapped) and its second half lands as frame 1 within 0.07 s (7 of 18 runs up to 2026-09-30).
+Frame 0 of a file is sometimes torn (vertically wrapped; 7 of 18 runs up to 2026-09-30). Those
+files all have an unusually large (~45 KB) second packet within 0.07 s, likely the opening
+keyframe split in two (unverified); from the next frame the video decodes clean.
 Nothing shows a segment's first ``FRAME0_SKIP_S``.
 """
 
