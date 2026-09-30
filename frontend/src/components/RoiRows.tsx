@@ -106,7 +106,7 @@ export function RoiRows({ rois, stats, selected, selectedIds, dispatch, extremes
         <li>◯ Circle: drag from the centre outwards. ⬭ Ellipse: drag its bounding box corner to corner.</li>
         <li>╱ Line: drag from one end to the other; the pixels along it are measured.</li>
         <li>⬠ Polygon: click each vertex; double-click places the last one and closes the shape (Enter closes, Esc cancels, Backspace undoes a vertex). ⌇ Spline: the same, but open. ✎ Freehand: hold the mouse and draw; releasing closes the shape.</li>
-        <li>↖ Select: click an ROI, then drag to move it; Delete removes it. Shift-click to select several and drag them together. ROIs stacked on top of each other: press 1–9 to select that row's ROI (or Alt/Option-click to step down through the stack), then drag anywhere inside it, even where others cover it. When a polygon, spline or line is selected, drag its square handles to edit individual vertices.</li>
+        <li>↖ Select: click an ROI, then drag to move it; Delete removes it. Shift-click to select several and drag them together. ROIs stacked on top of each other: press 1–9 to select that row's ROI (or Alt/Option-click to step down through the stack), then drag anywhere inside it, even where others cover it. When a polygon, spline or line is selected, drag its square handles to edit individual vertices. Cmd/Ctrl+Z undoes an ROI change; Cmd/Ctrl+Y or Cmd/Ctrl+Shift+Z redoes it.</li>
         <li>Click the color square to recolor, set a per-ROI emissivity and reflected temperature (values are re-corrected from the camera's setting); double-click the name to rename; ◉ hides an ROI on the image and plot without removing it.</li>
       </ul>
     </Disclosure>
@@ -135,7 +135,7 @@ export function RoiRows({ rois, stats, selected, selectedIds, dispatch, extremes
             <span key={`x${r.id}`} style={{ display: "flex", gap: 4 }}>
               <button className="secondary" type="button" onClick={() => dispatch({ type: "toggleHidden", id: r.id })} aria-pressed={!!r.hidden} aria-label={`${r.hidden ? "Show" : "Hide"} ${roiLabel(r)}`} title={r.hidden ? "Hidden on the image (still measured and recorded) · click to show" : "Hide on the image (still measured and recorded)"} style={{ opacity: r.hidden ? 0.5 : 1 }}>{r.hidden ? "◌" : "◉"}</button>
               <button className="secondary" type="button" onClick={() => setOptics(optics === r.id ? null : r.id)} aria-pressed={optics === r.id} aria-label={`Optics for ${roiLabel(r)}`} title="Per-ROI emissivity, reflected temperature and distance (for accuracy on this region)" style={{ fontWeight: (r.emissivity !== undefined || r.reflected_c !== undefined || r.distance_m !== undefined) ? 700 : 400, color: (r.emissivity !== undefined || r.reflected_c !== undefined || r.distance_m !== undefined) ? "var(--accent)" : undefined }}>ε</button>
-              <button className="secondary" type="button" onClick={() => dispatch({ type: "remove", id: r.id })} aria-label={`Remove ${roiLabel(r)}`} title="Remove">×</button>
+              <button className="secondary" type="button" onClick={() => { dispatch({ type: "commit" }); dispatch({ type: "remove", id: r.id }); dispatch({ type: "commit" }); }} aria-label={`Remove ${roiLabel(r)}`} title="Remove">×</button>
             </span>,
             <StatsLine key={`s${r.id}`} r={r} s={stats.get(r.id)} units={units} conv={conv} />,
             picking === r.id ? <div key={`c${r.id}`} style={{ gridColumn: "1 / -1" }}><ColorPicker r={r} i={i} dispatch={dispatch} onDone={() => setPicking(null)} /></div> : null,

@@ -12,7 +12,8 @@ import type { PaletteName } from "../lib/palette.ts";
 import type { Range, ScaleMode } from "../lib/scale.ts";
 import type { LayoutAction, LayoutState } from "../lib/layout.ts";
 import { SPEEDS, clampIndex, nextFrameDelayMs, speedLabel } from "../lib/playback.ts";
-import { hasRois, loadRois, roiLabel, roisDifferFromStored, type Roi, type RoiAction, type RoiState } from "../lib/roi.ts";
+import type { RoiHistoryAction } from "../lib/roiHistory.ts";
+import { hasRois, loadRois, roiLabel, roisDifferFromStored, type Roi, type RoiState } from "../lib/roi.ts";
 
 const roiStorage: Storage | null = (() => { try { return typeof localStorage !== "undefined" ? localStorage : null; } catch { return null; } })();
 /** Parse the plain ROI dicts stored with a recording into validated Roi objects. */
@@ -46,7 +47,7 @@ import { StatusBar } from "./studio/StatusBar.tsx";
 interface Props {
   name: string;
   layout: LayoutState; dispatch: Dispatch<LayoutAction>; topbar: ReactNode;
-  rois: RoiState; roiDispatch: Dispatch<RoiAction>;
+  rois: RoiState; roiDispatch: Dispatch<RoiHistoryAction>;
   status: Status; recording: RecordingStatus | null;
   palette: PaletteName; setPalette: (p: PaletteName) => void;
   scaleMode: ScaleMode; setScaleMode: (m: ScaleMode) => void;
@@ -106,7 +107,7 @@ export function PlaybackPage(p: Props) {
     if (!info || info.name !== p.name || seededRef.current === p.name) return;
     seededRef.current = p.name;
     if (!hasRois(roiStorage, `exp.${p.name}`) && info.rois && info.rois.length) {
-      p.roiDispatch({ type: "replace", rois: storedToRois(info.rois) });
+      p.roiDispatch({ type: "load", rois: storedToRois(info.rois) });
     }
   }, [info, p.name]); // eslint-disable-line react-hooks/exhaustive-deps
 
