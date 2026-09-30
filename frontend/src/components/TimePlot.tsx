@@ -53,6 +53,8 @@ function KeyItem({ tr, suffix = "" }: { tr: Trace; suffix?: string }) {
 export function TimePlot({ traces, markers = [], window: win, range, cursorT = null, units = "°C", emptyText, onSeek, rightTraces, rightUnits = "W", legend = true }: Props) {
   const hasRight = !!rightTraces && rightTraces.length > 0;
   const padRight = hasRight ? 46 : PAD.right;
+  const showKey = legend && (traces.length + (rightTraces?.length ?? 0)) > 0;
+  const padTop = showKey ? 20 : PAD.top;  // the key gets its own strip above the data
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -77,13 +79,13 @@ export function TimePlot({ traces, markers = [], window: win, range, cursorT = n
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, size.w, size.h);
     const pw = Math.max(1, size.w - PAD.left - padRight);
-    const ph = Math.max(1, size.h - PAD.top - PAD.bottom);
+    const ph = Math.max(1, size.h - padTop - PAD.bottom);
     const yr = range ?? valueRange(traces) ?? { min: 0, max: 1 };
     const yrR = hasRight ? (valueRange(rightTraces) ?? { min: 0, max: 1 }) : null;
     const line = css("var(--line)"), muted = css("var(--muted)");
     ctx.font = `10px ${css("var(--font-mono)")}`;
     ctx.save();
-    ctx.translate(PAD.left, PAD.top);
+    ctx.translate(PAD.left, padTop);
     // grid + axes labels
     ctx.strokeStyle = line; ctx.fillStyle = muted; ctx.lineWidth = 1;
     ctx.textAlign = "right"; ctx.textBaseline = "middle";
@@ -165,7 +167,7 @@ export function TimePlot({ traces, markers = [], window: win, range, cursorT = n
       ctx.fillStyle = css(rightTraces![0].color); ctx.textAlign = "right";
       ctx.fillText(rightUnits, size.w - 4, 2);
     }
-  }, [traces, markers, win, range, cursorT, units, size, rightTraces, rightUnits, hasRight, padRight]);
+  }, [traces, markers, win, range, cursorT, units, size, rightTraces, rightUnits, hasRight, padRight, padTop]);
 
   function onClick(e: RMouseEvent<HTMLCanvasElement>) {
     if (!onSeek) return;
@@ -199,8 +201,8 @@ export function TimePlot({ traces, markers = [], window: win, range, cursorT = n
           ))}
         </div>
       )}
-      {legend && (traces.length + (rightTraces?.length ?? 0)) > 0 && (
-        <div className="plot-key" aria-label="plot key" style={{ left: PAD.left + 4 }}>
+      {showKey && (
+        <div className="plot-key" aria-label="plot key" style={{ left: PAD.left, right: padRight + 24 }}>
           {traces.map((tr) => <KeyItem key={`l${tr.id}`} tr={tr} />)}
           {hasRight && rightTraces!.map((tr) => <KeyItem key={`r${tr.id}`} tr={tr} suffix={` (${rightUnits}, right)`} />)}
         </div>

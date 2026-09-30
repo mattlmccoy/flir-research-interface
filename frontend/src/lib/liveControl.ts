@@ -27,11 +27,15 @@ export class LiveControl {
     let changed = false;
     const c = st.control_last;
     if (c && c.ts && c.ts !== this.lastCtlTs) {
+      const first = this.lastCtlTs === null;
       this.lastCtlTs = c.ts;
-      const w = c.forward_w ?? c.applied_w ?? null;
-      this.rf.push(t, typeof w === "number" ? w : null);
-      this.setpoint.push(t, typeof c.setpoint_c === "number" ? c.setpoint_c : null);
-      changed = true;
+      // the sample already current when the page opened may be minutes old: not plotted at "now"
+      if (!first) {
+        const w = c.forward_w ?? c.applied_w ?? null;
+        this.rf.push(t, typeof w === "number" ? w : null);
+        this.setpoint.push(t, typeof c.setpoint_c === "number" ? c.setpoint_c : null);
+        changed = true;
+      }
     }
     const e = st.rf_link_last_event;
     if (e && e.ts && e.ts !== this.lastRfTs) {
