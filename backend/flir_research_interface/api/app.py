@@ -408,6 +408,7 @@ def create_app(
             logger.info("peak frames: %s", write_annotated_frames(reader))
 
     app.state.render_tasks = set()
+    app.state.finalizing = set()  # recorders a _finalize_recording is stopping right now
     app.state.derived_jobs = {}  # experiment name -> progress record for on-demand regenerate
     app.state.move_jobs = {}  # experiment name -> progress record for an offload/restore move
     app.state.media_jobs = {}  # experiment name -> progress record for a media-export render
@@ -453,8 +454,19 @@ def create_app(
         app.state.rf_link_owns_run = None
         # Thermal data first (the science record), then the visible video; the visible stop may
         # wait on ffmpeg and must never delay or endanger the manifest.
+        # Claim this run's recorder and visible recorder BEFORE any await: a finalize may take
+        # minutes, and the operator can reconnect and start a new run meanwhile. A finalize must
+        # only ever touch the run it began with (2026-09-30: a stale finalize stopped the next
+        # run's visible recorder). A recorder another finalize already owns is left to it.
         rec = recorder()
+        if rec is not None and rec in app.state.finalizing:
+            rec = None
+        if rec is not None:
+            app.state.finalizing.add(rec)
+        vis = app.state.visible
+        app.state.visible = None
         manifest = None
+        exp_dir = None
         if rec is not None:
             exp_dir = rec.experiment_dir
             if rec.state in (RecorderState.RECORDING, RecorderState.ERROR):
@@ -472,22 +484,16 @@ def create_app(
                         )
                     except Exception:  # noqa: BLE001 - never delay or endanger the stop
                         logger.debug("camera_state at stop unavailable", exc_info=True)
-                manifest = await run_in_threadpool(rec.stop)
-            app.state.recorder = None
-            _nuc_hold_end()
-            if manifest is not None and exp_dir is not None:
                 try:
-                    await run_in_threadpool(_export_roi_series, exp_dir)
-                except Exception:  # noqa: BLE001 - a convenience file must never fail the finalize
-                    logger.exception("automatic ROI series export failed")
-                try:
-                    await run_in_threadpool(_write_run_summary, exp_dir)
-                except Exception:  # noqa: BLE001 - a convenience file must never fail the finalize
-                    logger.exception("run summary failed")
-                _schedule_thermal_video(exp_dir)
-        vis = app.state.visible
+                    manifest = await run_in_threadpool(rec.stop)
+                finally:
+                    app.state.finalizing.discard(rec)
+            else:
+                app.state.finalizing.discard(rec)
+            if app.state.recorder is rec:  # a new run may already own the slot
+                app.state.recorder = None
+                _nuc_hold_end()
         if vis is not None:
-            app.state.visible = None
             try:
                 visible_info = await run_in_threadpool(vis.stop)
             except Exception as exc:  # noqa: BLE001 - report, never raise past the thermal finalize
@@ -495,6 +501,16 @@ def create_app(
                 visible_info = {"state": "error", "error": str(exc)}
             if manifest is not None:
                 manifest["visible"] = visible_info
+        if manifest is not None and exp_dir is not None:
+            try:
+                await run_in_threadpool(_export_roi_series, exp_dir)
+            except Exception:  # noqa: BLE001 - a convenience file must never fail the finalize
+                logger.exception("automatic ROI series export failed")
+            try:
+                await run_in_threadpool(_write_run_summary, exp_dir)
+            except Exception:  # noqa: BLE001 - a convenience file must never fail the finalize
+                logger.exception("run summary failed")
+            _schedule_thermal_video(exp_dir)
         return manifest
 
     # -- health / setup --------------------------------------------------------------------
@@ -648,14 +664,17 @@ def create_app(
 
     @app.post("/api/camera/disconnect")
     async def disconnect() -> dict[str, Any]:
-        await _finalize_recording()  # never lose a recording because the operator disconnected
-        app.state.autoconnect_paused = True  # a deliberate disconnect must stick
+        # Capture the session this click is about BEFORE the (possibly slow) finalize: if the
+        # operator reconnects meanwhile, the new session is not ours to disconnect.
         svc = service()
-        if svc is None:
+        app.state.autoconnect_paused = True  # a deliberate disconnect must stick
+        await _finalize_recording()  # never lose a recording because the operator disconnected
+        if svc is None or service() is not svc:
             return {"state": ServiceState.DISCONNECTED.value}
         await run_in_threadpool(svc.disconnect)
-        app.state.service = None
-        app.state.backend_name = None
+        if service() is svc:
+            app.state.service = None
+            app.state.backend_name = None
         return {"state": ServiceState.DISCONNECTED.value}
 
     @app.get("/api/camera/status")
