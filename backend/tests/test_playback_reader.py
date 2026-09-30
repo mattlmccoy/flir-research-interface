@@ -197,6 +197,12 @@ def test_reader_info_places_the_visible_video_on_the_thermal_clock(tmp_path: Pat
     (d / "visible.json").write_text(json.dumps(vis))
     info = ExperimentReader(d).info()
     assert info["visible_timeline"] == [
-        {"index": 0, "file": "visible.mp4", "t_start_s": pytest.approx(4.0), "duration_s": 120.0}
+        {
+            "index": 0,
+            "file": "visible.mp4",
+            "t_start_s": pytest.approx(4.0),
+            "duration_s": 120.0,
+            "anchor": "launch",
+        }
     ]
     assert info["visible"] == vis  # the recorded visible.json is served unchanged
