@@ -23,6 +23,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
+from flir_research_interface.visible.progress import KEY as PROGRESS_KEY
+from flir_research_interface.visible.progress import ProgressClock
 from flir_research_interface.visible.rtsp import (
     FFPROBE_CANDIDATES,
     RTSP_PATHS,
@@ -139,6 +141,10 @@ def ffmpeg_command(ffmpeg: str, url: str, out: Path) -> list[str]:
         "copy",
         "-movflags",
         "+faststart",
+        "-progress",  # stdout: out_time vs host read time gives the first frame's arrival
+        "pipe:1",
+        "-stats_period",
+        "0.5",
         "-f",
         "mp4",
         str(out),
@@ -179,6 +185,7 @@ class VisibleRecorder:
         backoff_s: tuple[float, ...] = RECONNECT_BACKOFF_S,
         clock: Callable[[], float] = time.monotonic,
         watch_interval_s: float | None = WATCH_INTERVAL_S,
+        wall_clock: Callable[[], int] = time.time_ns,
     ) -> None:
         self._restart_delay_s = restart_delay_s
         self._backoff_s = backoff_s
@@ -205,6 +212,9 @@ class VisibleRecorder:
         self._cmd: list[str] = []
         self._stderr: deque[str] = deque(maxlen=STDERR_TAIL_LINES)
         self._stderr_thread: threading.Thread | None = None
+        self._wall_clock = wall_clock
+        self._progress = ProgressClock()
+        self._progress_thread: threading.Thread | None = None
         self._watch_stop = threading.Event()
         self._watch_thread: threading.Thread | None = None
         self._redact = _redactor(url)
@@ -215,6 +225,21 @@ class VisibleRecorder:
                 self._stderr.append(self._redact(raw.decode("utf-8", "replace").rstrip()))
         except (OSError, ValueError):
             pass
+
+    def _pump_progress(self, stream: Any, progress: ProgressClock) -> None:
+        """Reads ffmpeg -progress lines, stamping each out_time with the host time it was read."""
+        try:
+            for raw in iter(stream.readline, b""):
+                line = raw.decode("utf-8", "replace").strip()
+                if line.startswith(PROGRESS_KEY):
+                    progress.feed(line, self._wall_clock())
+        except (OSError, ValueError):
+            pass
+
+    def _join_progress(self) -> None:
+        t = self._progress_thread
+        if t is not None and t is not threading.current_thread():
+            t.join(timeout=2.0)
 
     def _watch(self) -> None:
         """Keeps reconnecting while nobody polls ``stats`` (e.g. no browser open)."""
@@ -297,11 +322,14 @@ class VisibleRecorder:
         self._relaunch_at = self._clock() + delay
 
     def _close_segment(self, rc: int | None) -> None:
+        self._join_progress()  # ffmpeg has exited: drain its last progress block first
         self._segments.append(
             {
                 "index": self._seg_index,
                 "file": self._out_name(),
                 "started_host_ns": self._seg_started_ns,
+                "first_frame_host_ns": self._progress.first_frame_host_ns,
+                "first_frame_samples": self._progress.samples,
                 "stopped_host_ns": time.time_ns(),
                 "returncode": rc,
             }
@@ -314,12 +342,23 @@ class VisibleRecorder:
         self._cmd = ffmpeg_command(self._ffmpeg, self._url, self._out)
         self._launch_mono = self._clock()
         self._seg_started_ns = time.time_ns()
+        self._progress = ProgressClock()
         self._proc = self._popen(
             self._cmd,
             stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
+        stdout = getattr(self._proc, "stdout", None)
+        self._progress_thread = None
+        if stdout is not None:
+            self._progress_thread = threading.Thread(
+                target=self._pump_progress,
+                args=(stdout, self._progress),
+                name="ffmpeg-progress",
+                daemon=True,
+            )
+            self._progress_thread.start()
         stderr = getattr(self._proc, "stderr", None)
         if stderr is not None:
             self._stderr_thread = threading.Thread(
