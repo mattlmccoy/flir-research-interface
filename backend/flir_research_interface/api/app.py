@@ -979,6 +979,9 @@ def create_app(
         if recorder() is not None and recorder().state == RecorderState.RECORDING:  # type: ignore[union-attr]
             raise HTTPException(409, "already recording")
         extra = _recording_extra(req)
+        from flir_research_interface.analysis.series import clear_series_cache
+
+        clear_series_cache()
         hold = None
         if req.nuc_hold and app.state.nuc_restore is None:
             hold = await run_in_threadpool(_nuc_hold_begin, svc, nuc_first=nuc_first)
@@ -1741,7 +1744,9 @@ def create_app(
         stride = 1
         if max_points and r.n_frames > max_points:
             stride = -(-r.n_frames // max_points)  # ceil; keeps ~max_points plot points
-        out = await run_in_threadpool(lambda: roi_series(r, parsed, valid_c=valid_c, stride=stride))
+        out = await run_in_threadpool(
+            lambda: roi_series(r, parsed, valid_c=valid_c, stride=stride, cache=True)
+        )
         out["events"] = r.events
         return out
 
