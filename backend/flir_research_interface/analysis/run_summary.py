@@ -19,6 +19,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from flir_research_interface.analysis.export import _roi_desc
 from flir_research_interface.analysis.series import roi_series
+from flir_research_interface.camera.frame_ids import index_in_order
 from flir_research_interface.playback.reader import ExperimentReader
 
 PLOT_W, PLOT_H = 2400, 1000  # 2x: crisp at slide/paper size
@@ -204,21 +205,9 @@ def mark_indices(
     """Frame index of each mark, matched by exact id (events carry the ids of stored frames).
 
     Ids are not sorted (the 16-bit counter wraps 65535 -> 1) and repeat once a run outlasts one
-    cycle, so each mark takes the occurrence at or after the previous mark, else the nearest one
-    before it. None when the id is not in the recording.
+    cycle, so each mark takes the occurrence at or after the previous mark (``index_in_order``).
     """
-    ids = np.asarray(frame_ids, dtype=np.int64)
-    out: list[int | None] = []
-    prev = 0
-    for fid, _ in marks:
-        hits = np.flatnonzero(ids == fid)
-        if hits.size == 0:
-            out.append(None)
-            continue
-        later = hits[hits >= prev]
-        prev = int(later[0]) if later.size else int(hits[-1])
-        out.append(prev)
-    return out
+    return index_in_order(frame_ids, (fid for fid, _ in marks))
 
 
 def roi_plot_png(reader: ExperimentReader, rois: list[dict[str, Any]]) -> bytes:

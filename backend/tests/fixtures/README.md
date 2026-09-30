@@ -10,3 +10,8 @@ start/stop/annotation/frame_gap events of two real FLIR A70 runs recorded over S
 the recording was stopped, yet its manifest said `complete: true`) and the last 200 frames of
 `20260930_142445_Run` (healthy: last frame 0.1 s before the stop). Copied from `thermal.zarr` and
 `events.json` unchanged.
+
+`control_reset_20260923_175956.json` — timeline frames 2000–2199 (`frame_id`, `t_s`) and control
+events 60–82 (`t_utc`, `frame_id`, `forward_w`, `reverse_w`) of the real run `20260923_175956_Run`.
+The camera reconnected twice mid-run: ids 9177 → 1 at t = 67.8 s and 71 → 1 at t = 83.0 s, so ids
+1–71 occur twice. Copied from `thermal.zarr` and `events.json` unchanged (t_s rounded to 1 µs).

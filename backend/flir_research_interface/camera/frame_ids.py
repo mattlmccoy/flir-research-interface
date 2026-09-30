@@ -8,6 +8,9 @@ is a counter reset, which says nothing about lost frames.
 
 from __future__ import annotations
 
+from bisect import bisect_left
+from collections.abc import Iterable, Sequence
+
 FRAME_ID_MAX = 0xFFFF
 WRAP_WINDOW = 4096
 """Largest step (in frames) still read as a wrap rather than a reset: ~2 min at 30 fps."""
@@ -29,4 +32,27 @@ def frames_missing(prev: int, cur: int) -> int:
     return step - 1 if step is not None else 0
 
 
-__all__ = ["FRAME_ID_MAX", "WRAP_WINDOW", "frame_id_step", "frames_missing"]
+def index_in_order(frame_ids: Sequence[int], ids: Iterable[int | None]) -> list[int | None]:
+    """Timeline index of each id in ``ids`` (events in time order, each stamped with a stored id).
+
+    An id can occur more than once in one recording (the counter wraps, a reconnect restarts it),
+    so each takes its occurrence at or after the previous match, else the nearest one before it.
+    None when the id is missing or not in the recording (the anchor is left where it was).
+    """
+    where: dict[int, list[int]] = {}
+    for i, stored in enumerate(frame_ids):
+        where.setdefault(int(stored), []).append(i)
+    out: list[int | None] = []
+    prev = 0
+    for fid in ids:
+        hits = where.get(int(fid)) if fid is not None else None
+        if not hits:
+            out.append(None)
+            continue
+        k = bisect_left(hits, prev)
+        prev = hits[k] if k < len(hits) else hits[-1]
+        out.append(prev)
+    return out
+
+
+__all__ = ["FRAME_ID_MAX", "WRAP_WINDOW", "frame_id_step", "frames_missing", "index_in_order"]

@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from flir_research_interface.analysis.control_series import (
     control_series_from_rows,
     parse_control_csv,
 )
 
-FRAME_T = {100: 0.0, 102: 0.5, 104: 1.0}  # frame_id → relative seconds
+FRAME_T = {"frame_id": [100, 102, 104], "t_s": [0.0, 0.5, 1.0]}  # the run timeline
+RESET_FIXTURE = Path(__file__).parent / "fixtures" / "control_reset_20260923_175956.json"
 
 
 def test_series_from_event_rows_maps_and_extracts_numeric_columns() -> None:
@@ -48,3 +52,33 @@ def test_skips_rows_without_a_known_frame_and_blanks_become_none() -> None:
     s = parse_control_csv(csv_text, FRAME_T)
     assert s["t_s"] == [0.5]
     assert s["forward_w"] == [None]
+
+
+def test_samples_land_on_their_own_frame_after_a_camera_reconnect_reuses_ids() -> None:
+    # captured: the camera reconnected twice mid-run, so ids 1..71 occur twice in the timeline
+    fx = json.loads(RESET_FIXTURE.read_text())
+    ids, t = fx["frame_id"], fx["t_s"]
+    seg2 = ids.index(1)  # first restart (9177 -> 1)
+    seg3 = ids.index(1, seg2 + 1)  # second restart (71 -> 1)
+
+    def at(fid: int, start: int) -> float:
+        return float(t[ids.index(fid, start)])
+
+    expected = (
+        [at(9177, 0)] * 3
+        + [at(19, seg2), at(57, seg2)]
+        + [at(71, seg2)] * 15  # stamped with the last frame before the outage
+        + [at(20, seg3), at(56, seg3), at(92, seg3)]
+    )
+    s = control_series_from_rows(fx["control"], {"frame_id": ids, "t_s": t})
+    assert s["t_s"] == expected
+    assert s["forward_w"] == [c["forward_w"] for c in fx["control"]]
+
+
+def test_samples_in_a_run_longer_than_one_16_bit_id_cycle_keep_their_order() -> None:
+    # synthetic (no captured run exceeds 65535 frames): ids wrap 65535 -> 1 and repeat
+    ids = list(range(1, 65536)) * 2
+    t = [i / 30 for i in range(len(ids))]
+    rows = [{"frame_id": 100, "forward_w": 1.0}, {"frame_id": 50, "forward_w": 2.0}]
+    s = control_series_from_rows(rows, {"frame_id": ids, "t_s": t})
+    assert s["t_s"] == [t[99], t[65535 + 49]]  # the second sample is in the second cycle
