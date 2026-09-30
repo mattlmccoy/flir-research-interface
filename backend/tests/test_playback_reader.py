@@ -174,3 +174,29 @@ def test_list_experiments_includes_empty_recording_without_error(tmp_path: Path)
     assert len(items) == 1
     assert items[0]["n_frames"] == 0 and items[0]["complete"] is True
     assert "error" not in items[0]
+
+
+def test_reader_info_places_the_visible_video_on_the_thermal_clock(tmp_path: Path) -> None:
+    """Thermal frame 0 arrived at host 5.000 s; the visible segment opened at host 9.000 s."""
+    import json
+
+    d = _make_experiment(tmp_path)
+    vis = {
+        "file": "visible.mp4",
+        "started_host_ns": 9_000_000_000,
+        "segments": [
+            {
+                "index": 0,
+                "file": "visible.mp4",
+                "started_host_ns": 9_000_000_000,
+                "duration_s": 120.0,
+                "offset_s": 0.0,
+            }
+        ],
+    }
+    (d / "visible.json").write_text(json.dumps(vis))
+    info = ExperimentReader(d).info()
+    assert info["visible_timeline"] == [
+        {"index": 0, "file": "visible.mp4", "t_start_s": pytest.approx(4.0), "duration_s": 120.0}
+    ]
+    assert info["visible"] == vis  # the recorded visible.json is served unchanged

@@ -15,6 +15,7 @@ import numpy.typing as npt
 import zarr
 
 from flir_research_interface.camera.base import Frame
+from flir_research_interface.playback.visible_timing import thermal_segments
 from flir_research_interface.recording.recorder import STORE_NAME, inspect_experiment
 
 
@@ -81,6 +82,11 @@ class ExperimentReader:
     def pixel_format(self) -> str:
         return str(self._counts_attrs.get("pixel_format", "Mono16"))
 
+    @property
+    def host_t0_ns(self) -> int | None:
+        """Host wall-clock arrival of thermal frame 0 (None for a zero-frame recording)."""
+        return int(self._host_ts[0]) if self.n_frames else None
+
     def info(self) -> dict[str, Any]:
         insp = inspect_experiment(self.path)
         _, h, w = self._counts.shape if self._counts is not None else (0, 0, 0)
@@ -103,6 +109,7 @@ class ExperimentReader:
             "started_utc": self.metadata.get("started_utc"),
             "n_events": len(self.events),
             "visible": self.visible,
+            "visible_timeline": thermal_segments(self.visible, self.host_t0_ns),
             "rois": self.metadata.get("rois"),
             "visible_alignment": self.metadata.get("visible_alignment"),
             "thermal_preview": self.thermal_preview(),
