@@ -36,6 +36,8 @@ import { RailSection } from "./components/studio/RailSection.tsx";
 import { PlotDock } from "./components/studio/PlotDock.tsx";
 import { StatusBar } from "./components/studio/StatusBar.tsx";
 import { LiveControlStrip } from "./components/LiveControlStrip.tsx";
+import { useControlStatus } from "./lib/useControlStatus.ts";
+import { LiveControl } from "./lib/liveControl.ts";
 
 type Page = "live" | "setup" | "experiments" | "playback";
 const storage = (() => {
@@ -109,9 +111,16 @@ export function App() {
   const t0Ref = useRef<number | null>(null);
   const [liveStats, setLiveStats] = useState<StatsMap>(new Map());
   const [liveWindow, setLiveWindow] = useState(60);
+  const nowTRef = useRef(0);
+  // RF power, closed-loop setpoint and RF ON/OFF edges from the linked RF controller (CXN panel),
+  // drawn on the live plot against the ROI temperatures.
+  const liveCtl = useRef(new LiveControl());
+  const ctlStatus = useControlStatus(1000);
+  useEffect(() => { liveCtl.current.ingest(ctlStatus, nowTRef.current); }, [ctlStatus]);
   const onStats = useCallback((m: StatsMap, f: FrameMessage) => {
     if (t0Ref.current === null) t0Ref.current = f.header.device_timestamp_ns;
     const t = (f.header.device_timestamp_ns - t0Ref.current) / 1e9;
+    nowTRef.current = t;
     for (const [id, s] of m) {
       let b = buffers.current.get(id);
       if (!b) { b = new TraceBuffer(MAX_TRACE_POINTS); buffers.current.set(id, b); }
@@ -158,6 +167,7 @@ export function App() {
     await api.disconnect();
     setFrame(null);
     buffers.current.clear();
+    liveCtl.current.clear();
     t0Ref.current = null;
     await refresh();
     setPage("setup");
@@ -264,7 +274,7 @@ export function App() {
               {WINDOWS.map((w) => <option key={String(w)} value={String(w)}>{windowLabel(w)}</option>)}
             </select>
           }>
-          <TimePlot traces={withDelta} window={visibleWindow(nowT, liveWindow, 0)} emptyText="add a spot or rectangle ROI to plot its temperature" />
+          <TimePlot traces={[...withDelta, ...liveCtl.current.leftTraces()]} rightTraces={liveCtl.current.rightTraces()} rightUnits="W" markers={liveCtl.current.markers} window={visibleWindow(nowT, liveWindow, 0)} emptyText="add a spot or rectangle ROI to plot its temperature" />
         </PlotDock>
       }
       rail={

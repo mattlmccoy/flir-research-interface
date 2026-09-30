@@ -3,7 +3,8 @@ import type { MouseEvent as RMouseEvent } from "react";
 import { niceTicks, valueRange, xToPx, yToPx, type TimeWindow, type ValueRange } from "../lib/plot.ts";
 import { assignLabelRows, markColor } from "../lib/events.ts";
 
-export interface Trace { id: number; label: string; color: string; t: ArrayLike<number>; v: ArrayLike<number>; }
+/** A plotted series. `dash` (canvas line-dash) marks non-temperature series such as RF power. */
+export interface Trace { id: number; label: string; color: string; dash?: number[]; t: ArrayLike<number>; v: ArrayLike<number>; }
 export interface Marker { t: number; label: string; }
 
 interface Props {
@@ -19,6 +20,8 @@ interface Props {
   /** Optional traces on a secondary right-hand axis (e.g. RF power in W) with their own scale. */
   rightTraces?: Trace[];
   rightUnits?: string;
+  /** Show the in-plot key of every trace (default on). */
+  legend?: boolean;
 }
 
 const PAD = { left: 56, right: 10, top: 8, bottom: 20 };
@@ -36,8 +39,18 @@ function css(color: string): string {
   return m ? root.getPropertyValue(m[1]).trim() || "#fff" : color;
 }
 
+/** One key entry: a short line sample in the trace's color and dash, then its label. */
+function KeyItem({ tr, suffix = "" }: { tr: Trace; suffix?: string }) {
+  return (
+    <span className="row">
+      <svg width="18" height="6" aria-hidden="true"><line x1="0" y1="3" x2="18" y2="3" style={{ stroke: tr.color }} strokeWidth="2" strokeDasharray={tr.dash?.map((d) => d / 2).join(" ")} /></svg>
+      {tr.label}{suffix}
+    </span>
+  );
+}
+
 /** Temperature-vs-time canvas plot (spec §3 plot dock): traces, event markers, time cursor. */
-export function TimePlot({ traces, markers = [], window: win, range, cursorT = null, units = "°C", emptyText, onSeek, rightTraces, rightUnits = "W" }: Props) {
+export function TimePlot({ traces, markers = [], window: win, range, cursorT = null, units = "°C", emptyText, onSeek, rightTraces, rightUnits = "W", legend = true }: Props) {
   const hasRight = !!rightTraces && rightTraces.length > 0;
   const padRight = hasRight ? 46 : PAD.right;
   const hostRef = useRef<HTMLDivElement>(null);
@@ -82,7 +95,7 @@ export function TimePlot({ traces, markers = [], window: win, range, cursorT = n
       ctx.fillText(v.toFixed(yDec), -6, y);
     }
     if (yrR) {  // secondary (right) axis tick labels, e.g. RF power in W
-      ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillStyle = css("var(--warn)");
+      ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillStyle = css(rightTraces![0].color);
       const rTicks = niceTicks(yrR.min, yrR.max, Math.max(2, Math.floor(ph / 36)));
       for (const v of rTicks) ctx.fillText(v.toFixed(decimalsFor(rTicks)), pw + 6, Math.round(yToPx(v, yrR, ph)) + 0.5);
       ctx.fillStyle = muted;
@@ -98,7 +111,7 @@ export function TimePlot({ traces, markers = [], window: win, range, cursorT = n
     ctx.beginPath(); ctx.rect(0, 0, pw, ph); ctx.clip();
     // traces
     for (const tr of traces) {
-      ctx.strokeStyle = css(tr.color); ctx.lineWidth = 1.5; ctx.beginPath();
+      ctx.strokeStyle = css(tr.color); ctx.lineWidth = 1.5; ctx.setLineDash(tr.dash ?? []); ctx.beginPath();
       let pen = false;
       for (let i = 0; i < tr.t.length; i++) {
         const t = tr.t[i], v = tr.v[i];
@@ -111,7 +124,7 @@ export function TimePlot({ traces, markers = [], window: win, range, cursorT = n
     }
     if (yrR) {  // secondary-axis traces (RF power), scaled to their own range
       for (const tr of rightTraces!) {
-        ctx.strokeStyle = css(tr.color); ctx.lineWidth = 1.5; ctx.beginPath();
+        ctx.strokeStyle = css(tr.color); ctx.lineWidth = 1.5; ctx.setLineDash(tr.dash ?? []); ctx.beginPath();
         let pen = false;
         for (let i = 0; i < tr.t.length; i++) {
           const t = tr.t[i], v = tr.v[i];
@@ -123,6 +136,7 @@ export function TimePlot({ traces, markers = [], window: win, range, cursorT = n
         ctx.stroke();
       }
     }
+    ctx.setLineDash([]);
     // event markers: dashed line + label per event, colored by category (matching the legend), with
     // the labels stacked into rows so close events don't overlap.
     ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
@@ -148,7 +162,7 @@ export function TimePlot({ traces, markers = [], window: win, range, cursorT = n
     ctx.fillStyle = muted; ctx.textAlign = "left"; ctx.textBaseline = "top";
     ctx.fillText(units, 4, 2);
     if (yrR) {  // right-axis unit (RF power)
-      ctx.fillStyle = css("var(--warn)"); ctx.textAlign = "right";
+      ctx.fillStyle = css(rightTraces![0].color); ctx.textAlign = "right";
       ctx.fillText(rightUnits, size.w - 4, 2);
     }
   }, [traces, markers, win, range, cursorT, units, size, rightTraces, rightUnits, hasRight, padRight]);
@@ -183,6 +197,12 @@ export function TimePlot({ traces, markers = [], window: win, range, cursorT = n
           {hover.items.map((it, i) => (
             <span className="row" key={i}><i className="dot" style={{ background: it.color }} />{it.label}</span>
           ))}
+        </div>
+      )}
+      {legend && (traces.length + (rightTraces?.length ?? 0)) > 0 && (
+        <div className="plot-key" aria-label="plot key" style={{ left: PAD.left + 4 }}>
+          {traces.map((tr) => <KeyItem key={`l${tr.id}`} tr={tr} />)}
+          {hasRight && rightTraces!.map((tr) => <KeyItem key={`r${tr.id}`} tr={tr} suffix={` (${rightUnits}, right)`} />)}
         </div>
       )}
       {traces.length === 0 && emptyText && <div className="plot-empty">{emptyText}</div>}

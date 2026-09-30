@@ -60,6 +60,8 @@ export class TraceBuffer {
 
   get t(): Float64Array { return this.ordered(this.tBuf); }
   get v(): Float64Array { return this.ordered(this.vBuf); }
+  clear(): void { this.start = 0; this.n = 0; }
+
   get lastT(): number | null { return this.n ? this.tBuf[(this.start + this.n - 1) % this.cap] : null; }
 }
 

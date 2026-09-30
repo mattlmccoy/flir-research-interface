@@ -332,9 +332,6 @@ export function PlaybackPage(p: Props) {
                 {axisOpts.includes("rf") && <option value="rf">RF power (W)</option>}
                 {axisOpts.includes("caps") && <option value="caps">cap positions (%)</option>}
               </select>
-              {right.traces.map((tr) => (
-                <span key={tr.id} style={{ color: tr.color, marginLeft: 8, whiteSpace: "nowrap" }}>━ {tr.label}</span>
-              ))}
             </label>
           ) : undefined}>
           <TimePlot traces={withDelta} markers={markers} window={{ t0: 0, t1: Math.max(info?.duration_s ?? 0, 0.001) }} cursorT={t}

@@ -44,3 +44,18 @@ test("cap lines never reuse an ROI trace color (they share the plot with the ROI
     assert.ok(!roiColors.has(tr.color), `${tr.label} uses ROI color ${tr.color}`);
   }
 });
+
+test("control lines are dashed and never share a color value with an ROI preset, ROI trace token or event marker", async () => {
+  const { CONTROL_STYLE } = await import("./controlOverlay.ts");
+  const { COLOR_PRESETS } = await import("./overlay.ts");
+  const fs = await import("node:fs");
+  const css = fs.readFileSync(new URL("../theme.css", import.meta.url), "utf8");
+  const tokenHex = (name: string) => new RegExp(`${name}:\\s*(#[0-9a-f]{6})`, "i").exec(css)?.[1]?.toLowerCase();
+  const taken = new Set<string>([...COLOR_PRESETS, ...["--live", "--accent", "--trace-3", "--trace-4", "--trace-5", "--trace-6", "--err", "--fg-strong"].map((t) => tokenHex(t) ?? "")]);
+  for (const [k, s] of Object.entries(CONTROL_STYLE)) {
+    assert.ok(!taken.has(s.color.toLowerCase()), `${k} reuses ${s.color}`);
+    assert.ok(s.dash.length > 0, `${k} is dashed`);
+  }
+  const all = [...rightAxis({ ...rf, ...caps }, "rf").traces, ...rightAxis({ ...rf, ...caps }, "caps").traces];
+  assert.equal(new Set(all.map((t) => t.color)).size, 3);
+});
