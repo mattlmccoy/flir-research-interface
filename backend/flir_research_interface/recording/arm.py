@@ -20,6 +20,7 @@ import numpy as np
 
 from flir_research_interface.analysis.series import roi_index
 from flir_research_interface.camera.base import Frame
+from flir_research_interface.camera.frame_ids import frame_id_step
 from flir_research_interface.radiometry.temperature_linear import IRFormat, counts_to_celsius
 from flir_research_interface.recording.recorder import Recorder
 from flir_research_interface.recording.trigger import TriggerMachine, TriggerSpec
@@ -167,7 +168,10 @@ class Armer:
         with self._lock:
             pre = 0
             for f in self._ring:
-                if self.started_frame_id is not None and f.frame_id < self.started_frame_id:
+                if (
+                    self.started_frame_id is not None
+                    and frame_id_step(f.frame_id, self.started_frame_id) is not None
+                ):
                     pre += 1
                 rec.submit(f)
             self._ring.clear()

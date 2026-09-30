@@ -25,6 +25,14 @@ def _client(tmp_path: Path) -> TestClient:
     )
 
 
+def _wait_for_post_stop_exports(c: TestClient, timeout_s: float = 20.0) -> None:
+    """The exports run in the background after Stop returns; wait for that job to finish."""
+    deadline = time.monotonic() + timeout_s
+    while c.app.state.render_tasks and time.monotonic() < deadline:  # type: ignore[attr-defined]
+        time.sleep(0.05)
+    assert not c.app.state.render_tasks, "post-stop exports did not finish"  # type: ignore[attr-defined]
+
+
 def test_rois_are_written_to_metadata_and_series_exported_at_stop(tmp_path: Path) -> None:
     with _client(tmp_path) as c:
         devs = c.get("/api/camera/devices").json()
@@ -37,6 +45,7 @@ def test_rois_are_written_to_metadata_and_series_exported_at_stop(tmp_path: Path
         assert meta["rois"][0]["name"] == "centre" and meta["rois"][1]["color"] == "#ff8ad8"
         time.sleep(0.3)
         assert c.post("/api/recording/stop").status_code == 200
+        _wait_for_post_stop_exports(c)
         csv_path = d / "exports" / "roi_series.csv"
         assert csv_path.is_file()
         head = [ln for ln in csv_path.read_text().splitlines() if not ln.startswith("#")][0]
@@ -71,6 +80,7 @@ def test_stop_writes_readme_and_roi_plot(tmp_path: Path) -> None:
         )
         time.sleep(0.3)
         assert c.post("/api/recording/stop").status_code == 200
+        _wait_for_post_stop_exports(c)
         c.post("/api/camera/disconnect")
         assert "Regions of interest at record time: 3" in (d / "README.txt").read_text()
         assert (d / "exports" / "roi_plot.png").stat().st_size > 1000

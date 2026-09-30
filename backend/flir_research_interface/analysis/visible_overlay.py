@@ -20,6 +20,8 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
+from flir_research_interface.playback.visible_timing import FRAME0_SKIP_S, thermal_segments
+
 logger = logging.getLogger(__name__)
 
 _MAX_EXTRACT_FPS = 10.0  # the visible stream is ~6 fps; never pull more than this
@@ -51,25 +53,23 @@ def _warp(frame_rgb: np.ndarray, coeffs: tuple[float, ...], out_w: int, out_h: i
 
 
 def segment_windows(
-    vis: dict[str, Any], t0: float, t1: float
+    timeline: list[dict[str, Any]], t0: float, t1: float
 ) -> list[tuple[str, float, float, float]]:
     """Which visible files cover thermal time [t0, t1]: ``(file, local_start, duration, t_start)``.
 
-    A recording made before segmenting (no ``segments`` in visible.json) is one file whose time
-    equals thermal time. Otherwise each segment starts ``offset_s`` after the first; a segment
-    with no probed duration runs until the next one starts.
+    ``timeline`` is :func:`~flir_research_interface.playback.visible_timing.thermal_segments`:
+    each segment starts ``t_start_s`` into the thermal axis; one with no probed duration runs until
+    the next one starts. A window never begins inside a segment's first ``FRAME0_SKIP_S`` (the torn
+    opening keyframe), and thermal time before the video starts has no visible frame.
     """
-    segs = vis.get("segments")
-    if not segs:
-        return [(vis.get("file") or "visible.mp4", t0, t1 - t0, t0)]
     out: list[tuple[str, float, float, float]] = []
-    for i, seg in enumerate(segs):
-        o = float(seg.get("offset_s") or 0.0)
+    for i, seg in enumerate(timeline):
+        o = float(seg["t_start_s"])
         d = seg.get("duration_s")
         end = o + float(d) if d else (
-            float(segs[i + 1].get("offset_s") or 0.0) if i + 1 < len(segs) else float("inf")
+            float(timeline[i + 1]["t_start_s"]) if i + 1 < len(timeline) else float("inf")
         )
-        a, b = max(t0, o), min(t1, end)
+        a, b = max(t0, o + FRAME0_SKIP_S), min(t1, end)
         if b > a:
             out.append((str(seg["file"]), a - o, b - a, a))
     return out
@@ -92,8 +92,9 @@ class VisibleSource:
         vis = getattr(reader, "visible", None) or reader.metadata.get("visible") or {}
         align = reader.metadata.get("visible_alignment") or {}
         h_matrix = align.get("H")
+        timeline = thermal_segments(vis, getattr(reader, "host_t0_ns", None))
         windows = [
-            w for w in segment_windows(vis, t0, t1) if (reader.path / w[0]).is_file()
+            w for w in segment_windows(timeline, t0, t1) if (reader.path / w[0]).is_file()
         ]
         if not windows or not h_matrix:
             return  # no video or no alignment → overlay stays off

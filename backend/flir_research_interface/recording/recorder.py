@@ -5,6 +5,8 @@ Data-integrity rules implemented here (brief §16, §17, §18, §28):
 * The camera thread only *enqueues* (never blocks). If the bounded queue is full the frame is
   dropped **and counted** (``queue_dropped``); such a recording is flagged ``complete=False``.
 * Frame-id gaps (frames the camera/transport never delivered) are detected and listed.
+* Stream stalls (no frame at all for more than ``stall_threshold_s``, including the tail between
+  the last frame and the stop) are listed and also flag the recording ``complete=False``.
 * Every frame stores ``frame_id``, ``device_timestamp_ns`` and ``host_timestamp_ns``.
 * ``metadata.json`` (camera info, software version, git commit, host, conversion rule) is written
   at start; ``manifest.json`` only at clean finalization, so an experiment without a manifest is
@@ -49,11 +51,13 @@ from numcodecs import Blosc
 from flir_research_interface import __version__
 from flir_research_interface.acquisition.service import AcquisitionService
 from flir_research_interface.camera.base import Frame
+from flir_research_interface.camera.frame_ids import frames_missing
 from flir_research_interface.radiometry.temperature_linear import (
     KELVIN_OFFSET,
     IRFormat,
     kelvin_per_count,
 )
+from flir_research_interface.recording.stream_health import DEFAULT_STALL_S, iso_utc, stream_stall
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +144,8 @@ class Recorder:
         compressor: Any | None = None,
         flush_interval_s: float = 0.5,
         transport_stats: Callable[[], dict[str, Any] | None] | None = None,
+        stall_threshold_s: float = DEFAULT_STALL_S,
+        clock: Callable[[], int] = time.time_ns,
     ) -> None:
         self._service = service
         self._root = Path(experiments_root)
@@ -150,6 +156,8 @@ class Recorder:
         self._free_space_gb = free_space_gb
         self._compressor = compressor or Blosc(cname="zstd", clevel=3, shuffle=Blosc.BITSHUFFLE)
         self._flush_interval_s = flush_interval_s
+        self._stall_threshold_s = float(stall_threshold_s)
+        self._clock = clock  # host wall clock (ns): frame arrival and stop times for stalls
         self._buf_started: float | None = None
         self._state = RecorderState.IDLE
         self._lock = threading.Lock()
@@ -184,6 +192,11 @@ class Recorder:
         self._events: list[dict[str, Any]] = []
         self._buf: list[Frame] = []
         self._started_at: str | None = None
+        self._start_ns: int | None = None
+        self._stop_ns: int | None = None
+        self._last_rx_ns: int | None = None  # arrival of the last frame received (any, pre-skip)
+        self._last_rx_id: int | None = None
+        self._stalls: list[dict[str, Any]] = []
 
     # -- public ------------------------------------------------------------------------------
 
@@ -224,7 +237,23 @@ class Recorder:
                 "min_free_gb": self._min_free_gb,
                 "error": self._error,
                 "transport": transport,
+                **self._live_stall_stats(),
             }
+
+    def _live_stall_stats(self) -> dict[str, Any]:
+        """Seconds since the last frame arrived while recording; lock held by caller."""
+        ref = self._last_rx_ns if self._last_rx_ns is not None else self._start_ns
+        age = (
+            (self._clock() - ref) / 1e9
+            if self._state == RecorderState.RECORDING and ref is not None
+            else None
+        )
+        return {
+            "last_frame_age_s": age,
+            "stream_stalled": age is not None and age > self._stall_threshold_s,
+            "stall_threshold_s": self._stall_threshold_s,
+            "stream_stalls": len(self._stalls),
+        }
 
     def start(
         self,
@@ -260,6 +289,7 @@ class Recorder:
         self._reset_counters()
         self._exp_dir = exp_dir
         self._started_at = datetime.now(timezone.utc).isoformat()
+        self._start_ns = self._clock()
 
         ir_format = camera_info.get("ir_format")
         try:
@@ -355,7 +385,9 @@ class Recorder:
         """Called on the camera thread. Never blocks."""
         if self._state != RecorderState.RECORDING:
             return
+        now = self._clock()
         with self._lock:
+            self._note_arrival(frame.frame_id, now)
             self._frames_received += 1
             if self._every_nth > 1 and (self._frames_received - 1) % self._every_nth != 0:
                 self._frames_skipped_interval += 1  # intentional: periodic recording
@@ -379,6 +411,8 @@ class Recorder:
         with self._lock:
             if self._state == RecorderState.RECORDING:
                 self._state = RecorderState.FINALIZING
+            if self._stop_ns is None:  # frames stop being accepted here: the tail ends now
+                self._stop_ns = self._clock()
         self._pause.set()
         self._queue.put(None)  # sentinel; blocks only if queue is full of real frames, which drain
         if self._writer is not None:
@@ -455,16 +489,62 @@ class Recorder:
                 f"free space {free:.2f} GB below {limit:.2f} GB during recording; stopped"
             )
 
+    def _note_arrival(self, frame_id: int, now_ns: int) -> None:
+        """Record a stall if no frame arrived for longer than the threshold. Lock held by caller.
+
+        Checked on every received frame (before ``every_nth`` skipping), so a periodic recording
+        is judged on the camera stream, not on the stored cadence.
+        """
+        prev = self._last_rx_ns if self._last_rx_ns is not None else self._start_ns
+        stall = (
+            stream_stall(prev, now_ns, self._stall_threshold_s, after_frame_id=self._last_rx_id)
+            if prev is not None
+            else None
+        )
+        self._last_rx_ns, self._last_rx_id = now_ns, frame_id
+        if stall is None:
+            return
+        stall = {**stall, "resumed_frame_id": frame_id, "tail": False}
+        self._stalls.append(stall)
+        self._events.append({"t_utc": iso_utc(now_ns), "type": "stream_stall", **stall})
+        logger.warning(
+            "stream stall: no frame for %.1f s after frame %s",
+            stall["duration_s"],
+            stall["after_frame_id"],
+        )
+
+    def _close_tail_stall(self, stop_ns: int) -> float | None:
+        """Record the stall between the last frame (or the start) and the stop, if any, and return
+        that tail gap in seconds (None if the recording never started). After a writer error the
+        recorder itself stopped accepting frames, so that silence is not a camera stall. Lock held
+        by caller."""
+        ref = self._last_rx_ns if self._last_rx_ns is not None else self._start_ns
+        if ref is None:
+            return None
+        if self._error is not None:
+            return (stop_ns - ref) / 1e9
+        stall = stream_stall(ref, stop_ns, self._stall_threshold_s, after_frame_id=self._last_rx_id)
+        if stall is not None:
+            stall = {**stall, "tail": True}
+            self._stalls.append(stall)
+            self._events.append({"t_utc": iso_utc(stop_ns), "type": "stream_stall", **stall})
+            logger.warning(
+                "stream stall: no frame for the last %.1f s before stop (after frame %s)",
+                stall["duration_s"],
+                stall["after_frame_id"],
+            )
+        return (stop_ns - ref) / 1e9
+
     def _account(self, frame: Frame) -> None:
         with self._lock:
-            if self._last_frame_id is not None and frame.frame_id > self._last_frame_id + 1:
-                missing = frame.frame_id - self._last_frame_id - 1
-                self._gap_events.append({"after_frame_id": self._last_frame_id, "missing": missing})
+            last = self._last_frame_id
+            if last is not None and (missing := frames_missing(last, frame.frame_id)):
+                self._gap_events.append({"after_frame_id": last, "missing": missing})
                 self._events.append(
                     {
                         "t_utc": datetime.now(timezone.utc).isoformat(),
                         "type": "frame_gap",
-                        "after_frame_id": self._last_frame_id,
+                        "after_frame_id": last,
                         "missing": missing,
                     }
                 )
@@ -562,12 +642,28 @@ class Recorder:
                 {"t_utc": datetime.now(timezone.utc).isoformat(), "type": kind, **data}
             )
 
+    def _incomplete_reasons(self) -> list[str]:
+        """Why the record is not complete (empty when it is). Lock held by caller."""
+        reasons = []
+        if self._error is not None:
+            reasons.append("writer_error")
+        if self._queue_dropped:
+            reasons.append("queue_dropped")
+        expected = self._frames_received - self._frames_skipped_interval - self._queue_dropped
+        if self._frames_written != expected:  # lost after the queue (drops are counted above)
+            reasons.append("frames_unwritten")
+        if self._stalls:
+            reasons.append("stream_stalled")
+        return reasons
+
     def _write_manifest(self) -> dict[str, Any]:
         assert self._exp_dir is not None
         transport = self.transport_delta()
+        stop_ns = self._stop_ns if self._stop_ns is not None else self._clock()
         with self._lock:
             self._close_frozen()  # a NUC still in progress at stop is still a frozen run
-        self._event("recording_stopped", {})
+            tail_gap_s = self._close_tail_stall(stop_ns)
+            self._events.append({"t_utc": iso_utc(stop_ns), "type": "recording_stopped"})
         (self._exp_dir / "events.json").write_text(json.dumps(self._events, indent=2))
         with self._lock:
             gaps = sum(g["missing"] for g in self._gap_events)
@@ -594,10 +690,12 @@ class Recorder:
                 "transport": transport,
                 "duration_s": dur,
                 "error": self._error,
-                "complete": self._error is None
-                and self._queue_dropped == 0
-                and self._frames_written == self._frames_received - self._frames_skipped_interval,
+                "stall_threshold_s": self._stall_threshold_s,
+                "tail_gap_s": tail_gap_s,
+                "stream_stalls": list(self._stalls),
+                "incomplete_reasons": self._incomplete_reasons(),
             }
+            manifest["complete"] = not manifest["incomplete_reasons"]
         manifest["checksums"] = {
             "metadata.json": _sha256(self._exp_dir / "metadata.json"),
             "events.json": _sha256(self._exp_dir / "events.json"),

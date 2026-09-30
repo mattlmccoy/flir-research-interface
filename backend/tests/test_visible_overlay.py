@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from flir_research_interface.analysis.visible_overlay import blend_visible, ir_to_visible_coeffs
 
@@ -39,28 +40,43 @@ def test_blend_visible_opacity_bounds() -> None:
     assert 95 <= int(half[0, 0, 0]) <= 105  # 50% blend
 
 
-def test_segment_windows_legacy_single_file_uses_thermal_time() -> None:
+def test_segment_windows_map_thermal_time_through_each_segment_start() -> None:
+    """Segments sit on the thermal axis at t_start_s (see playback.visible_timing)."""
     from flir_research_interface.analysis.visible_overlay import segment_windows
 
-    assert segment_windows({"file": "visible.mp4"}, 2.0, 5.0) == [("visible.mp4", 2.0, 3.0, 2.0)]
+    timeline = [{"index": 0, "file": "visible.mp4", "t_start_s": 24.15, "duration_s": 231.9}]
+    # thermal 30..40 s is video 5.85..15.85 s
+    [(name, local, dur, g0)] = segment_windows(timeline, 30.0, 40.0)
+    assert name == "visible.mp4" and dur == pytest.approx(10.0)
+    assert local == pytest.approx(5.85) and g0 == pytest.approx(30.0)
+    assert segment_windows(timeline, 0.0, 20.0) == []  # before the video starts: no frames
 
 
 def test_segment_windows_split_across_a_stream_gap() -> None:
     """Run 20260923_175956: the stream dropped ~85 s in and reconnected into visible_001.mp4."""
     from flir_research_interface.analysis.visible_overlay import segment_windows
 
-    vis = {
-        "file": "visible.mp4",
-        "segments": [
-            {"file": "visible.mp4", "offset_s": 0.0, "duration_s": 77.0},
-            {"file": "visible_001.mp4", "offset_s": 95.0, "duration_s": 160.0},
-        ],
-    }
-    assert segment_windows(vis, 70.0, 100.0) == [
-        ("visible.mp4", 70.0, 7.0, 70.0),
-        ("visible_001.mp4", 0.0, 5.0, 95.0),
+    timeline = [
+        {"index": 0, "file": "visible.mp4", "t_start_s": 0.0, "duration_s": 77.0},
+        {"index": 1, "file": "visible_001.mp4", "t_start_s": 95.0, "duration_s": 160.0},
     ]
-    assert segment_windows(vis, 80.0, 90.0) == []  # entirely inside the gap
+    assert segment_windows(timeline, 70.0, 100.0) == [
+        ("visible.mp4", 70.0, 7.0, 70.0),
+        ("visible_001.mp4", pytest.approx(0.25), pytest.approx(4.75), pytest.approx(95.25)),
+    ]
+    assert segment_windows(timeline, 80.0, 90.0) == []  # entirely inside the gap
     # an unprobed segment runs until the next one starts (or forever for the last)
-    vis["segments"][1]["duration_s"] = None
-    assert segment_windows(vis, 300.0, 310.0) == [("visible_001.mp4", 205.0, 10.0, 300.0)]
+    timeline[1]["duration_s"] = None
+    assert segment_windows(timeline, 300.0, 310.0) == [("visible_001.mp4", 205.0, 10.0, 300.0)]
+
+
+def test_segment_windows_never_extract_the_torn_first_frame() -> None:
+    """A window reaching a segment's start begins FRAME0_SKIP_S into the file."""
+    from flir_research_interface.analysis.visible_overlay import segment_windows
+    from flir_research_interface.playback.visible_timing import FRAME0_SKIP_S
+
+    timeline = [{"index": 0, "file": "visible.mp4", "t_start_s": 4.0, "duration_s": 200.0}]
+    [(_, local, dur, g0)] = segment_windows(timeline, 0.0, 10.0)
+    assert local == pytest.approx(FRAME0_SKIP_S)
+    assert g0 == pytest.approx(4.0 + FRAME0_SKIP_S)
+    assert dur == pytest.approx(6.0 - FRAME0_SKIP_S)

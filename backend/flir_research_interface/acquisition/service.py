@@ -173,12 +173,16 @@ class AcquisitionService:
             return self._latest
 
     def wait_for_frame(self, *, after_id: int | None, timeout_s: float) -> Frame | None:
-        """Block until a frame with id > ``after_id`` exists (or timeout); marks it consumed."""
+        """Block until the latest frame is not ``after_id`` (or timeout); marks it consumed.
+
+        Compared by inequality, not ``>``: the camera id wraps 65535 -> 1 and restarts at 1 on a
+        reconnect, and the latest slot only ever holds the newest frame.
+        """
         deadline = time.monotonic() + timeout_s
         with self._cond:
             while True:
                 f = self._latest
-                if f is not None and (after_id is None or f.frame_id > after_id):
+                if f is not None and (after_id is None or f.frame_id != after_id):
                     self._latest_consumed = True
                     return f
                 remaining = deadline - time.monotonic()
