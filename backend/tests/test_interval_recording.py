@@ -50,8 +50,12 @@ def test_api_start_accepts_every_nth(tmp_path: Path) -> None:
             "/api/recording/start", json={"name": "lapse", "every_nth": 10, "nuc_hold": False}
         )
         assert r.status_code == 200, r.text
-        time.sleep(0.5)
+        # wait for enough frames that the 1-in-10 ratio means something; poll, never sleep once
+        deadline = time.monotonic() + 5.0
         st = c.get("/api/recording/status").json()
+        while st["frames_received"] < 20 and time.monotonic() < deadline:
+            time.sleep(0.05)
+            st = c.get("/api/recording/status").json()
         assert st["every_nth"] == 10 and st["frames_received"] > st["frames_written"] * 5
         c.post("/api/recording/stop")
         assert (

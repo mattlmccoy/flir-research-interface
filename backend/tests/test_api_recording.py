@@ -35,8 +35,12 @@ def test_recording_lifecycle_and_experiment_listing(tmp_path: Path) -> None:
         assert r.status_code == 200, r.text
         assert r.json()["state"] == "recording"
         assert c.post("/api/recording/start", json={"name": "again"}).status_code == 409
-        time.sleep(0.6)
+        # the recorder flushes in batches (32 frames or 0.5 s), so poll rather than sleep once
+        deadline = time.monotonic() + 5.0
         st = c.get("/api/recording/status").json()
+        while st["frames_written"] == 0 and time.monotonic() < deadline:
+            time.sleep(0.05)
+            st = c.get("/api/recording/status").json()
         assert st["state"] == "recording" and st["frames_written"] > 0 and st["queue_dropped"] == 0
         r = c.post("/api/recording/stop")
         assert r.status_code == 200
