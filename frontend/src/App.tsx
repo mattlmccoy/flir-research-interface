@@ -11,7 +11,8 @@ import { decodeFrameMessage, type FrameMessage } from "./lib/protocol.ts";
 import type { PaletteName } from "./lib/palette.ts";
 import type { Range, ScaleMode } from "./lib/scale.ts";
 import { DEFAULT_LAYOUT, layoutReducer, loadLayout, saveLayout } from "./lib/layout.ts";
-import { EMPTY_ROIS, hasRois, loadRois, roiLabel, roiReducer, saveRois } from "./lib/roi.ts";
+import { EMPTY_ROIS, hasRois, loadRois, roiLabel, saveRois } from "./lib/roi.ts";
+import { initRoiHistory, roiHistoryReducer, undoKeyFor } from "./lib/roiHistory.ts";
 import { TraceBuffer, WINDOWS, visibleWindow, windowLabel } from "./lib/plot.ts";
 import { roiColor } from "./lib/overlay.ts";
 import { fmtCelsius } from "./lib/format.ts";
@@ -69,7 +70,23 @@ export function App() {
   const [openExp, setOpenExp] = useState<string | null>(null);
   const [layout, dispatch] = useReducer(layoutReducer, DEFAULT_LAYOUT, () => loadLayout(storage));
   useEffect(() => { saveLayout(storage, layout); }, [layout]);
-  const [rois, roiDispatch] = useReducer(roiReducer, EMPTY_ROIS, () => loadRois(storage));
+  const [roiHist, roiDispatch] = useReducer(roiHistoryReducer, EMPTY_ROIS, () => initRoiHistory(loadRois(storage)));
+  const rois = roiHist.present;
+  // cmd/ctrl+Z undoes and cmd/ctrl+Y (or shift+cmd/ctrl+Z) redoes ROI edits; text fields keep
+  // their own native undo.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target;
+      if (el instanceof HTMLElement && (el.isContentEditable || el.tagName === "TEXTAREA"
+        || (el instanceof HTMLInputElement && !["range", "checkbox", "radio", "button", "color"].includes(el.type)))) return;
+      const cmd = undoKeyFor(e);
+      if (!cmd) return;
+      e.preventDefault();
+      roiDispatch({ type: cmd });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   // ROIs are scoped so each experiment keeps its own set; live shares one "live" scope.
   const roiScope = page === "playback" && openExp ? `exp.${openExp}` : "live";
   const roiScopeRef = useRef(roiScope);

@@ -56,7 +56,9 @@ export type RoiAction =
   | { type: "setBox"; id: number; box: 1 | 3 }
   | { type: "setHiddenAll"; hidden: boolean }
   | { type: "replace"; rois: Roi[] }
-  | { type: "clear" };
+  | { type: "clear" }
+  /** Ends a drag gesture: a no-op here, but it closes the current undo step (see roiHistory.ts). */
+  | { type: "commit" };
 
 /** The ROIs that should be drawn and hit-tested. */
 export function visibleRois(rois: Roi[]): Roi[] { return rois.filter((r) => !r.hidden); }
@@ -202,6 +204,8 @@ export function roiReducer(s: RoiState, a: RoiAction): RoiState {
     }
     case "clear":
       return { ...s, rois: [], selected: null, selectedIds: [] };
+    case "commit":
+      return s;
   }
 }
 
