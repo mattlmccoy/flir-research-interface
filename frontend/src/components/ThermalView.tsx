@@ -309,8 +309,8 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
       if (pts.length >= 3 && onRoi) onRoi({ type: "add", roi: { kind: "polygon", points: pts } });
       return;
     }
-    if (editing.current) { editing.current = null; return; }
-    if (moving.current) { moving.current = null; return; }
+    if (editing.current) { editing.current = null; onRoi?.({ type: "commit" }); return; }
+    if (moving.current) { moving.current = null; onRoi?.({ type: "commit" }); return; }
     const s = dragStart.current;
     if (!s || !hdr) return;
     dragStart.current = null;
@@ -326,7 +326,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
       if (e.key === "Backspace") { e.preventDefault(); const v = vertices.slice(0, -1); setVertices(v); setDraft(v.length >= 2 ? { kind: tool, points: v } : null); return; }
     }
     if (!onRoi || selected === null) return;
-    if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); for (const id of (selectedIds.length ? selectedIds : [selected])) onRoi({ type: "remove", id }); }
+    if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); onRoi({ type: "commit" }); for (const id of (selectedIds.length ? selectedIds : [selected])) onRoi({ type: "remove", id }); onRoi({ type: "commit" }); }
     else if (e.key === "Escape") onRoi({ type: "select", id: null });
   }
 
@@ -368,7 +368,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
       )}
       {hdr && box && (
         <RoiOverlay box={box} width={hdr.width} height={hdr.height} rois={rois} selected={selected} selectedIds={selectedIds} stats={stats} draft={draft} extremes={extremes} flipH={flipH} flipV={flipV} tool={tool} hidden={roisHidden} labelScope={labelScope} cursor={drawing ? "crosshair" : selected !== null ? "move" : zoom !== "fit" ? "grab" : "default"}
-          onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => { setHover(null); moving.current = null; panning.current = null; editing.current = null; }} onKeyDown={onKey}
+          onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => { setHover(null); if (moving.current || editing.current) onRoi?.({ type: "commit" }); moving.current = null; panning.current = null; editing.current = null; }} onKeyDown={onKey}
           onDoubleClick={() => { if (tool === "polygon" || tool === "polyline") finishPolygon(vertices); }} />
       )}
       {topLayer && box && <div className="top-layer" style={{ left: box.left, top: box.top, width: box.width, height: box.height }}>{topLayer}</div>}
