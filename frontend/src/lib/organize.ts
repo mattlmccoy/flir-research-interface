@@ -71,6 +71,25 @@ export function filterExperiments<T extends Exp>(
   });
 }
 
+/** New display titles for a bulk rename. Runs are taken in recording order — the folder name's
+ *  YYYYMMDD_HHMMSS prefix (every recorded run has one), else started_utc, else the name; never a mix
+ *  of the two clocks — so "1, 2, 3" follows the experiment sequence, not click order. With
+ *  `numbered`, titles are "<base> NN" zero-padded to the count's width (so they also sort by
+ *  name); otherwise every run gets `base`. A blank base yields "" for each run, which clears it. */
+export function bulkTitles(
+  items: { name: string; started_utc?: string | null }[], base: string, numbered: boolean,
+): { name: string; title: string }[] {
+  const b = base.trim().replace(/\s+/g, " ");
+  const when = (e: { name: string; started_utc?: string | null }) =>
+    /^\d{8}_\d{6}/.exec(e.name)?.[0] ?? e.started_utc ?? e.name;
+  const ordered = [...items].sort((a, c) => when(a).localeCompare(when(c)) || a.name.localeCompare(c.name));
+  const width = String(ordered.length).length;
+  return ordered.map((e, i) => ({
+    name: e.name,
+    title: !b ? "" : numbered ? `${b} ${String(i + 1).padStart(width, "0")}` : b,
+  }));
+}
+
 export type Sort = "newest" | "name" | "duration" | "starred";
 export function sortExperiments<T extends Exp>(items: T[], sort: Sort): T[] {
   const newest = (a: T, b: T) =>

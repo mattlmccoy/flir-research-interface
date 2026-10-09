@@ -2,7 +2,7 @@
 // selected, as a "pick some runs" prompt) so the action controls are where you expect them after
 // clicking "select". During a bulk op it shows a live "verb k/N" progress bar.
 export function SelectionBar({
-  count, driveConnected, busy, progress, onMove, onTag, onStar, onDelete, onSelectAll, onClear,
+  count, driveConnected, busy, progress, onMove, onTag, onRename, onStar, onDelete, onSelectAll, onClear,
 }: {
   count: number;
   driveConnected: boolean;
@@ -10,6 +10,7 @@ export function SelectionBar({
   progress: { done: number; total: number; verb: string } | null;
   onMove: (to: "drive" | "local") => void;
   onTag: () => void;
+  onRename: () => void;
   onStar: (on: boolean) => void;
   onDelete: () => void;
   onSelectAll: () => void;
@@ -25,6 +26,7 @@ export function SelectionBar({
       {driveConnected && <button className="secondary" disabled={busy || none} onClick={() => onMove("drive")}>move to drive →</button>}
       {driveConnected && <button className="secondary" disabled={busy || none} onClick={() => onMove("local")}>← local</button>}
       <button className="secondary" disabled={busy || none} onClick={onTag}>tag…</button>
+      <button className="secondary" disabled={busy || none} onClick={onRename} title="Give the selected runs a display name (optionally numbered)">rename…</button>
       <button className="secondary" disabled={busy || none} onClick={() => onStar(true)}>★ star</button>
       <button className="secondary" disabled={busy || none} onClick={() => onStar(false)}>☆ unstar</button>
       <button className="danger" disabled={busy || none} onClick={onDelete}>delete</button>

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   normalizeTag, mergeTags, suggestTags, tagUniverse, filterExperiments, sortExperiments,
-  selectionReducer, displayName, type SelectionState,
+  selectionReducer, displayName, bulkTitles, type SelectionState,
 } from "./organize.ts";
 
 type E = { name: string; starred?: boolean; tags?: string[]; started_utc?: string | null };
@@ -77,4 +77,31 @@ test("name sort uses the display title when set, else the folder name", () => {
   ];
   assert.deepEqual(sortExperiments(items, "name").map((e) => displayName(e)),
     ["20260911_C_Run", "alpha run", "zinc run"]);
+});
+
+test("bulk titles: numbered in recording order, regardless of selection or screen order", () => {
+  const picked = [
+    { name: "20260911_150811_Run", started_utc: "2026-09-11T19:08:11Z" },
+    { name: "20260911_121421_Run", started_utc: "2026-09-11T16:14:21Z" },
+    { name: "20260911_135955_Run" },  // no started_utc: falls back to the timestamped folder name
+  ];
+  assert.deepEqual(bulkTitles(picked, "Doped coupon", true), [
+    { name: "20260911_121421_Run", title: "Doped coupon 1" },
+    { name: "20260911_135955_Run", title: "Doped coupon 2" },
+    { name: "20260911_150811_Run", title: "Doped coupon 3" },
+  ]);
+});
+
+test("bulk titles: unnumbered gives every run the same name; blank clears names", () => {
+  const picked = [{ name: "b_Run" }, { name: "a_Run" }];
+  assert.deepEqual(bulkTitles(picked, "  Warm-up  ", false).map((x) => x.title), ["Warm-up", "Warm-up"]);
+  assert.deepEqual(bulkTitles(picked, "   ", true).map((x) => x.title), ["", ""]);  // "" = clear
+  assert.deepEqual(bulkTitles([], "x", true), []);
+});
+
+test("bulk titles: zero-pads numbers so 10+ runs still sort by name", () => {
+  const picked = Array.from({ length: 12 }, (_, i) => ({ name: `20261001_0000${String(i).padStart(2, "0")}_Run` }));
+  const titles = bulkTitles(picked, "Sweep", true).map((x) => x.title);
+  assert.equal(titles[0], "Sweep 01");
+  assert.equal(titles[11], "Sweep 12");
 });

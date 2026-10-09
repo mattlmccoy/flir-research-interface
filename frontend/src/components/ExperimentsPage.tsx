@@ -7,6 +7,7 @@ import {
 } from "../lib/organize.ts";
 import { ExperimentCard } from "./ExperimentCard.tsx";
 import { SelectionBar } from "./SelectionBar.tsx";
+import { BulkRenamePopover } from "./BulkRenamePopover.tsx";
 import { TagPopover } from "./TagPopover.tsx";
 
 const cardId = (e: { library?: string; name: string }) => `${e.library ?? "local"}:${e.name}`;
@@ -30,6 +31,7 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string, title?: str
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number; verb: string } | null>(null);
   const [bulkTagOpen, setBulkTagOpen] = useState(false);
+  const [bulkRenameOpen, setBulkRenameOpen] = useState(false);
 
   const setSortP = (s: Sort) => { setSort(s); ls.set("fri.sort", s); };
   const setStarredP = (on: boolean) => { setStarredOnly(on); ls.set("fri.starredOnly", on ? "1" : "0"); };
@@ -111,6 +113,15 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string, title?: str
       (e) => api.setLabels(e.name, { starred: !!e.starred, tags: mergeTags(e.tags ?? [], add), library: libOf(e) }).then(() => {}));
   }
 
+  async function bulkRename(plan: { name: string; title: string }[]) {
+    setBulkRenameOpen(false);
+    const titleOf = new Map(plan.map((p) => [p.name, p.title]));
+    const targets = selectedItems().filter((e) => titleOf.has(e.name));
+    await runBulk(targets, "rename", (e) => api.setLabels(e.name, {
+      starred: !!e.starred, tags: e.tags ?? [], library: libOf(e), title: titleOf.get(e.name) ?? "",
+    }).then(() => {}));
+  }
+
   async function bulkDelete() {
     const targets = selectedItems();
     if (targets.length === 0) return;
@@ -185,9 +196,14 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string, title?: str
         <>
           <SelectionBar
             count={sel.selected.size} driveConnected={driveConnected} busy={bulkBusy} progress={bulkProgress}
-            onMove={bulkMove} onTag={() => setBulkTagOpen(true)} onStar={bulkStar} onDelete={bulkDelete}
+            onMove={bulkMove} onTag={() => { setBulkRenameOpen(false); setBulkTagOpen(true); }} onRename={() => { setBulkTagOpen(false); setBulkRenameOpen(true); }} onStar={bulkStar} onDelete={bulkDelete}
             onSelectAll={() => dispatch({ type: "selectAll", names: shownIds })} onClear={() => { clearSelection(); setSelecting(false); }}
           />
+          {bulkRenameOpen && sel.selected.size > 0 && (
+            <div className="bulk-tag-pop">
+              <BulkRenamePopover items={selectedItems()} onApply={bulkRename} onClose={() => setBulkRenameOpen(false)} />
+            </div>
+          )}
           {bulkTagOpen && sel.selected.size > 0 && (
             <div className="bulk-tag-pop">
               <TagPopover tags={[]} universe={universe} addOnly onChange={bulkAddTags} onClose={() => setBulkTagOpen(false)} />
