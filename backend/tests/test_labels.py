@@ -46,3 +46,23 @@ def test_blank_title_or_notes_clears_them(tmp_path: Path) -> None:
     write_labels(tmp_path, starred=False, tags=[], title="Run A", notes="n")
     write_labels(tmp_path, starred=False, tags=[], title="  ", notes="")
     assert read_labels(tmp_path) == {"starred": False, "tags": []}  # keys absent when unset
+
+
+def test_export_label_uses_display_name_with_the_timestamp_kept(tmp_path: Path) -> None:
+    from flir_research_interface.labels import export_label
+
+    run = tmp_path / "20260911_121421_Run"
+    run.mkdir()
+    assert export_label(run) == "20260911_121421_Run"  # no display name: folder name, unchanged
+    write_labels(run, starred=False, tags=[], title="Doped coupon #3")
+    assert export_label(run) == "20260911_121421_Doped_coupon_3"
+    write_labels(run, starred=False, tags=[], title='Ø? bad:/\\*"<>| chars  é')
+    label = export_label(run)  # filesystem- and header-safe on Windows/macOS/Linux
+    assert label.startswith("20260911_121421_") and label.isascii()
+    assert not any(c in label for c in '<>:"/\\|?* ')
+    write_labels(run, starred=False, tags=[], title="x" * 300)
+    assert len(export_label(run)) <= 100
+    other = tmp_path / "run1"  # a folder without the timestamp prefix keeps its name as the prefix
+    other.mkdir()
+    write_labels(other, starred=False, tags=[], title="Coupon")
+    assert export_label(other) == "run1_Coupon"

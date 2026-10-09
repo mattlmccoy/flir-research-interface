@@ -14,6 +14,7 @@ import io
 import json
 import os
 import zipfile
+from pathlib import Path
 from typing import Any
 
 import h5py
@@ -23,6 +24,7 @@ from PIL import Image
 
 from flir_research_interface import __version__
 from flir_research_interface.analysis.series import roi_series
+from flir_research_interface.labels import export_label, read_labels
 from flir_research_interface.playback.reader import ExperimentReader
 from flir_research_interface.radiometry.temperature_linear import (
     KELVIN_OFFSET,
@@ -121,7 +123,7 @@ def frame_bytes(reader: ExperimentReader, index: int, fmt: str) -> tuple[bytes, 
         raise ValueError(f"unknown export format {fmt!r}; choose one of {sorted(FRAME_FORMATS)}")
     frame = reader.frame(index)
     media, ext = FRAME_FORMATS[fmt]
-    filename = f"{reader.path.name}_frame{index:04d}{ext}"
+    filename = f"{export_label(reader.path)}_frame{index:04d}{ext}"
     linear = _linear_format(reader)
     celsius: npt.NDArray[np.float32] | None = (
         counts_to_celsius(frame.counts, linear) if linear is not None else None
@@ -165,7 +167,7 @@ def export_frame_range(
     indices = list(range(start, stop, step))
     out_dir = reader.path / "exports"
     out_dir.mkdir(exist_ok=True)
-    tag = f"frames_{start:04d}-{indices[-1]:04d}_step{step}"
+    tag = f"{export_label(reader.path)}_frames_{start:04d}-{indices[-1]:04d}_step{step}"
     if fmt == "tiff-stack":
         linear = _linear_format(reader)
         pages = []
@@ -194,11 +196,30 @@ def export_frame_range(
     }
 
 
+def _remove_superseded_hdf5(keep: Path, experiment: str) -> None:
+    """Delete earlier HDF5 exports of the same run (``attrs["experiment"]`` matches) left under a
+    previous name. Files that are unreadable or from another run are never touched."""
+    for other in keep.parent.glob("*.h5"):
+        if other == keep:
+            continue
+        try:
+            with h5py.File(other, "r") as f:
+                same = f.attrs.get("experiment") == experiment
+        except (OSError, ValueError):
+            continue
+        if same:
+            other.unlink(missing_ok=True)
+
+
 def export_hdf5(reader: ExperimentReader, *, batch: int = 64) -> dict[str, Any]:
-    """Write ``<experiment>/exports/<name>.h5`` (gzip'd uint16 counts + time axes + metadata)."""
+    """Write ``<experiment>/exports/<label>.h5`` (gzip'd uint16 counts + time axes + metadata).
+
+    ``<label>`` carries the run's display name (see ``labels.export_label``). After a rename, the
+    previous HDF5 export of this same run (identified by its ``experiment`` attribute) is removed
+    once the new one is complete, so a multi-GB duplicate is not left behind."""
     out_dir = reader.path / "exports"
     out_dir.mkdir(exist_ok=True)
-    out = out_dir / f"{reader.path.name}.h5"
+    out = out_dir / f"{export_label(reader.path)}.h5"
     tmp = out.with_name(out.name + ".tmp")
     info = reader.info()
     n, h, w = reader.n_frames, int(info["height"]), int(info["width"])
@@ -223,6 +244,7 @@ def export_hdf5(reader: ExperimentReader, *, batch: int = 64) -> dict[str, Any]:
         f.create_dataset("device_timestamp_ns", data=dev)
         f.create_dataset("host_timestamp_ns", data=host)
         f.attrs["experiment"] = reader.path.name
+        f.attrs["title"] = read_labels(reader.path).get("title") or ""
         f.attrs["software"] = f"FLIR Research Interface {__version__}"
         f.attrs["ir_format"] = reader.ir_format or ""
         f.attrs["pixel_format"] = reader.pixel_format
@@ -235,6 +257,7 @@ def export_hdf5(reader: ExperimentReader, *, batch: int = 64) -> dict[str, Any]:
         f.attrs["metadata_json"] = json.dumps(reader.metadata)
         f.attrs["events_json"] = json.dumps(reader.events)
     os.replace(tmp, out)
+    _remove_superseded_hdf5(out, reader.path.name)
     data = out.read_bytes()
     return {
         "path": str(out),

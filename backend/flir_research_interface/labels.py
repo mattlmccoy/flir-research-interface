@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
+import unicodedata
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -101,7 +103,33 @@ def write_labels(
     return stored
 
 
+_TIMESTAMP = re.compile(r"^\d{8}_\d{6}")
+_MAX_LABEL_LEN = 100
+
+
+def _file_safe(text: str) -> str:
+    """ASCII, Windows/macOS/Linux-safe, header-safe: accents dropped, every run of other
+    characters (spaces, punctuation, <>:"/\\|?*) becomes one underscore."""
+    ascii_ = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^A-Za-z0-9.-]+", "_", ascii_).strip("._-")
+
+
+def export_label(run_dir: Path | str) -> str:
+    """The base name for files exported from a run: the folder name when there is no display
+    name, else ``<timestamp>_<display name>`` (the folder's timestamp prefix, or the whole folder
+    name when it has none, keeps two runs with the same title from colliding)."""
+    run_dir = Path(run_dir)
+    title = read_labels(run_dir).get("title")
+    safe = _file_safe(title) if title else ""
+    if not safe:
+        return run_dir.name
+    m = _TIMESTAMP.match(run_dir.name)
+    prefix = m.group(0) if m else run_dir.name
+    return f"{prefix}_{safe}"[:_MAX_LABEL_LEN].rstrip("._-")
+
+
 __all__ = [
-    "LABELS_FILE", "normalize_notes", "normalize_tags", "normalize_title", "read_labels",
+    "LABELS_FILE", "export_label", "normalize_notes", "normalize_tags", "normalize_title",
+    "read_labels",
     "write_labels",
 ]

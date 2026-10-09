@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from flir_research_interface.analysis.export import (
+    export_frame_range,
     export_hdf5,
     frame_bytes,
     series_csv,
@@ -180,3 +181,44 @@ def test_export_endpoints(tmp_path: Path) -> None:
         body = h5.json()
         assert Path(body["path"]).is_file() and body["size_bytes"] > 0
         assert c.post("/api/experiments/nope/export/hdf5").status_code == 404
+
+
+def test_exports_carry_the_display_name_and_hdf5_replaces_its_old_copy(tmp_path: Path) -> None:
+    from flir_research_interface.labels import export_label, write_labels
+
+    d = _make_experiment(tmp_path, n=3)
+    first = Path(export_hdf5(ExperimentReader(d))["path"])  # before any rename: folder name
+    assert first.name == f"{d.name}.h5"
+    unrelated = d / "exports" / "someone_elses.h5"
+    with h5py.File(unrelated, "w") as f:
+        f.attrs["experiment"] = "another_run"
+    write_labels(d, starred=False, tags=[], title="Doped coupon")
+    label = export_label(d)
+    r = ExperimentReader(d)
+    out = Path(export_hdf5(r)["path"])
+    assert out.name == f"{label}.h5"
+    assert not first.exists()  # the superseded copy of THIS run is removed (multi-GB duplicate)
+    assert unrelated.exists()  # never touches .h5 files from elsewhere
+    _data, _media, fname = frame_bytes(r, 0, "csv")
+    assert fname == f"{label}_frame0000.csv"
+    rng = Path(export_frame_range(r, 0, 2, 1, "csv")["path"])
+    assert rng.name.startswith(f"{label}_frames_")
+
+
+def test_downloads_are_named_with_the_display_name(tmp_path: Path) -> None:
+    from flir_research_interface.labels import export_label, write_labels
+
+    d = _make_experiment(tmp_path, n=3)
+    write_labels(d, starred=False, tags=[], title="Doped coupon")
+    label = export_label(d)
+    (d / "exports").mkdir(exist_ok=True)
+    (d / "exports" / "roi_series.csv").write_text("t_s\n0\n")
+    with TestClient(create_app(experiments_root=tmp_path, min_free_gb=0.0)) as c:
+        url = f"/api/experiments/{d.name}/exports/roi_series.csv"
+        cd = c.get(url).headers["content-disposition"]
+        assert f'filename="{label}_roi_series.csv"' in cd
+        assert cd.startswith("inline")  # still viewable in the browser, saved under the label
+        rois = json.dumps([{"id": 1, "kind": "spot", "x": 1, "y": 1}])
+        cd = c.get(f"/api/experiments/{d.name}/export/series.csv", params={"rois": rois}).headers[
+            "content-disposition"]
+        assert f'filename="{label}_series.csv"' in cd

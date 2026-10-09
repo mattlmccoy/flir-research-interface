@@ -31,6 +31,7 @@ from flir_research_interface.analysis.thermal_video import (
     save_range,
     thermal_frame_rgb,
 )
+from flir_research_interface.labels import export_label
 from flir_research_interface.playback.reader import ExperimentReader
 from flir_research_interface.radiometry.overrange import over_range_mask
 from flir_research_interface.radiometry.temperature_linear import IRFormat, counts_to_celsius
@@ -485,7 +486,9 @@ def render_clip(
 
         out_dir = reader.path / "exports" / CLIPS_DIR
         out_dir.mkdir(parents=True, exist_ok=True)
-        stem = _slug(opts.title or f"clip_{opts.start}-{stop}")
+        # an explicit clip title is the user's chosen name; otherwise say which run it came from
+        stem = (_slug(opts.title) if opts.title
+                else f"{export_label(reader.path)}_clip_{opts.start}-{stop}")
         total = len(indices)
 
         def _frames() -> Iterator[tuple[int, np.ndarray]]:

@@ -1824,6 +1824,19 @@ def create_app(
 
     # -- exports (Milestone 7) ---------------------------------------------------------------
 
+    def _named_file(
+        path: Path, run_dir: Path, file: str, media_type: str | None = None
+    ) -> Response:
+        """Serve a run file inline (still viewable in the browser) but saved as
+        ``<display-name label>_<file>`` so downloads say which run they came from."""
+        from starlette.responses import FileResponse
+
+        return FileResponse(
+            path, media_type=media_type, headers={"Accept-Ranges": "bytes"},
+            filename=f"{labels_mod.export_label(run_dir)}_{file}",
+            content_disposition_type="inline",
+        )
+
     def _download(data: bytes | str, media_type: str, filename: str) -> Response:
         return Response(
             content=data,
@@ -1842,7 +1855,7 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         r = _open(name)
         text = await run_in_threadpool(series_csv, r, parsed)
-        return _download(text, "text/csv", f"{r.path.name}_series.csv")
+        return _download(text, "text/csv", f"{labels_mod.export_label(r.path)}_series.csv")
 
     @app.get("/api/experiments/{name}/frames/{index}/export")
     async def export_frame(name: str, index: int, format: str = "csv") -> Response:
@@ -1886,12 +1899,12 @@ def create_app(
 
     @app.get("/api/experiments/{name}/report.pdf")
     def experiment_report(name: str) -> Response:
-        from starlette.responses import FileResponse
 
-        path = _exp_dir(name) / "exports" / "report.pdf"
+        d = _exp_dir(name)
+        path = d / "exports" / "report.pdf"
         if not path.is_file():
             raise HTTPException(404, "report not generated yet")
-        return FileResponse(path, media_type="application/pdf")
+        return _named_file(path, d, "report.pdf", "application/pdf")
 
     @app.post("/api/experiments/{name}/export/frames")
     async def export_frames_route(name: str, req: FrameRangeRequest) -> dict[str, Any]:
@@ -1921,14 +1934,14 @@ def create_app(
     @app.get("/api/experiments/{name}/exports/{file}")
     def experiment_export_file(name: str, file: str) -> Response:
         """Any derived file from the run's exports/ folder (PNG, MP4, CSV, PDF, zip, TIFF…)."""
-        from starlette.responses import FileResponse
 
         if "/" in file or "\\" in file or file.startswith("."):
             raise HTTPException(400, "invalid file name")
-        path = _exp_dir(name) / "exports" / file
+        d = _exp_dir(name)
+        path = d / "exports" / file
         if not path.is_file():
             raise HTTPException(404, f"exports/{file} not found")
-        return FileResponse(path, headers={"Accept-Ranges": "bytes"})
+        return _named_file(path, d, file)
 
     @app.get("/api/experiments/{name}/exports/clips/{file}")
     def experiment_clip_file(name: str, file: str) -> Response:
@@ -1944,12 +1957,12 @@ def create_app(
 
     @app.get("/api/experiments/{name}/thermal_preview.mp4")
     def experiment_thermal_video(name: str) -> Response:
-        from starlette.responses import FileResponse
 
-        path = _exp_dir(name) / "exports" / "thermal_preview.mp4"
+        d = _exp_dir(name)
+        path = d / "exports" / "thermal_preview.mp4"
         if not path.is_file():
             raise HTTPException(404, "thermal preview video not rendered yet")
-        return FileResponse(path, media_type="video/mp4", headers={"Accept-Ranges": "bytes"})
+        return _named_file(path, d, "thermal_preview.mp4", "video/mp4")
 
     def _png_response(path: Path, request: Request) -> Response:
         if not path.is_file():
@@ -1966,12 +1979,11 @@ def create_app(
 
     @app.get("/api/experiments/{name}/visible.mp4")
     def experiment_visible_video(name: str) -> Response:
-        from starlette.responses import FileResponse
-
-        path = _exp_dir(name) / "visible.mp4"
+        d = _exp_dir(name)
+        path = d / "visible.mp4"
         if not path.is_file():
             raise HTTPException(404, "this recording has no visible video")
-        return FileResponse(path, media_type="video/mp4", headers={"Accept-Ranges": "bytes"})
+        return _named_file(path, d, "visible.mp4", "video/mp4")
 
     @app.get("/api/experiments/{name}/visible/{index}")
     def experiment_visible_segment(name: str, index: int) -> Response:
