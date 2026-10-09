@@ -23,3 +23,26 @@ def test_write_labels_normalizes_and_round_trips_atomically(tmp_path: Path) -> N
     assert stored == {"starred": True, "tags": ["Doped", "x"]}
     assert read_labels(tmp_path) == {"starred": True, "tags": ["Doped", "x"]}
     assert not list(tmp_path.glob("*.tmp*"))  # temp file cleaned up (atomic replace)
+
+
+def test_title_and_notes_round_trip_and_are_normalized(tmp_path: Path) -> None:
+    stored = write_labels(tmp_path, starred=False, tags=[], title="  doped   coupon  #3 ",
+                          notes="  line one\nline two  \n")
+    assert stored["title"] == "doped coupon #3"  # whitespace collapsed, trimmed
+    assert stored["notes"] == "line one\nline two"  # line breaks kept, ends trimmed
+    assert read_labels(tmp_path)["title"] == "doped coupon #3"
+    long = write_labels(tmp_path, starred=False, tags=[], title="x" * 500, notes="n" * 20000)
+    assert len(long["title"]) == 120 and len(long["notes"]) == 10000  # capped
+
+
+def test_star_or_tag_edit_keeps_title_and_notes(tmp_path: Path) -> None:
+    write_labels(tmp_path, starred=False, tags=["a"], title="Run A", notes="kept")
+    write_labels(tmp_path, starred=True, tags=["a", "b"])  # e.g. a bulk star from an older client
+    got = read_labels(tmp_path)
+    assert got == {"starred": True, "tags": ["a", "b"], "title": "Run A", "notes": "kept"}
+
+
+def test_blank_title_or_notes_clears_them(tmp_path: Path) -> None:
+    write_labels(tmp_path, starred=False, tags=[], title="Run A", notes="n")
+    write_labels(tmp_path, starred=False, tags=[], title="  ", notes="")
+    assert read_labels(tmp_path) == {"starred": False, "tags": []}  # keys absent when unset

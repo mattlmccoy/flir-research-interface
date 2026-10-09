@@ -68,6 +68,7 @@ function beep(): void {
 export function App() {
   const [page, setPage] = useState<Page>("setup");
   const [openExp, setOpenExp] = useState<string | null>(null);
+  const [openTitle, setOpenTitle] = useState<string | null>(null);  // display name, if renamed
   const [layout, dispatch] = useReducer(layoutReducer, DEFAULT_LAYOUT, () => loadLayout(storage));
   useEffect(() => { saveLayout(storage, layout); }, [layout]);
   const [roiHist, roiDispatch] = useReducer(roiHistoryReducer, EMPTY_ROIS, () => initHistory(loadRois(storage)));
@@ -284,7 +285,7 @@ export function App() {
       {page === "playback" && openExp && (
         <span className="crumb">
           <button className="secondary" onClick={() => setPage("experiments")} title="Back to the experiments list" aria-label="Back to experiments">← experiments</button>
-          <span className="open-name" title={openExp}>{openExp}</span>
+          <span className="open-name" title={openTitle ? `${openTitle} — folder ${openExp}` : openExp}>{openTitle || openExp}</span>
           <button className="secondary" title="Show this run's folder in Finder / Explorer" aria-label="Reveal run folder"
             onClick={() => { setRevealNote(null); api.reveal(openExp).then((r) => { if (!r.ok) setRevealNote(r.error ?? "reveal failed"); }).catch((e) => setRevealNote(String(e))); }}>reveal</button>
           {revealNote && <span className="bad" role="alert">{revealNote}</span>}
@@ -310,7 +311,7 @@ export function App() {
   }
   if (page === "experiments") {
     return <StudioFrame layout={layout} page topbar={topbar} statusbar={statusbar}
-      center={<ExperimentsPage onOpen={(name) => { setOpenExp(name); setPage("playback"); }}/>} />;
+      center={<ExperimentsPage onOpen={(name, title) => { setOpenExp(name); setOpenTitle(title ?? null); setPage("playback"); }}/>} />;
   }
   if (page === "playback" && openExp) {
     return <PlaybackPage name={openExp} layout={layout} dispatch={dispatch} topbar={topbar}

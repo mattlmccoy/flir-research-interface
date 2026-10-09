@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { api, type Experiment, type Previews } from "../lib/api.ts";
 import { formatSeconds, keyframeBackgroundPosition, keyframeIndex } from "../lib/keyframes.ts";
 import { hasRois, loadRois, roisDifferFromStored } from "../lib/roi.ts";
+import { displayName } from "../lib/organize.ts";
 import { isOffline } from "../lib/storageSummary.ts";
 import { TagPopover } from "./TagPopover.tsx";
 
@@ -30,19 +31,38 @@ export function ExperimentCard({
   const [note, setNote] = useState<string | null>(null);
   const [move, setMove] = useState<{ done: number; total: number } | null>(null);
   const [showTags, setShowTags] = useState(false);
+  // Inline edit of the display name or notes (sidecar only; the run folder is never renamed).
+  const [editing, setEditing] = useState<"title" | "notes" | null>(null);
+  const [draft, setDraft] = useState("");
+  const cancelled = useRef(false);
   const onDrive = exp.library === "drive";
   const tags = exp.tags ?? [];
   const lib = exp.library === "drive" ? "drive" : "local";
 
   // Persist star/tags to this run's sidecar (the card's own library copy). Optimistic via onChanged.
-  async function saveLabels(next: { starred?: boolean; tags?: string[] }) {
+  async function saveLabels(next: { starred?: boolean; tags?: string[]; title?: string; notes?: string }) {
     try {
       await api.setLabels(exp.name, {
         starred: next.starred ?? !!exp.starred, tags: next.tags ?? tags, library: lib,
+        ...(next.title !== undefined ? { title: next.title } : {}),
+        ...(next.notes !== undefined ? { notes: next.notes } : {}),
       });
       onChanged();
     } catch (e) { setNote(String(e)); }
   }
+  function startEdit(field: "title" | "notes") {
+    cancelled.current = false;
+    setDraft((field === "title" ? exp.title : exp.notes) ?? "");
+    setEditing(field);
+  }
+  function commitEdit(field: "title" | "notes") {
+    if (editing !== field) return;
+    setEditing(null);
+    if (cancelled.current) return;
+    const before = (field === "title" ? exp.title : exp.notes) ?? "";
+    if (draft.trim() !== before.trim()) void saveLabels({ [field]: draft });
+  }
+  const cancelEdit = () => { cancelled.current = true; setEditing(null); };
 
   // Offload to the drive (or bring back), copy → verify → delete, with a progress bar.
   async function moveTo(to: "drive" | "local") {
@@ -138,7 +158,9 @@ export function ExperimentCard({
           <div className="ph">on {label}<br />not connected</div>
         </div>
         <div className="body">
-          <span className="name">{exp.starred ? "★ " : ""}{exp.name}</span>
+          <span className="name">{exp.starred ? "★ " : ""}{displayName(exp)}</span>
+          {exp.title && <span className="folder-name" title="folder name on disk">{exp.name}</span>}
+          {exp.notes && <div className="notes ro">{exp.notes}</div>}
           <span className="meta">
             {exp.duration_s != null && <span>{formatSeconds(exp.duration_s)}</span>}
             <span>{n} fr</span>
@@ -198,7 +220,33 @@ export function ExperimentCard({
         )}
       </div>
       <div className="body">
-        <span className="name">{exp.name}</span>
+        {editing === "title" ? (
+          <input className="name-edit" autoFocus value={draft} maxLength={120} placeholder={exp.name}
+            aria-label="display name" title="Display name (Enter to save, Esc to cancel, empty = folder name)"
+            onChange={(e) => setDraft(e.target.value)} onBlur={() => commitEdit("title")}
+            onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") cancelEdit(); }} />
+        ) : (
+          <span className="name-row">
+            <span className="name" title={exp.name}>{displayName(exp)}</span>
+            <button className="icon-btn" aria-label="rename" title="Rename — changes the name shown here; the folder on disk keeps its name"
+              onClick={() => startEdit("title")}>✎</button>
+          </span>
+        )}
+        {exp.title && editing !== "title" && <span className="folder-name" title="folder name on disk">{exp.name}</span>}
+        {editing === "notes" ? (
+          <div className="notes-edit">
+            <textarea autoFocus rows={4} value={draft} maxLength={10000} aria-label="notes"
+              placeholder="what was this run? sample, settings, what happened…"
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Escape") cancelEdit(); if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) commitEdit("notes"); }} />
+            <div className="actions-row">
+              <button className="primary" onClick={() => commitEdit("notes")} title="Save notes (⌘/Ctrl+Enter)">save notes</button>
+              <button className="secondary" onClick={cancelEdit}>cancel</button>
+            </div>
+          </div>
+        ) : exp.notes ? (
+          <div className="notes" title="click to edit notes" onClick={() => startEdit("notes")}>{exp.notes}</div>
+        ) : null}
         <span className="meta">
           {exp.duration_s != null && <span>{formatSeconds(exp.duration_s)}</span>}
           <span>{n} fr</span>
@@ -218,6 +266,9 @@ export function ExperimentCard({
           ))}
           <span style={{ position: "relative" }}>
             <button className="tag-add" title="add tags" onClick={() => setShowTags((s) => !s)}>＋ tag</button>
+            {!exp.notes && editing !== "notes" && (
+              <button className="tag-add" style={{ marginLeft: 4 }} title="add notes to this run" onClick={() => startEdit("notes")}>＋ notes</button>
+            )}
             {showTags && (
               <TagPopover tags={tags} universe={universe}
                 onChange={(next) => saveLabels({ tags: next })} onClose={() => setShowTags(false)} />

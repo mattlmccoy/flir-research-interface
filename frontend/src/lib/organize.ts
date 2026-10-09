@@ -49,7 +49,12 @@ export function suggestTags(all: string[], query: string, exclude: string[]): st
 type Exp = {
   name: string; starred?: boolean; tags?: string[];
   started_utc?: string | null; duration_s?: number;
+  title?: string | null; notes?: string | null;
 };
+
+/** What a run is called on screen: its display title when set, else its folder name. */
+export const displayName = (e: { name: string; title?: string | null }): string =>
+  (e.title ?? "").trim() || e.name;
 
 export function filterExperiments<T extends Exp>(
   items: T[], f: { query: string; starredOnly: boolean; tags: string[] },
@@ -61,7 +66,8 @@ export function filterExperiments<T extends Exp>(
     const tags = (e.tags ?? []).map((t) => t.toLowerCase());
     if (need.some((t) => !tags.includes(t))) return false;
     if (!q) return true;
-    return e.name.toLowerCase().includes(q) || tags.some((t) => t.includes(q));
+    const text = [e.name, e.title ?? "", e.notes ?? ""].join("\n").toLowerCase();
+    return text.includes(q) || tags.some((t) => t.includes(q));
   });
 }
 
@@ -70,7 +76,7 @@ export function sortExperiments<T extends Exp>(items: T[], sort: Sort): T[] {
   const newest = (a: T, b: T) =>
     (b.started_utc ?? "").localeCompare(a.started_utc ?? "") || b.name.localeCompare(a.name);
   return [...items].sort((a, b) => {
-    if (sort === "name") return a.name.localeCompare(b.name);
+    if (sort === "name") return displayName(a).localeCompare(displayName(b));
     if (sort === "duration") return (b.duration_s ?? 0) - (a.duration_s ?? 0);
     if (sort === "starred") return Number(!!b.starred) - Number(!!a.starred) || newest(a, b);
     return newest(a, b);

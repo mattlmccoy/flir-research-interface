@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   normalizeTag, mergeTags, suggestTags, tagUniverse, filterExperiments, sortExperiments,
-  selectionReducer, type SelectionState,
+  selectionReducer, displayName, type SelectionState,
 } from "./organize.ts";
 
 type E = { name: string; starred?: boolean; tags?: string[]; started_utc?: string | null };
@@ -56,4 +56,25 @@ test("selectionReducer toggle/range/selectAll/clear", () => {
   assert.deepEqual([...s.selected].sort(), ["x", "y"]);
   s = selectionReducer(s, { type: "clear" });
   assert.equal(s.selected.size, 0);
+});
+
+test("search matches the display title and notes, not just the folder name", () => {
+  const items = [
+    { name: "20260911_121421_Run", title: "Doped coupon #3", notes: "load retuned at 40 s" },
+    { name: "20260911_135955_Run" },
+  ];
+  const q = (query: string) => filterExperiments(items, { query, starredOnly: false, tags: [] }).map((e) => e.name);
+  assert.deepEqual(q("coupon"), ["20260911_121421_Run"]);
+  assert.deepEqual(q("RETUNED"), ["20260911_121421_Run"]);
+  assert.deepEqual(q("135955"), ["20260911_135955_Run"]);  // folder name still searchable
+});
+
+test("name sort uses the display title when set, else the folder name", () => {
+  const items = [
+    { name: "20260911_A_Run", title: "zinc run" },
+    { name: "20260911_B_Run", title: "alpha run" },
+    { name: "20260911_C_Run" },
+  ];
+  assert.deepEqual(sortExperiments(items, "name").map((e) => displayName(e)),
+    ["20260911_C_Run", "alpha run", "zinc run"]);
 });

@@ -85,6 +85,9 @@ export interface Experiment {
   size_bytes?: number;
   starred?: boolean;
   tags?: string[];
+  /** Display name and free-text notes (labels.json sidecar; the folder name is unchanged). */
+  title?: string;
+  notes?: string;
   complete: boolean;
   frames_on_disk: number;
   has_metadata?: boolean;
@@ -211,8 +214,8 @@ export const api = {
     j<MoveJob>(req(`/api/experiments/${encodeURIComponent(name)}/move`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ to }) })),
   moveStatus: (name: string) =>
     j<MoveJob>(req(`/api/experiments/${encodeURIComponent(name)}/move/status`)),
-  setLabels: (name: string, body: { starred: boolean; tags: string[]; library?: "local" | "drive" }) =>
-    j<{ starred: boolean; tags: string[] }>(req(`/api/experiments/${encodeURIComponent(name)}/labels`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })),
+  setLabels: (name: string, body: { starred: boolean; tags: string[]; library?: "local" | "drive"; title?: string; notes?: string }) =>
+    j<{ starred: boolean; tags: string[]; title?: string; notes?: string }>(req(`/api/experiments/${encodeURIComponent(name)}/labels`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })),
   revealRoot: () => j<RevealResult>(req("/api/experiments/reveal-root", { method: "POST" })),
   health: () => j<Health>(req("/api/health")),
   sdk: () => j<Record<string, unknown>>(req("/api/setup/sdk")),

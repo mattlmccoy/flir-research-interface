@@ -248,6 +248,9 @@ class LabelsRequest(BaseModel):
     starred: bool = False
     tags: list[str] = []
     library: str | None = None  # "local"|"drive"|None (None = first found, local-first)
+    # Display name + notes (the run folder is never renamed). Omitted = keep; "" or null = clear.
+    title: str | None = None
+    notes: str | None = None
 
 
 class ForceIpRequest(BaseModel):
@@ -1429,7 +1432,8 @@ def create_app(
     @app.put("/api/experiments/{name}/labels")
     def set_labels(name: str, req: LabelsRequest) -> dict[str, Any]:
         run = _exp_dir_in(name, req.library)
-        return labels_mod.write_labels(run, starred=req.starred, tags=req.tags)
+        extra = {k: getattr(req, k) for k in ("title", "notes") if k in req.model_fields_set}
+        return labels_mod.write_labels(run, starred=req.starred, tags=req.tags, **extra)
 
     def _open(name: str) -> ExperimentReader:
         d = _exp_dir(name)

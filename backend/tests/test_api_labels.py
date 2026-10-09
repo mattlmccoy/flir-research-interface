@@ -44,3 +44,17 @@ def test_put_labels_unknown_run_is_404(tmp_path: Path) -> None:
     c = _client(tmp_path)
     r = c.put("/api/experiments/nope/labels", json={"starred": False, "tags": []}, headers=H)
     assert r.status_code == 404
+
+
+def test_put_title_and_notes_shows_in_the_listing_and_survives_a_star(tmp_path: Path) -> None:
+    (tmp_path / "20260911_121421_Run").mkdir()
+    c = _client(tmp_path)
+    url = "/api/experiments/20260911_121421_Run/labels"
+    r = c.put(url, json={"starred": False, "tags": [], "title": "Doped coupon #3",
+                         "notes": "PA12 + 2% CB; load retuned at 40 s"}, headers=H)
+    assert r.status_code == 200 and r.json()["title"] == "Doped coupon #3"
+    c.put(url, json={"starred": True, "tags": ["doped"]}, headers=H)  # no title/notes sent
+    run = next(e for e in c.get("/api/experiments").json() if e["name"] == "20260911_121421_Run")
+    assert run["title"] == "Doped coupon #3" and run["notes"].startswith("PA12")
+    assert run["starred"] is True
+    assert (tmp_path / "20260911_121421_Run").is_dir()  # the folder itself is never renamed
