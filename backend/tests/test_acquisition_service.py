@@ -187,3 +187,49 @@ def test_connect_retries_with_backoff_before_failing() -> None:
     svc.connect(svc.enumerate()[0])  # must retry past the two failures, not raise
     assert svc.state == ServiceState.CONNECTED
     svc.disconnect()
+
+
+class _Vanishing(SimulatedCameraBackend):
+    """The stream dies once, then the camera is gone for ``gone_for`` reconnects, then returns —
+    the 2026-10-09 → 10-13 outage (a USB hub dropped the camera's adapter for four days)."""
+
+    def __init__(self, *, gone_for: int) -> None:
+        super().__init__(scene=UniformScene(25.0), width=8, height=8, fps=200.0, realtime=True)
+        self.gone_left = gone_for
+        self.frames_calls = 0
+        self._died = False
+
+    def connect(self, descriptor) -> None:  # type: ignore[no-untyped-def]
+        if self._died and self.gone_left > 0:
+            self.gone_left -= 1
+            raise RuntimeError("camera serial '89903739' not found")
+        super().connect(descriptor)
+
+    def frames(self):  # type: ignore[no-untyped-def]
+        self.frames_calls += 1
+        if not self._died:
+            self._died = True
+            raise RuntimeError("Error reading from Device [-1010]")
+        yield from super().frames()
+
+
+def test_outage_logs_one_traceback_then_one_line_per_retry(caplog) -> None:  # type: ignore[no-untyped-def]
+    import logging
+
+    cam = _Vanishing(gone_for=5)
+    svc = AcquisitionService(cam, auto_reconnect=True, reconnect_delays=(0.01,))
+    svc.connect(svc.enumerate()[0])
+    with caplog.at_level(logging.INFO, logger="flir_research_interface.acquisition.service"):
+        svc.start()
+        assert _wait(lambda: svc.stats()["frames_received"] > 0, timeout_s=5.0)
+        svc.disconnect()
+    recs = [r for r in caplog.records if r.name.endswith("acquisition.service")]
+    tracebacks = [r for r in recs if r.exc_info]
+    assert len(tracebacks) == 1, [r.getMessage() for r in tracebacks]  # the first failure only
+    # never pump frames from a camera that failed to reconnect (that was the NotConnectedError spam)
+    assert cam.frames_calls == 2  # the failing stream + the recovered one
+    msgs = [r.getMessage() for r in recs]
+    retries = [m for m in msgs if "reconnect" in m and "failed" in m]
+    assert len(retries) == 5 and all("\n" not in m for m in retries)
+    assert "not found" in retries[0] and "attempt" in retries[0]
+    assert any("reconnected" in r.getMessage() for r in recs)  # the recovery is stated plainly

@@ -245,18 +245,26 @@ class AcquisitionService:
         # Supervise the stream. Without auto_reconnect this is a single pass that surfaces any
         # failure as ERROR (unchanged behaviour). With it, a failure/stall triggers a backoff +
         # reconnect of the same camera, retrying until it returns (or max attempts).
+        # Logging during an outage: the first failure keeps its traceback; every later failure
+        # is one line (a camera gone for days must not write a traceback every 30 s), and frames
+        # are never pumped from a camera that failed to reconnect.
         attempt = 0
+        reconnect_failed = False
+        reason: str | None = None
         while not self._stop_evt.is_set():
-            reason: str | None = None
-            try:
-                if self._acquire_frames() > 0:
-                    attempt = 0  # frames flowed → the connection is healthy again
-                if self._stop_evt.is_set():
-                    break
-                reason = "camera stream ended"
-            except Exception as exc:  # noqa: BLE001 - any backend failure is a candidate to recover
-                logger.exception("acquisition failed")
-                reason = f"{type(exc).__name__}: {exc}"
+            if not reconnect_failed:
+                try:
+                    if self._acquire_frames() > 0:
+                        attempt = 0  # frames flowed → the connection is healthy again
+                    if self._stop_evt.is_set():
+                        break
+                    reason = "camera stream ended"
+                except Exception as exc:  # noqa: BLE001 - any backend failure may be recoverable
+                    reason = f"{type(exc).__name__}: {exc}"
+                    if attempt == 0:
+                        logger.exception("acquisition failed")
+                    else:
+                        logger.warning("acquisition failed again: %s", reason)
 
             if self._stop_evt.is_set():
                 break
@@ -281,9 +289,16 @@ class AcquisitionService:
                 if self._device is not None:
                     self._backend.connect(self._device)
                 self._last_frame_at = time.monotonic()
+                reconnect_failed = False
+                logger.info("camera reconnected after %d attempt(s)", attempt)
                 self._set_state(ServiceState.ACQUIRING)
             except Exception as exc:  # noqa: BLE001 - reconnect failed; loop retries with backoff
-                self._set_state(ServiceState.RECONNECTING, f"reconnect failed: {exc}")
+                reconnect_failed = True
+                reason = f"reconnect failed: {type(exc).__name__}: {exc}"
+                nxt = self._reconnect_delays[min(attempt, len(self._reconnect_delays) - 1)]
+                logger.warning("camera reconnect failed (attempt %d): %s; retrying in %.0fs",
+                               attempt, exc, nxt)
+                self._set_state(ServiceState.RECONNECTING, reason)
 
         with self._cond:
             if self._state in (ServiceState.ACQUIRING, ServiceState.RECONNECTING):
