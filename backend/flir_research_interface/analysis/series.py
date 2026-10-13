@@ -230,9 +230,20 @@ def _spline_pixels(points: list[tuple[int, int]], w: int, h: int) -> list[tuple[
 
 
 def roi_index(roi: dict[str, Any], w: int, h: int) -> tuple[np.ndarray, np.ndarray]:
-    """(ys, xs) of the pixels a non-rect ROI covers inside a w×h image (no duplicates)."""
+    """(ys, xs) of the pixels an ROI covers inside a w×h image (no duplicates). Rects use the same
+    end-exclusive, frame-clipped box as the recorded series (``[y0:y1, x0:x1]``). Unknown kinds
+    raise ``ValueError`` rather than being guessed as polygons."""
     kind = roi["kind"]
+    if kind not in ("rect", "spot", "polyline", "ellipse", "circle", "line", "polygon"):
+        raise ValueError(f"unknown ROI kind {kind!r}")
     pts: list[tuple[int, int]]
+    if kind == "rect":
+        x0, y0 = max(0, int(roi["x0"])), max(0, int(roi["y0"]))
+        x1, y1 = min(w, int(roi["x1"])), min(h, int(roi["y1"]))
+        if x1 <= x0 or y1 <= y0:
+            return np.empty(0, dtype=np.intp), np.empty(0, dtype=np.intp)
+        ys_r, xs_r = np.mgrid[y0:y1, x0:x1]
+        return ys_r.ravel().astype(np.intp), xs_r.ravel().astype(np.intp)
     if kind == "spot":
         pts = [(int(roi["x"]), int(roi["y"]))]
     elif kind == "polyline":  # a "spline" ROI: pixels along the Catmull-Rom curve
@@ -258,7 +269,7 @@ def roi_index(roi: dict[str, Any], w: int, h: int) -> tuple[np.ndarray, np.ndarr
         return ys[m], xs[m]
     elif kind == "line":
         pts = _line_pixels(roi["x0"], roi["y0"], roi["x1"], roi["y1"])
-    else:  # polygon: even-odd interior on pixel centres plus the Bresenham boundary
+    elif kind == "polygon":  # even-odd interior on pixel centres plus the Bresenham boundary
         p = [(int(x), int(y)) for x, y in roi["points"]]
         n = len(p)
         seen: set[tuple[int, int]] = set()

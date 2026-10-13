@@ -84,7 +84,13 @@ def live_roi_payload(
     h, w = celsius.shape
     out: list[dict[str, Any]] = []
     for roi in rois:
-        ys, xs = roi_index(roi, w, h)
+        try:
+            ys, xs = roi_index(roi, w, h)
+        except (KeyError, ValueError, TypeError, IndexError):
+            # A malformed or half-drawn ROI must never take down the whole feed the RF controller
+            # reads: report just that ROI invalid (null temps) and keep measuring the others.
+            out.append(_invalid_roi(roi))
+            continue
         if ys.size == 0:  # ROI off-frame / empty → nothing to measure
             out.append(_invalid_roi(roi))
             continue
