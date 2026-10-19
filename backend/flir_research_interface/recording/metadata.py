@@ -65,6 +65,20 @@ def _atomic_write(path: Path, meta: dict[str, Any]) -> None:
         raise
 
 
+def _replace_block(exp_dir: Path, key: str, value: list[dict[str, Any]]) -> dict[str, Any]:
+    """Replace ``metadata.json[key]``, record the edit and return the updated document."""
+    path = Path(exp_dir) / "metadata.json"
+    if not path.is_file():
+        raise FileNotFoundError(f"no metadata.json in {exp_dir}")
+    meta: dict[str, Any] = json.loads(path.read_text())
+    meta[key] = value
+    edits = list(meta.get("edits") or [])
+    edits.append({"t_utc": datetime.now(timezone.utc).isoformat(), "keys": [key], "block": key})
+    meta["edits"] = edits
+    _atomic_write(path, meta)
+    return meta
+
+
 def set_experiment_rois(exp_dir: Path, rois: list[dict[str, Any]]) -> dict[str, Any]:
     """Replace ``metadata.json['rois']`` with ``rois`` (already validated by ``parse_rois``).
 
@@ -72,22 +86,17 @@ def set_experiment_rois(exp_dir: Path, rois: list[dict[str, Any]]) -> dict[str, 
     roi_plot, peak frames, thermal videos) can be regenerated to match them. Records the edit and
     returns the updated metadata document. Raises ``FileNotFoundError`` when there is no metadata.
     """
-    path = Path(exp_dir) / "metadata.json"
-    if not path.is_file():
-        raise FileNotFoundError(f"no metadata.json in {exp_dir}")
-    meta: dict[str, Any] = json.loads(path.read_text())
-    meta["rois"] = rois
-    edits = list(meta.get("edits") or [])
-    edits.append(
-        {
-            "t_utc": datetime.now(timezone.utc).isoformat(),
-            "keys": ["rois"],
-            "block": "rois",
-        }
-    )
-    meta["edits"] = edits
-    _atomic_write(path, meta)
-    return meta
+    return _replace_block(exp_dir, "rois", rois)
 
 
-__all__ = ["RESERVED_KEYS", "patch_experiment_metadata", "set_experiment_rois"]
+def set_experiment_masks(exp_dir: Path, masks: list[dict[str, Any]]) -> dict[str, Any]:
+    """Replace ``metadata.json['masks']`` (already validated by ``parse_masks``); same rules."""
+    return _replace_block(exp_dir, "masks", masks)
+
+
+__all__ = [
+    "RESERVED_KEYS",
+    "patch_experiment_metadata",
+    "set_experiment_masks",
+    "set_experiment_rois",
+]

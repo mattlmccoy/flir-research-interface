@@ -108,6 +108,7 @@ class RecordingStartRequest(BaseModel):
     metadata: dict[str, Any] = {}
     visible: bool = False
     rois: list[dict[str, Any]] | None = None
+    masks: list[dict[str, Any]] | None = None  # region masks: colour range + frame stats only
     # NUC right before the recording, then NUCMode=Off until stop so the camera never freezes
     # mid-run (the A70 repeats its image for ~2 s during a NUC); the previous mode is restored.
     nuc_hold: bool = True
@@ -141,6 +142,10 @@ class MetadataPatch(BaseModel):
 
 class RoisRequest(BaseModel):
     rois: list[dict[str, Any]]
+
+
+class MasksRequest(BaseModel):
+    masks: list[dict[str, Any]]
 
 
 class MediaRequest(BaseModel):
@@ -933,7 +938,17 @@ def create_app(
             extra["visible_alignment"] = alignment
         if req.rois is not None:
             extra["rois"] = _rois_with_labels(req.rois)
+        if req.masks:
+            extra["masks"] = _parsed_masks(req.masks)
         return extra
+
+    def _parsed_masks(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        from flir_research_interface.analysis.masks import parse_masks
+
+        try:
+            return parse_masks(raw)
+        except ValueError as exc:
+            raise HTTPException(400, f"masks: {exc}") from exc
 
     def _rois_with_labels(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Validate ROI geometry/optics (parse_rois) and re-attach the operator's names/colors."""
@@ -1539,6 +1554,19 @@ def create_app(
         except FileNotFoundError as exc:
             raise HTTPException(404, str(exc)) from exc
         return {"rois": len(rois)}
+
+    @app.put("/api/experiments/{name}/masks")
+    def experiment_masks_put(name: str, req: MasksRequest) -> dict[str, Any]:
+        """Persist the run's region masks edited in playback (``metadata.json['masks']`` only)."""
+        from flir_research_interface.recording.metadata import set_experiment_masks
+
+        d = _exp_dir(name)
+        masks = _parsed_masks(req.masks)
+        try:
+            set_experiment_masks(d, masks)
+        except FileNotFoundError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return {"masks": len(masks)}
 
     @app.post("/api/experiments/{name}/export/derived")
     async def export_derived_route(name: str, video: bool = True) -> dict[str, Any]:

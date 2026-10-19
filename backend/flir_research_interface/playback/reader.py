@@ -111,6 +111,7 @@ class ExperimentReader:
             "visible": self.visible,
             "visible_timeline": thermal_segments(self.visible, self.host_t0_ns),
             "rois": self.metadata.get("rois"),
+            "masks": self.metadata.get("masks"),
             "visible_alignment": self.metadata.get("visible_alignment"),
             "thermal_preview": self.thermal_preview(),
         }

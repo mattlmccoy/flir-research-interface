@@ -18,6 +18,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from flir_research_interface.analysis.export import _roi_desc
+from flir_research_interface.analysis.masks import mask_desc
 from flir_research_interface.analysis.series import roi_series
 from flir_research_interface.camera.frame_ids import index_in_order
 from flir_research_interface.playback.reader import ExperimentReader
@@ -134,6 +135,14 @@ def readme_text(reader: ExperimentReader) -> str:
     for r in rois:
         label = r.get("name") or f"{r['kind']} {r['id']}"
         lines.append(f"  {label}: {_roi_desc(r)}")
+    masks = m.get("masks") or []
+    if masks:
+        lines.append("")
+        lines.append(
+            f"Region masks at record time: {len(masks)} "
+            "(colour range and frame stats only; the data is unaltered)"
+        )
+        lines.extend(f"  {mask_desc(k)}" for k in masks)
     marks = [e for e in reader.events if e.get("type") == "annotation"]
     lines.append("")
     lines.append(f"Operator marks: {len(marks)}")
