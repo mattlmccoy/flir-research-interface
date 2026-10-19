@@ -9,6 +9,7 @@ import {
   maskReducer,
   maskedStats,
   saveMasks,
+  toolForMaskMode,
   type MaskShape,
 } from "./mask.ts";
 import { autoScale } from "./scale.ts";
@@ -109,4 +110,12 @@ test("maskAt finds the topmost shape under a pixel, for shift-click", () => {
   assert.equal(maskAt(shapes, 3, 3, W, H), 2); // drawn last wins
   assert.equal(maskAt(shapes, 1, 1, W, H), 1);
   assert.equal(maskAt(shapes, 9, 7, W, H), null);
+});
+
+test("entering mask mode lands on a drawing tool, so the first drag draws a region", () => {
+  assert.equal(toolForMaskMode("select"), "rect"); // select would only pick, never draw
+  assert.equal(toolForMaskMode("spot"), "rect");
+  assert.equal(toolForMaskMode("polygon"), "polygon");
+  assert.equal(toolForMaskMode("freehand"), "freehand");
+  assert.equal(toolForMaskMode("rect"), "rect");
 });

@@ -42,8 +42,7 @@ import { LiveControl } from "./lib/liveControl.ts";
 import { evalRateAlarm, loadRateAlarm, saveRateAlarm, slopeOver, type RateAlarmState } from "./lib/rate.ts";
 import { RatePanel } from "./components/RatePanel.tsx";
 import { MaskPanel } from "./components/MaskPanel.tsx";
-import { EMPTY_MASKS, hasMasks, loadMasks, maskPixels, maskReducer, maskedStats, saveMasks } from "./lib/mask.ts";
-import { MASK_TOOLS } from "./components/studio/ToolStrip.tsx";
+import { EMPTY_MASKS, hasMasks, loadMasks, maskPixels, maskReducer, maskedStats, saveMasks, toolForMaskMode } from "./lib/mask.ts";
 
 type Page = "live" | "setup" | "experiments" | "playback";
 const storage = (() => {
@@ -135,7 +134,7 @@ export function App() {
   }, [masks]);
   const toggleMaskMode = (on: boolean) => {
     setMaskMode(on);
-    if (on && !MASK_TOOLS.includes(layout.tool)) dispatch({ type: "setTool", tool: "rect" });
+    if (on && toolForMaskMode(layout.tool) !== layout.tool) dispatch({ type: "setTool", tool: toolForMaskMode(layout.tool) });
   };
   const [align, alignDispatch] = useReducer(alignmentReducer, EMPTY_ALIGNMENT, () => loadAlignment(storage));
   useEffect(() => { saveAlignment(storage, align); }, [align]);

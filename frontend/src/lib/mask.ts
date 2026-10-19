@@ -5,6 +5,16 @@
  * mask rect or polygon covers exactly the pixels the same ROI would.
  */
 import { roiPixels, type Polygon, type Rect, type Roi } from "./roi.ts";
+import type { Tool } from "./layout.ts";
+
+/** Tools that draw a mask region. */
+export const MASK_DRAW_TOOLS: readonly Tool[] = ["rect", "polygon", "freehand"];
+
+/** The tool to use on entering mask mode: keep a mask-drawing tool, otherwise the rectangle
+ *  (the select tool would only pick, so the first drag would draw nothing). */
+export function toolForMaskMode(tool: Tool): Tool {
+  return MASK_DRAW_TOOLS.includes(tool) ? tool : "rect";
+}
 
 export type MaskMode = "include" | "exclude";
 export type MaskShape =
