@@ -113,9 +113,10 @@ test("maskAt finds the topmost shape under a pixel, for shift-click", () => {
   assert.equal(maskAt(shapes, 9, 7, W, H), null);
 });
 
-test("entering mask mode lands on a drawing tool, so the first drag draws a region", () => {
-  assert.equal(toolForMaskMode("select"), "rect"); // select would only pick, never draw
-  assert.equal(toolForMaskMode("spot"), "rect");
+test("entering mask mode keeps the selector (and any mask drawing tool); other tools become the selector", () => {
+  assert.equal(toolForMaskMode("select"), "select");
+  assert.equal(toolForMaskMode("spot"), "select");
+  assert.equal(toolForMaskMode("circle"), "select");
   assert.equal(toolForMaskMode("polygon"), "polygon");
   assert.equal(toolForMaskMode("freehand"), "freehand");
   assert.equal(toolForMaskMode("rect"), "rect");

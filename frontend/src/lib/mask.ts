@@ -10,10 +10,10 @@ import type { Tool } from "./layout.ts";
 /** Tools that draw a mask region. */
 export const MASK_DRAW_TOOLS: readonly Tool[] = ["rect", "polygon", "freehand"];
 
-/** The tool to use on entering mask mode: keep a mask-drawing tool, otherwise the rectangle
- *  (the select tool would only pick, so the first drag would draw nothing). */
+/** The tool to use on entering mask mode: keep the selector or a mask-drawing tool; any other
+ *  tool (spot, circle, line …) cannot make a mask region, so fall back to the selector. */
 export function toolForMaskMode(tool: Tool): Tool {
-  return MASK_DRAW_TOOLS.includes(tool) ? tool : "rect";
+  return tool === "select" || MASK_DRAW_TOOLS.includes(tool) ? tool : "select";
 }
 
 export type MaskMode = "include" | "exclude";
