@@ -17,6 +17,7 @@ import { hasRois, loadRois, roiLabel, roisDifferFromStored, type Roi, type RoiSt
 import { hasMasks, maskPixels, maskedStats, masksAsRois, type MaskAction, type MaskState } from "../lib/mask.ts";
 import type { RoiAction } from "../lib/roi.ts";
 import { MaskPanel } from "./MaskPanel.tsx";
+import { rfNotchStatus } from "../lib/rfNotch.ts";
 
 const roiStorage: Storage | null = (() => { try { return typeof localStorage !== "undefined" ? localStorage : null; } catch { return null; } })();
 /** Parse the plain ROI dicts stored with a recording into validated Roi objects. */
@@ -155,10 +156,13 @@ export function PlaybackPage(p: Props) {
     return () => { alive = false; };
   }, [p.name, info]);
 
+  // With the RF-banding filter on, frames carry a display copy; a cached frame without one is refetched.
+  const rf = p.layout.rfNotch;
   const ensureBlock = useCallback((start: number): Promise<void> => {
-    const running = inflight.current.get(start);
+    const key = start * 2 + (rf ? 1 : 0);
+    const running = inflight.current.get(key);
     if (running) return running;
-    const promise = api.frameBlock(p.name, start, BLOCK)
+    const promise = api.frameBlock(p.name, start, BLOCK, rf)
       .then((buf) => {
         for (const m of decodeFrameBlock(buf)) {
           const idx = (m.header as { index?: number }).index;
@@ -170,25 +174,25 @@ export function PlaybackPage(p: Props) {
           for (const k of keys.slice(0, keys.length - BLOCK * 3)) cache.current.delete(k);
         }
       })
-      .finally(() => { inflight.current.delete(start); });
-    inflight.current.set(start, promise);
+      .finally(() => { inflight.current.delete(key); });
+    inflight.current.set(key, promise);
     return promise;
-  }, [p.name]);
+  }, [p.name, rf]);
 
   const load = useCallback(async (i: number): Promise<FrameMessage> => {
     const hit = cache.current.get(i);
-    if (hit) return hit;
+    if (hit && (!rf || hit.display)) return hit;
     await ensureBlock(Math.floor(i / BLOCK) * BLOCK);
     const m = cache.current.get(i);
     if (!m) throw new Error(`frame ${i} not returned`);
     return m;
-  }, [ensureBlock]);
+  }, [ensureBlock, rf]);
 
   useEffect(() => {
     if (!info || n === 0) return;
     let alive = true;
     const hit = cache.current.get(index);
-    if (!hit) setFrameStatus("loading");  // only show the spinner when we actually have to fetch
+    if (!hit || (rf && !hit.display)) setFrameStatus("loading");  // only show the spinner when we actually have to fetch
     load(index)
       .then((m) => { if (alive) { setFrame(m); setFrameStatus("ready"); setFrameErr(null); } })
       .catch((e) => { if (alive) { setFrameStatus("error"); setFrameErr(String(e)); } });
@@ -267,6 +271,9 @@ export function PlaybackPage(p: Props) {
     return a && b ? [...traces, deltaTrace(a, b)] : traces;
   })();
 
+  // snapshots say "RF banding removed" only when the shown frame really had banding taken out
+  const rfInfo = frame?.header.display?.rf_notch;
+  const rfFiltered = p.layout.rfNotch && !!frame?.display && !!rfInfo && rfInfo.applied && rfInfo.bands.length > 0;
   const transport = (
     <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: "1 1 auto", minWidth: 0 }}>
     <span style={{ display: "flex", gap: 8, alignItems: "center", minWidth: 0 }}>
@@ -297,7 +304,7 @@ export function PlaybackPage(p: Props) {
 
   function saveImage(): void {
     const v = document.querySelector<HTMLElement>(".view");
-    if (v) saveSnapshot(v, snapshotFilename(p.name, index, t), snapshotFooter({ name: p.name, tS: t, index, range: shown, palette: p.palette, rois: p.rois.rois.length, reference: !!reference }));
+    if (v) saveSnapshot(v, snapshotFilename(p.name, index, t, { rfFiltered }), snapshotFooter({ name: p.name, tS: t, index, range: shown, palette: p.palette, rois: p.rois.rois.length, reference: !!reference, rfFiltered }));
   }
   function toggleVisibleOverlay(): void {
     // toggle the overlay on the image; its opacity slider pops up next to the button (below)
@@ -324,7 +331,7 @@ export function PlaybackPage(p: Props) {
 
   return (
     <>
-    {showMedia && tl && <MediaExportEditor name={p.name} nFrames={n} index={index} tS={tl.t_s} markers={markers} rois={(info?.rois ?? []).map((r) => ({ id: Number(r.id), name: typeof r.name === "string" ? r.name : undefined, kind: typeof r.kind === "string" ? r.kind : undefined, color: typeof r.color === "string" ? r.color : undefined }))} hasVisible={hasVideo && !!info?.visible_alignment} onClose={() => setShowMedia(false)} />}
+    {showMedia && tl && <MediaExportEditor name={p.name} nFrames={n} index={index} tS={tl.t_s} markers={markers} rois={(info?.rois ?? []).map((r) => ({ id: Number(r.id), name: typeof r.name === "string" ? r.name : undefined, kind: typeof r.kind === "string" ? r.kind : undefined, color: typeof r.color === "string" ? r.color : undefined }))} hasVisible={hasVideo && !!info?.visible_alignment} onClose={() => setShowMedia(false)} rfNotch={p.layout.rfNotch} />}
     <StudioFrame layout={p.layout} topbar={p.topbar} dispatch={p.dispatch} dockFoot={transport}
       strip={<ToolStrip tool={p.layout.tool} maskMode={p.maskMode} onMaskMode={p.onMaskMode} onTool={(tool) => p.dispatch({ type: "setTool", tool })} onCollapseAll={() => p.dispatch({ type: !p.layout.rail && !p.layout.dock ? "restoreAll" : "collapseAll" })} collapsed={!p.layout.rail && !p.layout.dock} zoom={p.layout.zoom} onZoom={(z) => p.dispatch({ type: "setZoom", zoom: z })}
         extras={<>
@@ -344,13 +351,13 @@ export function PlaybackPage(p: Props) {
             <div className="load-overlay error" role="alert">
               <div>couldn’t load frame {index + 1}</div>
               <div className="hint">{frameErr}</div>
-              <button className="secondary" onClick={() => { cache.current.delete(index); inflight.current.delete(Math.floor(index / BLOCK) * BLOCK); setFrameStatus("loading"); load(index).then((m) => { setFrame(m); setFrameStatus("ready"); setFrameErr(null); }).catch((e) => { setFrameStatus("error"); setFrameErr(String(e)); }); }}>retry</button>
+              <button className="secondary" onClick={() => { cache.current.delete(index); inflight.current.delete(Math.floor(index / BLOCK) * BLOCK * 2 + (rf ? 1 : 0)); setFrameStatus("loading"); load(index).then((m) => { setFrame(m); setFrameStatus("ready"); setFrameErr(null); }).catch((e) => { setFrameStatus("error"); setFrameErr(String(e)); }); }}>retry</button>
             </div>
           ) : frameStatus === "loading" && !frame ? (
             <div className="load-overlay"><span className="spinner" /> loading frame {index + 1}…</div>
           ) : null}
           <ThermalView frame={frame} palette={p.palette} scaleMode={p.scaleMode} manual={p.manual} onScale={setShown} setManual={p.setManual} setScaleMode={p.setScaleMode}
-            rois={p.maskMode ? maskRois : p.rois.rois} statsRois={p.rois.rois} selected={p.maskMode ? p.masks.selected : p.rois.selected} selectedIds={p.maskMode ? p.masks.selectedIds : p.rois.selectedIds} tool={p.layout.tool} roisHidden={!p.maskMode && p.layout.roisHidden} labelScope={p.maskMode ? `exp.${p.name}.mask` : `exp.${p.name}`} zoom={p.layout.zoom} onRoi={p.maskMode ? maskEdit : p.roiDispatch} onStats={onStats} rad={rad} extremes={p.layout.extremes} isotherm={p.layout.isotherm} onField={setField} reference={reference} hold={p.layout.hold} flipH={p.layout.flipH} flipV={p.layout.flipV} agc={p.layout.agc} filter={p.layout.filter} units={p.layout.units} valid={p.layout.segment.on ? { min: p.layout.segment.min, max: p.layout.segment.max } : null} mask={maskPx} maskShapes={p.masks.enabled || p.maskMode ? p.masks.shapes : []} maskMode={p.maskMode} onMask={p.maskDispatch}
+            rois={p.maskMode ? maskRois : p.rois.rois} statsRois={p.rois.rois} selected={p.maskMode ? p.masks.selected : p.rois.selected} selectedIds={p.maskMode ? p.masks.selectedIds : p.rois.selectedIds} tool={p.layout.tool} roisHidden={!p.maskMode && p.layout.roisHidden} labelScope={p.maskMode ? `exp.${p.name}.mask` : `exp.${p.name}`} zoom={p.layout.zoom} onRoi={p.maskMode ? maskEdit : p.roiDispatch} onStats={onStats} rad={rad} extremes={p.layout.extremes} isotherm={p.layout.isotherm} onField={setField} reference={reference} hold={p.layout.hold} flipH={p.layout.flipH} flipV={p.layout.flipV} agc={p.layout.agc} filter={p.layout.filter} units={p.layout.units} useDisplay={p.layout.rfNotch} valid={p.layout.segment.on ? { min: p.layout.segment.min, max: p.layout.segment.max } : null} mask={maskPx} maskShapes={p.masks.enabled || p.maskMode ? p.masks.shapes : []} maskMode={p.maskMode} onMask={p.maskDispatch}
             overlay={p.layout.visibleMode === "overlay" && hasVideo ? <VisibleVideo plain name={p.name} t={t} playing={playing} speed={speed} vis={playVis} /> : undefined} overlayStyle={p.layout.overlay} overlayH={overlayH} />
           {p.layout.visibleMode === "side" && hasVideo && <VisibleVideo big flipH={p.layout.flipH} flipV={p.layout.flipV} name={p.name} t={t} playing={playing} speed={speed} vis={playVis} measuredFps={info?.visible?.measured_fps} />}
         </div>
@@ -420,7 +427,7 @@ export function PlaybackPage(p: Props) {
             {err && <div className="errbox">{err}</div>}
           </RailSection>
           <RailSection id="display" title="display" open={p.layout.sections.display} onToggle={() => p.dispatch({ type: "toggleSection", section: "display" })} tag="visualization only">
-            <DisplayControls palette={p.palette} setPalette={p.setPalette} scaleMode={p.scaleMode} setScaleMode={p.setScaleMode} manual={p.manual} setManual={p.setManual} shown={shown} isotherm={p.layout.isotherm} setIsotherm={(isotherm) => p.dispatch({ type: "setIsotherm", isotherm })} hasReference={!!reference} onSetReference={() => { if (field) setReference(new Float32Array(field.c)); }} onClearReference={() => setReference(null)} onRangeFromRoi={(() => { const sel = p.rois.rois.find((r) => r.id === p.rois.selected); if (!field || !sel || sel.kind === "spot") return null; return () => { const rg = rangeFromRoi(field.c, field.w, field.h, sel); if (rg) { p.setManual({ min: Math.floor(rg.min * 10) / 10, max: Math.ceil(rg.max * 10) / 10 }); p.setScaleMode("manual"); } }; })()} hold={p.layout.hold} setHold={(hold) => p.dispatch({ type: "setHold", hold })} flipH={p.layout.flipH} flipV={p.layout.flipV} setFlip={(h, v) => p.dispatch({ type: "setFlip", h, v })} agc={p.layout.agc} setAgc={(agc) => p.dispatch({ type: "setAgc", agc })} units={p.layout.units} setUnits={(units) => p.dispatch({ type: "setUnits", units })} conv={field?.conv ?? null} filter={p.layout.filter} setFilter={(filter) => p.dispatch({ type: "setFilter", filter })} segment={p.layout.segment} setSegment={(segment) => p.dispatch({ type: "setSegment", segment })} saturation={(() => { const cs = (info?.camera as Record<string, unknown> | null | undefined)?.active_case as { low_c?: number; high_c?: number } | undefined; if (!field || !cs || typeof cs.low_c !== "number" || typeof cs.high_c !== "number") return null; const n = saturationCount(field.c, { low: cs.low_c, high: cs.high_c }); return { ...n, lowC: cs.low_c, highC: cs.high_c }; })()} onSnapshot={() => { const v = document.querySelector<HTMLElement>(".view"); if (v) saveSnapshot(v, snapshotFilename(p.name, index, t), snapshotFooter({ name: p.name, tS: t, index: index, range: shown, palette: p.palette, rois: p.rois.rois.length, reference: !!reference })); }} />
+            <DisplayControls palette={p.palette} setPalette={p.setPalette} scaleMode={p.scaleMode} setScaleMode={p.setScaleMode} manual={p.manual} setManual={p.setManual} shown={shown} isotherm={p.layout.isotherm} setIsotherm={(isotherm) => p.dispatch({ type: "setIsotherm", isotherm })} hasReference={!!reference} onSetReference={() => { if (field) setReference(new Float32Array(field.c)); }} onClearReference={() => setReference(null)} onRangeFromRoi={(() => { const sel = p.rois.rois.find((r) => r.id === p.rois.selected); if (!field || !sel || sel.kind === "spot") return null; return () => { const rg = rangeFromRoi(field.c, field.w, field.h, sel); if (rg) { p.setManual({ min: Math.floor(rg.min * 10) / 10, max: Math.ceil(rg.max * 10) / 10 }); p.setScaleMode("manual"); } }; })()} hold={p.layout.hold} setHold={(hold) => p.dispatch({ type: "setHold", hold })} flipH={p.layout.flipH} flipV={p.layout.flipV} setFlip={(h, v) => p.dispatch({ type: "setFlip", h, v })} agc={p.layout.agc} setAgc={(agc) => p.dispatch({ type: "setAgc", agc })} units={p.layout.units} setUnits={(units) => p.dispatch({ type: "setUnits", units })} conv={field?.conv ?? null} filter={p.layout.filter} setFilter={(filter) => p.dispatch({ type: "setFilter", filter })} rfNotch={p.layout.rfNotch} setRfNotch={(on) => p.dispatch({ type: "setRfNotch", on })} rfStatus={rfNotchStatus(p.layout.rfNotch, frame?.header.display?.rf_notch)} segment={p.layout.segment} setSegment={(segment) => p.dispatch({ type: "setSegment", segment })} saturation={(() => { const cs = (info?.camera as Record<string, unknown> | null | undefined)?.active_case as { low_c?: number; high_c?: number } | undefined; if (!field || !cs || typeof cs.low_c !== "number" || typeof cs.high_c !== "number") return null; const n = saturationCount(field.c, { low: cs.low_c, high: cs.high_c }); return { ...n, lowC: cs.low_c, highC: cs.high_c }; })()} onSnapshot={() => { const v = document.querySelector<HTMLElement>(".view"); if (v) saveSnapshot(v, snapshotFilename(p.name, index, t, { rfFiltered }), snapshotFooter({ name: p.name, tS: t, index: index, range: shown, palette: p.palette, rois: p.rois.rois.length, reference: !!reference, rfFiltered })); }} />
           </RailSection>
           <RailSection id="visible" title="visible camera" open={p.layout.sections.visible} onToggle={() => p.dispatch({ type: "toggleSection", section: "visible" })} tag="recorded video">
             <VisiblePanel mode="playback" name={p.name} hasVideo={hasVideo} t={t} playing={playing} speed={speed} vis={playVis} measuredFps={info?.visible?.measured_fps} visibleMode={p.layout.visibleMode} overlay={p.layout.overlay} dispatch={p.dispatch} aligned={!!overlayH} />

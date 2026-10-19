@@ -1,4 +1,6 @@
 /** Decoder for the backend's frame message (see backend api/frames.py). */
+import type { RfNotchInfo } from "./rfNotch.ts";
+
 export interface FrameHeader {
   type: "frame";
   frame_id: number;
@@ -23,11 +25,16 @@ export interface FrameHeader {
   viz_dropped?: number;
   frames_received?: number;
   state?: string;
+  /** Present when a display copy (RF banding removed) follows the raw counts. */
+  display?: { rf_notch: RfNotchInfo; counts: boolean };
 }
 
 export interface FrameMessage {
   header: FrameHeader;
+  /** The raw counts: every number (ROI readouts, stats, hover) comes from these. */
   counts: Uint16Array;
+  /** Display-only copy with the RF banding removed, when requested. */
+  display?: Uint16Array;
 }
 
 export function decodeFrameMessage(buf: ArrayBuffer): FrameMessage {
@@ -35,17 +42,19 @@ export function decodeFrameMessage(buf: ArrayBuffer): FrameMessage {
   const n = view.getUint32(0, false);
   const header = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, n))) as FrameHeader;
   const expected = header.width * header.height;
+  const arrays = header.display?.counts ? 2 : 1;
   const bytes = buf.byteLength - 4 - n;
-  if (bytes !== expected * 2) {
-    throw new Error(`payload size ${bytes} does not match ${header.width}x${header.height} uint16`);
+  if (bytes !== expected * 2 * arrays) {
+    throw new Error(`payload size ${bytes} does not match ${arrays}x ${header.width}x${header.height} uint16`);
   }
   const off = 4 + n;
   // Little-endian on every platform this runs on: view the payload as Uint16 directly.
   // Typed-array views need 2-byte alignment, so copy when the header length makes `off` odd.
-  const counts = off % 2 === 0
-    ? new Uint16Array(buf.slice(off, off + expected * 2))
-    : new Uint16Array(new Uint8Array(buf, off, expected * 2).slice().buffer);
-  return { header, counts };
+  const take = (at: number) => (at % 2 === 0
+    ? new Uint16Array(buf.slice(at, at + expected * 2))
+    : new Uint16Array(new Uint8Array(buf, at, expected * 2).slice().buffer));
+  const counts = take(off);
+  return arrays === 2 ? { header, counts, display: take(off + expected * 2) } : { header, counts };
 }
 
 /** Split a block body of repeated [uint32 length][frame message] into decoded frames. */

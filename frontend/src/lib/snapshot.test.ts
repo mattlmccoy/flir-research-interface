@@ -13,3 +13,10 @@ test("snapshot footer lists run, time, palette range and the ROI count", () => {
   const g = snapshotFooter({ name: "run7", tS: null, index: null, range: { min: -1, max: 1 }, palette: "iron", rois: 0, reference: true });
   assert.equal(g, "run7 · frame − reference ±1.0 °C");
 });
+
+test("snapshots taken with the RF-banding filter on say so in the file name and the footer", () => {
+  assert.equal(snapshotFilename("run", 4, 1.5, { rfFiltered: true }), "run_f0005_t1.500s_rf-filtered.png");
+  assert.equal(snapshotFilename("run", 4, 1.5), "run_f0005_t1.500s.png");
+  const f = snapshotFooter({ name: "run", tS: 1.5, index: 4, range: { min: 20, max: 30 }, palette: "iron", rois: 0, reference: false, rfFiltered: true });
+  assert.match(f, /RF banding removed \(display only\)/);
+});

@@ -34,7 +34,11 @@ from flir_research_interface.analysis.thermal_video import (
 from flir_research_interface.labels import export_label
 from flir_research_interface.playback.reader import ExperimentReader
 from flir_research_interface.radiometry.overrange import over_range_mask
-from flir_research_interface.radiometry.temperature_linear import IRFormat, counts_to_celsius
+from flir_research_interface.radiometry.temperature_linear import (
+    IRFormat,
+    counts_to_celsius,
+    kelvin_per_count,
+)
 from flir_research_interface.visible.recorder import FFMPEG_CANDIDATES
 from flir_research_interface.visible.rtsp import find_ffprobe
 
@@ -96,6 +100,7 @@ class MediaOptions:
     visible_opacity: float = 0.0  # blend the recorded visible camera over the frame (0 = off)
     palette: str = "inferno"  # color palette for the thermal image + bar
     max_mb: float = 0.0  # cap the output file size (MB); 0 = no limit
+    rf_notch: bool = False  # colour the frames with the RF banding removed (numbers stay raw)
 
 
 def _slug(text: str) -> str:
@@ -489,6 +494,8 @@ def render_clip(
         # an explicit clip title is the user's chosen name; otherwise say which run it came from
         stem = (_slug(opts.title) if opts.title
                 else f"{export_label(reader.path)}_clip_{opts.start}-{stop}")
+        if opts.rf_notch:
+            stem += "_rf-filtered"
         total = len(indices)
 
         def _frames() -> Iterator[tuple[int, np.ndarray]]:
@@ -538,11 +545,18 @@ def _compose(reader: ExperimentReader, idx: int, vmin: float, vmax: float, scale
              visible: Any = None) -> np.ndarray:
     values, counts = _celsius(reader, idx)
     over = over_range_mask(counts)
-    stats_vals = values if over is None else np.where(over, np.nan, values)
+    stats_vals = values if over is None else np.where(over, np.nan, values)  # numbers: raw
+    shown = values  # what gets coloured
+    if opts.rf_notch:
+        from flir_research_interface.analysis.rf_notch import rf_notch
+
+        fmt = IRFormat(reader.metadata.get("conversion", {}).get("ir_format") or reader.ir_format)
+        cleaned, _info = rf_notch(counts, kelvin_per_count(fmt))
+        shown = counts_to_celsius(cleaned, fmt)
     bar = 24 if opts.colorbar else 0
     # A title paints a bar over the top-left, so let it own that corner: draw the timestamp just
     # below the bar instead of having thermal_frame_rgb bake it under the title.
-    rgb = thermal_frame_rgb(values, vmin, vmax, reader.t_s(idx), bar_px=bar, scale=scale,
+    rgb = thermal_frame_rgb(shown, vmin, vmax, reader.t_s(idx), bar_px=bar, scale=scale,
                             rois=rois if opts.with_rois else None, reader=reader,
                             show_time=opts.timestamp and not opts.title, palette=opts.palette)
     if over is not None:  # paint over-range pixels magenta, like the live display
@@ -559,6 +573,9 @@ def _compose(reader: ExperimentReader, idx: int, vmin: float, vmax: float, scale
     pil = Image.fromarray(rgb).convert("RGB")
     d = ImageDraw.Draw(pil, "RGBA")
     font = label_font(max(11, min(18, rgb.shape[0] // 26)))
+    if opts.rf_notch:  # say it on the image too: the colours are not the raw frame
+        d.text((4, rgb.shape[0] - font.size - 4), "RF-banding filter on (display only)",
+               fill=(255, 255, 255), font=font)
     if opts.frame_stats:
         lo, hi, mean = np.nanmin(stats_vals), np.nanmax(stats_vals), np.nanmean(stats_vals)
         txt = f"min {lo:.1f}  max {hi:.1f}  mean {mean:.1f} °C"

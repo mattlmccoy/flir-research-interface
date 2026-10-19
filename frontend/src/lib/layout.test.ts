@@ -277,3 +277,13 @@ test("railW / dockH survive a save/load round-trip and default when absent", asy
   assert.equal(back.dockH, 320);
   assert.equal(loadLayout(memStorage()).railW, DL.railW, "absent → default");
 });
+
+test("the RF-banding filter switch is off by default, toggles, and is remembered", () => {
+  assert.equal(DEFAULT_LAYOUT.rfNotch, false);
+  const on = layoutReducer(DEFAULT_LAYOUT, { type: "setRfNotch", on: true });
+  assert.equal(on.rfNotch, true);
+  const m = new Map<string, string>();
+  const st = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => { m.set(k, v); }, removeItem: (k: string) => { m.delete(k); }, clear: () => m.clear(), key: () => null, get length() { return m.size; } } as Storage;
+  saveLayout(st, on);
+  assert.equal(loadLayout(st).rfNotch, true);
+});
