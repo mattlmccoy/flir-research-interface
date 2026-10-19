@@ -1800,7 +1800,7 @@ def create_app(
 
     @app.get("/api/experiments/{name}/frames")
     def experiment_frame_block(
-        name: str, start: int = 0, count: int = Query(32, ge=1, le=256)
+        name: str, start: int = 0, count: int = Query(32, ge=1, le=256), rf_notch: bool = False
     ) -> Response:
         """A run of frames in one response: repeated [uint32 length][frame message]. One request
         instead of one per frame keeps playback smooth (block Zarr reads are ~30x cheaper)."""
@@ -1824,6 +1824,7 @@ def create_app(
             msg = encode_frame_message(
                 frame,
                 extra={"index": i, "n_frames": r.n_frames, "t_s": r.t_s(i), "source": "playback"},
+                rf_notch=rf_notch,
             )
             parts.append(struct.pack(">I", len(msg)) + msg)
         return Response(
@@ -1833,7 +1834,7 @@ def create_app(
         )
 
     @app.get("/api/experiments/{name}/frames/{index}")
-    def experiment_frame(name: str, index: int) -> Response:
+    def experiment_frame(name: str, index: int, rf_notch: bool = False) -> Response:
         r = _open(name)
         try:
             frame = r.frame(index)
@@ -1847,6 +1848,7 @@ def create_app(
                 "t_s": r.t_s(index),
                 "source": "playback",
             },
+            rf_notch=rf_notch,
         )
         return Response(content=payload, media_type="application/octet-stream")
 
@@ -2048,6 +2050,8 @@ def create_app(
     @app.websocket("/ws/frames")
     async def ws_frames(ws: WebSocket) -> None:
         await ws.accept()
+        # ?rf_notch=1: add a display copy with the RF banding removed (raw counts still first)
+        notch = ws.query_params.get("rf_notch") in ("1", "true")
         min_interval = 1.0 / app.state.viz_fps if app.state.viz_fps > 0 else 0.0
         last_id: int | None = None
         last_sent = 0.0
@@ -2070,7 +2074,13 @@ def create_app(
                 if wait > 0:
                     await asyncio.sleep(wait)
                 last_sent = time.monotonic()
-                await ws.send_bytes(encode_frame_message(frame, svc.stats()))
+                if notch:  # ~10-20 ms of FFT work: off the event loop
+                    msg = await run_in_threadpool(
+                        encode_frame_message, frame, svc.stats(), rf_notch=True
+                    )
+                else:
+                    msg = encode_frame_message(frame, svc.stats())
+                await ws.send_bytes(msg)
         except WebSocketDisconnect:
             return
         except Exception:  # noqa: BLE001

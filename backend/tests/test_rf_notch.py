@@ -24,7 +24,7 @@ def _kelvin(c: np.ndarray) -> np.ndarray:
 
 
 def _fine_detail_mk(c: np.ndarray) -> float:
-    """RMS of everything above 0.1 cycles/px: the banding plus the scene's fine texture and noise."""
+    """RMS above 0.1 cycles/px: the banding plus the scene's fine texture and the noise."""
     a = _kelvin(c)
     s = np.fft.fftshift(np.fft.fft2(a - a.mean()))
     h, w = a.shape

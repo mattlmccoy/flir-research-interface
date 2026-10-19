@@ -28,7 +28,7 @@ RF_BANDS: dict[str, Band] = {
     "diag+": ((0.15, 0.235), (0.29, 0.41)),
     "diag-": ((0.24, 0.32), (-0.41, -0.28)),
 }
-"""Core band of each banding patch: ((fy_lo, fy_hi), (fx_lo, fx_hi)) in cycles/px; conjugates mirrored."""
+"""Core band of each patch: ((fy_lo, fy_hi), (fx_lo, fx_hi)) in cycles/px; conjugate mirrored."""
 REMOVE_MARGIN = 0.04
 """A detected patch is removed over its core band widened by this much (cycles/px) on every side."""
 DETECT_RATIO = 4.0
@@ -41,7 +41,9 @@ def _grid(h: int, w: int) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float
     return fy, fx
 
 
-def _patch(fy: npt.NDArray[np.float64], fx: npt.NDArray[np.float64], band: Band, margin: float) -> npt.NDArray[np.bool_]:
+def _patch(
+    fy: npt.NDArray[np.float64], fx: npt.NDArray[np.float64], band: Band, margin: float
+) -> npt.NDArray[np.bool_]:
     (y0, y1), (x0, x1) = band
     m = (fy >= y0 - margin) & (fy < y1 + margin) & (fx >= x0 - margin) & (fx < x1 + margin)
     h, w = m.shape
@@ -53,7 +55,7 @@ def _patch(fy: npt.NDArray[np.float64], fx: npt.NDArray[np.float64], band: Band,
 def rf_notch(
     counts: npt.NDArray[np.uint16], kelvin_per_count: float | None
 ) -> tuple[npt.NDArray[np.uint16], dict[str, Any]]:
-    """Return ``(display_counts, info)``; ``info["bands"]`` lists the patches removed (empty: none)."""
+    """Return ``(display_counts, info)``; ``info["bands"]`` lists the patches removed ([]: none)."""
     if kelvin_per_count is None:
         return counts, {"applied": False, "reason": "not temperature-linear (raw counts)"}
     k = counts.astype(np.float64) * kelvin_per_count
