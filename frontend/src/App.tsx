@@ -41,6 +41,9 @@ import { useControlStatus } from "./lib/useControlStatus.ts";
 import { LiveControl } from "./lib/liveControl.ts";
 import { evalRateAlarm, loadRateAlarm, saveRateAlarm, slopeOver, type RateAlarmState } from "./lib/rate.ts";
 import { RatePanel } from "./components/RatePanel.tsx";
+import { MaskPanel } from "./components/MaskPanel.tsx";
+import { EMPTY_MASKS, hasMasks, loadMasks, maskPixels, maskReducer, maskedStats, saveMasks } from "./lib/mask.ts";
+import { MASK_TOOLS } from "./components/studio/ToolStrip.tsx";
 
 type Page = "live" | "setup" | "experiments" | "playback";
 const storage = (() => {
@@ -112,6 +115,28 @@ export function App() {
     const t = setTimeout(() => { api.putLiveRois(rois.rois).catch(() => {}); }, 400);
     return () => clearTimeout(t);
   }, [rois.rois, roiScope]);
+  // Region masks follow the ROI scopes (live / exp.<name>); they only pick the pixels behind the
+  // colour auto-range and the frame stats. A run's stored masks are seeded by PlaybackPage.
+  const [masks, maskDispatch] = useReducer(maskReducer, EMPTY_MASKS, () => loadMasks(storage, roiScope));
+  const [maskMode, setMaskMode] = useState(false);
+  const maskScopeRef = useRef(roiScope);
+  useEffect(() => {
+    if (maskScopeRef.current === roiScope) return;
+    maskScopeRef.current = roiScope;
+    const loaded = loadMasks(storage, roiScope);
+    maskDispatch({ type: "load", shapes: loaded.shapes });
+    maskDispatch({ type: "setEnabled", enabled: loaded.enabled });
+    maskDispatch({ type: "setDrawMode", mode: loaded.drawMode });
+  }, [roiScope]);
+  useEffect(() => {
+    const scope = maskScopeRef.current;  // never create an empty run scope before PlaybackPage seeds it
+    if (scope !== "live" && masks.shapes.length === 0 && !hasMasks(storage, scope)) return;
+    saveMasks(storage, masks, scope);
+  }, [masks]);
+  const toggleMaskMode = (on: boolean) => {
+    setMaskMode(on);
+    if (on && !MASK_TOOLS.includes(layout.tool)) dispatch({ type: "setTool", tool: "rect" });
+  };
   const [align, alignDispatch] = useReducer(alignmentReducer, EMPTY_ALIGNMENT, () => loadAlignment(storage));
   useEffect(() => { saveAlignment(storage, align); }, [align]);
   const [calibrating, setCalibrating] = useState(false);
@@ -203,6 +228,9 @@ export function App() {
 
   const refreshInfo = useCallback(() => { api.info().then(setInfo).catch(() => undefined); }, []);
   const [field, setField] = useState<FieldSnapshot | null>(null);
+  const maskPx = useMemo(() => (masks.enabled && field ? maskPixels(masks.shapes, field.w, field.h) : null), [masks.enabled, masks.shapes, field?.w, field?.h]); // eslint-disable-line react-hooks/exhaustive-deps
+  const maskUsed = useMemo(() => (maskPx ? maskPx.reduce((n, v) => n + v, 0) : null), [maskPx]);
+  const maskStats = maskPx && field ? maskedStats(field.c, maskPx) : null;
   const [reference, setReference] = useState<Float32Array | null>(null);
   const rad = useMemo(() => radiometryFromCamera(info), [info]);
   const refresh = useCallback(async () => {
@@ -315,14 +343,14 @@ export function App() {
   }
   if (page === "playback" && openExp) {
     return <PlaybackPage name={openExp} layout={layout} dispatch={dispatch} topbar={topbar}
-      rois={rois} roiDispatch={roiDispatch}
+      rois={rois} roiDispatch={roiDispatch} masks={masks} maskDispatch={maskDispatch} maskMode={maskMode} onMaskMode={toggleMaskMode}
       palette={palette} setPalette={setPalette} scaleMode={scaleMode} setScaleMode={setScaleMode}
       manual={manual} setManual={setManual} onBack={() => setPage("experiments")} status={status} recording={recording} />;
   }
 
   return (
     <StudioFrame layout={layout} topbar={topbar} dispatch={dispatch} statusbar={statusbar}
-      strip={<ToolStrip tool={layout.tool} onCollapseAll={() => dispatch({ type: allHidden ? "restoreAll" : "collapseAll" })} collapsed={allHidden} zoom={layout.zoom} onZoom={(z) => dispatch({ type: "setZoom", zoom: z })}
+      strip={<ToolStrip tool={layout.tool} onCollapseAll={() => dispatch({ type: allHidden ? "restoreAll" : "collapseAll" })} collapsed={allHidden} zoom={layout.zoom} onZoom={(z) => dispatch({ type: "setZoom", zoom: z })} maskMode={maskMode} onMaskMode={toggleMaskMode}
         onTool={(t) => dispatch({ type: "setTool", tool: t })}
         extras={<StripActions
           onSaveImage={saveLiveImage} saveDisabled={!frame}
@@ -335,7 +363,7 @@ export function App() {
       center={
         <div className={`center-split ${(layout.visibleMode === "side" || calibrating) && visibleAvailable ? "on" : ""}`}>
           <ThermalView frame={frame} palette={palette} scaleMode={scaleMode} manual={manual} onScale={setShown} setManual={setManual} setScaleMode={setScaleMode}
-            rois={rois.rois} selected={rois.selected} selectedIds={rois.selectedIds} tool={layout.tool} roisHidden={layout.roisHidden} labelScope={roiScope} zoom={layout.zoom} onRoi={roiDispatch} onStats={onStats} rad={rad} extremes={layout.extremes} isotherm={layout.isotherm} onField={setField} reference={reference} hold={layout.hold} flipH={layout.flipH} flipV={layout.flipV} agc={layout.agc} filter={layout.filter} units={layout.units} valid={layout.segment.on ? { min: layout.segment.min, max: layout.segment.max } : null}
+            rois={rois.rois} selected={rois.selected} selectedIds={rois.selectedIds} tool={layout.tool} roisHidden={layout.roisHidden} labelScope={roiScope} zoom={layout.zoom} onRoi={roiDispatch} onStats={onStats} rad={rad} extremes={layout.extremes} isotherm={layout.isotherm} onField={setField} reference={reference} hold={layout.hold} flipH={layout.flipH} flipV={layout.flipV} agc={layout.agc} filter={layout.filter} units={layout.units} valid={layout.segment.on ? { min: layout.segment.min, max: layout.segment.max } : null} mask={maskPx} maskShapes={masks.enabled || maskMode ? masks.shapes : []} maskMode={maskMode} onMask={maskDispatch}
             overlay={layout.visibleMode === "overlay" && !calibrating && visibleAvailable ? <VisibleLive plain /> : undefined} overlayStyle={layout.overlay} overlayH={align.H}
             topLayer={calibrating ? <PickLayer label="IR" flipH={layout.flipH} flipV={layout.flipV} color="var(--live)" points={align.pairs.map((p) => p.ir)} pending={align.pending?.ir} onPick={(p) => alignDispatch({ type: "pick", side: "ir", p })} /> : undefined} />
           {(layout.visibleMode === "side" || calibrating) && visibleAvailable && (
@@ -355,13 +383,13 @@ export function App() {
       }
       rail={
         <Rail>
-          <RailSection id="measurements" title="measurements" open={layout.sections.measurements} onToggle={() => dispatch({ type: "toggleSection", section: "measurements" })}>
+          <RailSection id="measurements" title="measurements" open={layout.sections.measurements} onToggle={() => dispatch({ type: "toggleSection", section: "measurements" })} tag={maskPx ? `masked · ${(maskUsed ?? 0).toLocaleString()} px` : undefined}>
             {hdr ? (
               <div className="kv">
                 <span>center</span><span className="v">{fmtCelsius(hdr.center_c)}</span>
-                <span>min</span><span className="v">{fmtCelsius(hdr.min_c)}</span>
-                <span>max</span><span className="v">{fmtCelsius(hdr.max_c)}</span>
-                <span>mean</span><span className="v">{fmtCelsius(hdr.mean_c)}</span>
+                <span>min</span><span className="v">{fmtCelsius(maskPx ? maskStats?.min ?? null : hdr.min_c)}</span>
+                <span>max</span><span className="v">{fmtCelsius(maskPx ? maskStats?.max ?? null : hdr.max_c)}</span>
+                <span>mean</span><span className="v">{fmtCelsius(maskPx ? maskStats?.mean ?? null : hdr.mean_c)}</span>
                 {!!hdr.over_range && <><span>over-range</span><span className="v" style={{ textAlign: "right" }}><span className="badge warn" title="Pixels the camera could not represent (scene hotter than its range) — saturated or 16-bit wrapped. Shown magenta and excluded from the stats. Switch the camera to a higher measurement range.">{hdr.over_range} px</span></span></>}
                 <span>ir format</span><span className="v plain">{hdr.ir_format}</span>
                 <span>frame</span><span className="v plain">{hdr.frame_id}</span>
@@ -381,10 +409,11 @@ export function App() {
             <CameraControls info={info} locked={isRecording} onApplied={refreshInfo} />
           </RailSection>
           <RailSection id="recording" title="recording" open={layout.sections.recording} onToggle={() => dispatch({ type: "toggleSection", section: "recording" })}>
-            <RecordPanel acquiring={status.state === "acquiring"} rois={rois.rois} />
+            <RecordPanel acquiring={status.state === "acquiring"} rois={rois.rois} masks={masks.enabled && masks.shapes.length ? masks.shapes : null} />
           </RailSection>
           <RailSection id="display" title="display" open={layout.sections.display} onToggle={() => dispatch({ type: "toggleSection", section: "display" })} tag="visualization only">
             <DisplayControls palette={palette} setPalette={setPalette} scaleMode={scaleMode} setScaleMode={setScaleMode} manual={manual} setManual={setManual} shown={shown} isotherm={layout.isotherm} setIsotherm={(isotherm) => dispatch({ type: "setIsotherm", isotherm })} hasReference={!!reference} onSetReference={() => { if (field) setReference(new Float32Array(field.c)); }} onClearReference={() => setReference(null)} onRangeFromRoi={(() => { const sel = rois.rois.find((r) => r.id === rois.selected); if (!field || !sel || sel.kind === "spot") return null; return () => { const rg = rangeFromRoi(field.c, field.w, field.h, sel); if (rg) { setManual({ min: Math.floor(rg.min * 10) / 10, max: Math.ceil(rg.max * 10) / 10 }); setScaleMode("manual"); } }; })()} hold={layout.hold} setHold={(hold) => dispatch({ type: "setHold", hold })} flipH={layout.flipH} flipV={layout.flipV} setFlip={(h, v) => dispatch({ type: "setFlip", h, v })} agc={layout.agc} setAgc={(agc) => dispatch({ type: "setAgc", agc })} units={layout.units} setUnits={(units) => dispatch({ type: "setUnits", units })} conv={field?.conv ?? null} filter={layout.filter} setFilter={(filter) => dispatch({ type: "setFilter", filter })} segment={layout.segment} setSegment={(segment) => dispatch({ type: "setSegment", segment })} saturation={(() => { const cs = (info as Record<string, unknown> | null | undefined)?.active_case as { low_c?: number; high_c?: number } | undefined; if (!field || !cs || typeof cs.low_c !== "number" || typeof cs.high_c !== "number") return null; const n = saturationCount(field.c, { low: cs.low_c, high: cs.high_c }); return { ...n, lowC: cs.low_c, highC: cs.high_c }; })()} onSnapshot={saveLiveImage} />
+            <MaskPanel state={masks} dispatch={maskDispatch} maskMode={maskMode} onMaskMode={toggleMaskMode} usedPx={maskUsed} totalPx={field ? field.w * field.h : null} />
           </RailSection>
           <RailSection id="visible" title="visible camera" open={layout.sections.visible} onToggle={() => dispatch({ type: "toggleSection", section: "visible" })} tag="preview only">
             <VisiblePanel mode="live" available={visibleAvailable} reason={recording?.visible?.reason} visibleMode={layout.visibleMode} overlay={layout.overlay} dispatch={dispatch} aligned={!!align.H} />

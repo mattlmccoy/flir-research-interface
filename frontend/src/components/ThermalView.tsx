@@ -22,6 +22,7 @@ import type { Tool } from "../lib/layout.ts";
 import { RoiOverlay, type Draft } from "./RoiOverlay.tsx";
 import { displaySize, type Zoom } from "../lib/zoom.ts";
 import { toCssMatrix3d, type H3 } from "../lib/homography.ts";
+import { maskAt, maskField, type MaskAction, type MaskShape } from "../lib/mask.ts";
 
 export type StatsMap = Map<number, RoiStats>;
 const HIT_TOL_PX = 6;
@@ -78,7 +79,16 @@ interface Props {
   filter?: FilterName;
   /** Units for the hover readout. */
   units?: Units;
+  /** Region mask: 1 = pixel drives the auto colour range (null: every pixel). Display only. */
+  mask?: Uint8Array | null;
+  /** The mask's shapes, outlined over the image (empty / omitted when the mask is off). */
+  maskShapes?: readonly MaskShape[];
+  /** Drawing tools add mask shapes (rect / polygon / freehand) instead of ROIs. */
+  maskMode?: boolean;
+  onMask?: (a: MaskAction) => void;
 }
+
+const NO_MASKS: readonly MaskShape[] = [];
 
 /** The shape a drag from `a` to `b` produces for the active tool (null when degenerate). */
 export function dragShape(tool: Tool, a: Pt, b: Pt, w: number, h: number): RoiInput | null {
@@ -103,7 +113,7 @@ export function dragShape(tool: Tool, a: Pt, b: Pt, w: number, h: number): RoiIn
 /** Renders raw counts -> °C -> palette on a canvas, with an ROI overlay layer. Data arrays are never mutated. */
 const divergingLut = buildLut("diverging");
 
-export function ThermalView({ frame, palette, scaleMode, manual, onScale, setManual, setScaleMode, rois = NO_ROIS, selected = null, selectedIds = NO_IDS, tool = "select", roisHidden = false, labelScope, zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null, hold = "off", flipH = false, flipV = false, agc = LINEAR_AGC, valid = null, filter = "off", units = "C" }: Props) {
+export function ThermalView({ frame, palette, scaleMode, manual, onScale, setManual, setScaleMode, rois = NO_ROIS, selected = null, selectedIds = NO_IDS, tool = "select", roisHidden = false, labelScope, zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null, hold = "off", flipH = false, flipV = false, agc = LINEAR_AGC, valid = null, filter = "off", units = "C", mask = null, maskShapes = NO_MASKS, maskMode = false, onMask }: Props) {
   const viewRef = useRef<HTMLDivElement>(null);
   const holdRef = useRef<HoldBuffer | null>(null);
   const freehand = useRef<[number, number][] | null>(null);
@@ -177,7 +187,8 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
     const held = holdRef.current ? holdRef.current.push(filtered) : filtered;
     const sub = reference ? subtractReference(held, reference) : null;
     const shownField = sub?.delta ?? held;
-    const range = sub?.delta ? sub.range : resolveScale(scaleMode, manual, autoScale(held));
+    const used = mask && mask.length === c.length ? mask : null;
+    const range = sub?.delta ? sub.range : resolveScale(scaleMode, manual, autoScale(used ? maskField(held, used) : held));
     onScale(range);
     setBarRange(range);
     const canvas = canvasRef.current;
@@ -190,15 +201,16 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
     if (!ctx) return;
     const img = ctx.createImageData(header.width, header.height);
     const lutNow = sub?.delta ? divergingLut : lutRef.current;
-    if (agc.mode === "plateau" && !sub?.delta) applyMap(shownField, plateauMap(shownField, range, 256, agc.plateau), lutNow, img.data);
+    if (agc.mode === "plateau" && !sub?.delta) applyMap(shownField, plateauMap(used ? maskField(shownField, used) : shownField, range, 256, agc.plateau), lutNow, img.data);
     else mapToRgba(shownField, range.min, range.max, lutNow, img.data);
     if (isotherm) applyIsotherm(c, img.data, isotherm);
+    if (used) for (let i = 0; i < used.length; i++) if (!used[i]) { const d = i * 4; img.data[d] *= 0.35; img.data[d + 1] *= 0.35; img.data[d + 2] *= 0.35; } // masked out → dimmed
     if (over) for (let i = 0; i < over.mask.length; i++) if (over.mask[i]) {
       const d = i * 4; img.data[d] = 255; img.data[d + 1] = 0; img.data[d + 2] = 255; img.data[d + 3] = 255; // over-range → magenta
     }
     ctx.putImageData(img, 0, 0);
     drawMinimap();
-  }, [frame, palette, scaleMode, manual.min, manual.max, isotherm, reference, hold, agc.mode, agc.plateau, filter]);
+  }, [frame, palette, scaleMode, manual.min, manual.max, isotherm, reference, hold, agc.mode, agc.plateau, filter, mask]);
 
   useEffect(() => {
     const c = celsiusRef.current;
@@ -215,17 +227,24 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
     if (!q) return q;
     return { x: flipH ? hdr.width - 1 - q.x : q.x, y: flipV ? hdr.height - 1 - q.y : q.y };
   }
+  /** A finished shape: a mask region in mask mode (rect / polygon only), otherwise an ROI. */
+  function addShape(roi: RoiInput) {
+    if (!maskMode) { onRoi?.({ type: "add", roi }); return; }
+    if (roi.kind === "rect") onMask?.({ type: "add", shape: { kind: "rect", x0: roi.x0, y0: roi.y0, x1: roi.x1, y1: roi.y1 } });
+    else if (roi.kind === "polygon") onMask?.({ type: "add", shape: { kind: "polygon", points: roi.points } });
+  }
   function finishPolygon(pts: [number, number][]) {
     setVertices([]); setDraft(null);
     if (!onRoi) return;
-    if (tool === "polyline") { if (pts.length >= 2) onRoi({ type: "add", roi: { kind: "polyline", points: pts } }); return; }
-    if (pts.length >= 3) onRoi({ type: "add", roi: { kind: "polygon", points: pts } });
+    if (tool === "polyline") { if (pts.length >= 2) addShape({ kind: "polyline", points: pts }); return; }
+    if (pts.length >= 3) addShape({ kind: "polygon", points: pts });
   }
   function onDown(e: RPointerEvent<HTMLCanvasElement>) {
     const p = pix(e);
     if (!p || !onRoi || !hdr) return;
     e.currentTarget.focus();
-    if (tool === "spot") { onRoi({ type: "add", roi: { kind: "spot", x: p.x, y: p.y } }); return; }
+    if (maskMode && e.shiftKey) { const id = maskAt(maskShapes, p.x, p.y, hdr.width, hdr.height); if (id !== null) { onMask?.({ type: "toggleMode", id }); return; } }
+    if (tool === "spot") { addShape({ kind: "spot", x: p.x, y: p.y }); return; }
     if (tool === "rect" || tool === "circle" || tool === "ellipse" || tool === "line") {
       dragStart.current = p;
       setDraft(dragShape(tool, p, p, hdr.width, hdr.height) ?? (tool === "circle" ? { kind: "circle", cx: p.x, cy: p.y, r: 1 } : null));
@@ -306,7 +325,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
     if (freehand.current) {
       const pts = simplifyPath(freehand.current, 1.0);
       freehand.current = null; setDraft(null);
-      if (pts.length >= 3 && onRoi) onRoi({ type: "add", roi: { kind: "polygon", points: pts } });
+      if (pts.length >= 3) addShape({ kind: "polygon", points: pts });
       return;
     }
     if (editing.current) { editing.current = null; onRoi?.({ type: "commit" }); return; }
@@ -317,7 +336,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
     setDraft(null);
     const p = pix(e);
     const shape = p ? dragShape(tool, s, p, hdr.width, hdr.height) : null;
-    if (shape && onRoi) onRoi({ type: "add", roi: shape });
+    if (shape) addShape(shape);
   }
   function onKey(e: RKeyboardEvent<HTMLCanvasElement>) {
     if ((tool === "polygon" || tool === "polyline") && vertices.length) {
@@ -365,6 +384,17 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
             ? { transform: toCssMatrix3d(overlayH, box.width, box.height), transformOrigin: "0 0" }
             : { transform: `translate(${overlayStyle?.dx ?? 0}%, ${overlayStyle?.dy ?? 0}%) scale(${overlayStyle?.scale ?? 1})` }}>{overlay}</div>
         </div>
+      )}
+      {hdr && box && maskShapes.length > 0 && (
+        <svg className="mask-outlines" viewBox={`0 0 ${hdr.width} ${hdr.height}`} preserveAspectRatio="none" aria-hidden="true"
+          style={{ left: box.left, top: box.top, width: box.width, height: box.height, transform: flipH || flipV ? `scale(${flipH ? -1 : 1}, ${flipV ? -1 : 1})` : undefined }}>
+          {maskShapes.map((m) => {
+            const cls = `mask-shape ${m.mode}`;
+            return m.kind === "rect"
+              ? <rect key={m.id} className={cls} x={m.x0} y={m.y0} width={m.x1 - m.x0} height={m.y1 - m.y0} />
+              : <polygon key={m.id} className={cls} points={m.points.map(([x, y]) => `${x + 0.5},${y + 0.5}`).join(" ")} />;
+          })}
+        </svg>
       )}
       {hdr && box && (
         <RoiOverlay box={box} width={hdr.width} height={hdr.height} rois={rois} selected={selected} selectedIds={selectedIds} stats={stats} draft={draft} extremes={extremes} flipH={flipH} flipV={flipV} tool={tool} hidden={roisHidden} labelScope={labelScope} cursor={drawing ? "crosshair" : selected !== null ? "move" : zoom !== "fit" ? "grab" : "default"}

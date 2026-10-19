@@ -14,6 +14,8 @@ import type { LayoutAction, LayoutState } from "../lib/layout.ts";
 import { SPEEDS, clampIndex, nextFrameDelayMs, speedLabel } from "../lib/playback.ts";
 import type { RoiHistoryAction } from "../lib/roiHistory.ts";
 import { hasRois, loadRois, roiLabel, roisDifferFromStored, type Roi, type RoiState } from "../lib/roi.ts";
+import { hasMasks, maskPixels, maskedStats, type MaskAction, type MaskState } from "../lib/mask.ts";
+import { MaskPanel } from "./MaskPanel.tsx";
 
 const roiStorage: Storage | null = (() => { try { return typeof localStorage !== "undefined" ? localStorage : null; } catch { return null; } })();
 /** Parse the plain ROI dicts stored with a recording into validated Roi objects. */
@@ -48,6 +50,7 @@ interface Props {
   name: string;
   layout: LayoutState; dispatch: Dispatch<LayoutAction>; topbar: ReactNode;
   rois: RoiState; roiDispatch: Dispatch<RoiHistoryAction>;
+  masks: MaskState; maskDispatch: Dispatch<MaskAction>; maskMode: boolean; onMaskMode: (on: boolean) => void;
   status: Status; recording: RecordingStatus | null;
   palette: PaletteName; setPalette: (p: PaletteName) => void;
   scaleMode: ScaleMode; setScaleMode: (m: ScaleMode) => void;
@@ -109,7 +112,26 @@ export function PlaybackPage(p: Props) {
     if (!hasRois(roiStorage, `exp.${p.name}`) && info.rois && info.rois.length) {
       p.roiDispatch({ type: "load", rois: storedToRois(info.rois) });
     }
+    if (!hasMasks(roiStorage, `exp.${p.name}`) && info.masks && info.masks.length) {
+      p.maskDispatch({ type: "load", shapes: info.masks });
+    }
+    maskSyncRef.current = JSON.stringify(info.masks ?? []);
   }, [info, p.name]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Mask edits in playback are saved into the run (metadata.json['masks'] only), debounced. The
+  // first state after seeding matches what the run already has, so nothing is written for it.
+  const maskSyncRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (seededRef.current !== p.name || maskSyncRef.current === null) return;
+    const want = JSON.stringify(p.masks.enabled ? p.masks.shapes : []);
+    if (want === maskSyncRef.current) return;
+    const t = setTimeout(() => {
+      api.putMasks(p.name, JSON.parse(want) as unknown[])
+        .then(() => { maskSyncRef.current = want; })
+        .catch((e: unknown) => setErr(`mask not saved to the run: ${String(e)}`));
+    }, 600);
+    return () => clearTimeout(t);
+  }, [p.masks, p.name]);
 
   // Whole-recording ROI series from the backend; debounced so a drag does not fire per pixel.
   useEffect(() => {
@@ -211,6 +233,9 @@ export function PlaybackPage(p: Props) {
   const exp = (info?.experiment ?? {}) as Record<string, unknown>;
   const cam = (info?.camera ?? {}) as Record<string, unknown>;
   const [field, setField] = useState<FieldSnapshot | null>(null);
+  const maskPx = useMemo(() => (p.masks.enabled && field ? maskPixels(p.masks.shapes, field.w, field.h) : null), [p.masks.enabled, p.masks.shapes, field?.w, field?.h]); // eslint-disable-line react-hooks/exhaustive-deps
+  const maskUsed = useMemo(() => (maskPx ? maskPx.reduce((n, v) => n + v, 0) : null), [maskPx]);
+  const maskStats = maskPx && field ? maskedStats(field.c, maskPx) : null;
   const [reference, setReference] = useState<Float32Array | null>(null);
   const rad = useMemo(() => radiometryFromCamera(info?.camera), [info]);
   const active = cam.active_case as { low_c?: number; high_c?: number } | undefined;
@@ -296,7 +321,7 @@ export function PlaybackPage(p: Props) {
     <>
     {showMedia && tl && <MediaExportEditor name={p.name} nFrames={n} index={index} tS={tl.t_s} markers={markers} rois={(info?.rois ?? []).map((r) => ({ id: Number(r.id), name: typeof r.name === "string" ? r.name : undefined, kind: typeof r.kind === "string" ? r.kind : undefined, color: typeof r.color === "string" ? r.color : undefined }))} hasVisible={hasVideo && !!info?.visible_alignment} onClose={() => setShowMedia(false)} />}
     <StudioFrame layout={p.layout} topbar={p.topbar} dispatch={p.dispatch} dockFoot={transport}
-      strip={<ToolStrip tool={p.layout.tool} onTool={(tool) => p.dispatch({ type: "setTool", tool })} onCollapseAll={() => p.dispatch({ type: !p.layout.rail && !p.layout.dock ? "restoreAll" : "collapseAll" })} collapsed={!p.layout.rail && !p.layout.dock} zoom={p.layout.zoom} onZoom={(z) => p.dispatch({ type: "setZoom", zoom: z })}
+      strip={<ToolStrip tool={p.layout.tool} maskMode={p.maskMode} onMaskMode={p.onMaskMode} onTool={(tool) => p.dispatch({ type: "setTool", tool })} onCollapseAll={() => p.dispatch({ type: !p.layout.rail && !p.layout.dock ? "restoreAll" : "collapseAll" })} collapsed={!p.layout.rail && !p.layout.dock} zoom={p.layout.zoom} onZoom={(z) => p.dispatch({ type: "setZoom", zoom: z })}
         extras={<>
           <button aria-label="Media export (clip / GIF)" data-tip="Media export — MP4/GIF of a chosen window with overlays" disabled={n === 0} onClick={() => setShowMedia(true)}><IconClip /></button>
           <StripActions
@@ -320,7 +345,7 @@ export function PlaybackPage(p: Props) {
             <div className="load-overlay"><span className="spinner" /> loading frame {index + 1}…</div>
           ) : null}
           <ThermalView frame={frame} palette={p.palette} scaleMode={p.scaleMode} manual={p.manual} onScale={setShown} setManual={p.setManual} setScaleMode={p.setScaleMode}
-            rois={p.rois.rois} selected={p.rois.selected} selectedIds={p.rois.selectedIds} tool={p.layout.tool} roisHidden={p.layout.roisHidden} labelScope={`exp.${p.name}`} zoom={p.layout.zoom} onRoi={p.roiDispatch} onStats={onStats} rad={rad} extremes={p.layout.extremes} isotherm={p.layout.isotherm} onField={setField} reference={reference} hold={p.layout.hold} flipH={p.layout.flipH} flipV={p.layout.flipV} agc={p.layout.agc} filter={p.layout.filter} units={p.layout.units} valid={p.layout.segment.on ? { min: p.layout.segment.min, max: p.layout.segment.max } : null}
+            rois={p.rois.rois} selected={p.rois.selected} selectedIds={p.rois.selectedIds} tool={p.layout.tool} roisHidden={p.layout.roisHidden} labelScope={`exp.${p.name}`} zoom={p.layout.zoom} onRoi={p.roiDispatch} onStats={onStats} rad={rad} extremes={p.layout.extremes} isotherm={p.layout.isotherm} onField={setField} reference={reference} hold={p.layout.hold} flipH={p.layout.flipH} flipV={p.layout.flipV} agc={p.layout.agc} filter={p.layout.filter} units={p.layout.units} valid={p.layout.segment.on ? { min: p.layout.segment.min, max: p.layout.segment.max } : null} mask={maskPx} maskShapes={p.masks.enabled || p.maskMode ? p.masks.shapes : []} maskMode={p.maskMode} onMask={p.maskDispatch}
             overlay={p.layout.visibleMode === "overlay" && hasVideo ? <VisibleVideo plain name={p.name} t={t} playing={playing} speed={speed} vis={playVis} /> : undefined} overlayStyle={p.layout.overlay} overlayH={overlayH} />
           {p.layout.visibleMode === "side" && hasVideo && <VisibleVideo big flipH={p.layout.flipH} flipV={p.layout.flipV} name={p.name} t={t} playing={playing} speed={speed} vis={playVis} measuredFps={info?.visible?.measured_fps} />}
         </div>
@@ -364,13 +389,13 @@ export function PlaybackPage(p: Props) {
             </div>
             <MetadataEditor name={p.name} experiment={exp} onSaved={() => { api.experiment(p.name).then(setInfo).catch((e) => setErr(String(e))); }} />
           </RailSection>
-          <RailSection id="measurements" title="measurements" open={p.layout.sections.measurements} onToggle={() => p.dispatch({ type: "toggleSection", section: "measurements" })} tag="this frame">
+          <RailSection id="measurements" title="measurements" open={p.layout.sections.measurements} onToggle={() => p.dispatch({ type: "toggleSection", section: "measurements" })} tag={maskPx ? `this frame · masked · ${(maskUsed ?? 0).toLocaleString()} px` : "this frame"}>
             {hdr ? (
               <div className="kv">
                 <span>center</span><span className="v">{fmtCelsius(hdr.center_c)}</span>
-                <span>min</span><span className="v">{fmtCelsius(hdr.min_c)}</span>
-                <span>max</span><span className="v">{fmtCelsius(hdr.max_c)}</span>
-                <span>mean</span><span className="v">{fmtCelsius(hdr.mean_c)}</span>
+                <span>min</span><span className="v">{fmtCelsius(maskPx ? maskStats?.min ?? null : hdr.min_c)}</span>
+                <span>max</span><span className="v">{fmtCelsius(maskPx ? maskStats?.max ?? null : hdr.max_c)}</span>
+                <span>mean</span><span className="v">{fmtCelsius(maskPx ? maskStats?.mean ?? null : hdr.mean_c)}</span>
                 {!!hdr.over_range && <><span>over-range</span><span className="v" style={{ textAlign: "right" }}><span className="badge warn" title="Pixels the camera could not represent (scene hotter than its range) — saturated or 16-bit wrapped. Shown magenta and excluded from the stats. Record hot runs in a higher camera range.">{hdr.over_range} px</span></span></>}
                 <span>frame id</span><span className="v plain">{hdr.frame_id}</span>
               </div>
@@ -390,6 +415,7 @@ export function PlaybackPage(p: Props) {
           </RailSection>
           <RailSection id="display" title="display" open={p.layout.sections.display} onToggle={() => p.dispatch({ type: "toggleSection", section: "display" })} tag="visualization only">
             <DisplayControls palette={p.palette} setPalette={p.setPalette} scaleMode={p.scaleMode} setScaleMode={p.setScaleMode} manual={p.manual} setManual={p.setManual} shown={shown} isotherm={p.layout.isotherm} setIsotherm={(isotherm) => p.dispatch({ type: "setIsotherm", isotherm })} hasReference={!!reference} onSetReference={() => { if (field) setReference(new Float32Array(field.c)); }} onClearReference={() => setReference(null)} onRangeFromRoi={(() => { const sel = p.rois.rois.find((r) => r.id === p.rois.selected); if (!field || !sel || sel.kind === "spot") return null; return () => { const rg = rangeFromRoi(field.c, field.w, field.h, sel); if (rg) { p.setManual({ min: Math.floor(rg.min * 10) / 10, max: Math.ceil(rg.max * 10) / 10 }); p.setScaleMode("manual"); } }; })()} hold={p.layout.hold} setHold={(hold) => p.dispatch({ type: "setHold", hold })} flipH={p.layout.flipH} flipV={p.layout.flipV} setFlip={(h, v) => p.dispatch({ type: "setFlip", h, v })} agc={p.layout.agc} setAgc={(agc) => p.dispatch({ type: "setAgc", agc })} units={p.layout.units} setUnits={(units) => p.dispatch({ type: "setUnits", units })} conv={field?.conv ?? null} filter={p.layout.filter} setFilter={(filter) => p.dispatch({ type: "setFilter", filter })} segment={p.layout.segment} setSegment={(segment) => p.dispatch({ type: "setSegment", segment })} saturation={(() => { const cs = (info?.camera as Record<string, unknown> | null | undefined)?.active_case as { low_c?: number; high_c?: number } | undefined; if (!field || !cs || typeof cs.low_c !== "number" || typeof cs.high_c !== "number") return null; const n = saturationCount(field.c, { low: cs.low_c, high: cs.high_c }); return { ...n, lowC: cs.low_c, highC: cs.high_c }; })()} onSnapshot={() => { const v = document.querySelector<HTMLElement>(".view"); if (v) saveSnapshot(v, snapshotFilename(p.name, index, t), snapshotFooter({ name: p.name, tS: t, index: index, range: shown, palette: p.palette, rois: p.rois.rois.length, reference: !!reference })); }} />
+            <MaskPanel state={p.masks} dispatch={p.maskDispatch} maskMode={p.maskMode} onMaskMode={p.onMaskMode} usedPx={maskUsed} totalPx={field ? field.w * field.h : null} />
           </RailSection>
           <RailSection id="visible" title="visible camera" open={p.layout.sections.visible} onToggle={() => p.dispatch({ type: "toggleSection", section: "visible" })} tag="recorded video">
             <VisiblePanel mode="playback" name={p.name} hasVideo={hasVideo} t={t} playing={playing} speed={speed} vis={playVis} measuredFps={info?.visible?.measured_fps} visibleMode={p.layout.visibleMode} overlay={p.layout.overlay} dispatch={p.dispatch} aligned={!!overlayH} />

@@ -34,7 +34,7 @@ const REQUIRED_TOKENS = [
   "--accent", "--accent-ink", "--focus",
   "--live", "--live-glow", "--live-glow-dim", "--live-bg",
   "--warn", "--warn-bg",
-  "--err", "--err-bg",
+  "--err", "--err-bg", "--mask-include", "--mask-exclude",
   "--rec",
   "--trace-3", "--trace-4", "--trace-5", "--trace-6",
   "--image-bg", "--scrim", "--shadow", "--danger-ink",

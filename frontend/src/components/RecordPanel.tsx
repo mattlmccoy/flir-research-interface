@@ -1,3 +1,4 @@
+import type { MaskShape } from "../lib/mask.ts";
 import { NumberField } from "./NumberField.tsx";
 import { markForKey } from "../lib/delta.ts";
 import { useEffect, useState } from "react";
@@ -7,7 +8,7 @@ import { streamStallWarning } from "../lib/streamStall.ts";
 import type { Roi } from "../lib/roi.ts";
 
 
-export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: Roi[] }) {
+export function RecordPanel({ acquiring, rois, masks = null }: { acquiring: boolean; rois: Roi[]; masks?: MaskShape[] | null }) {
   const [name, setName] = useState("Run");
   const [meta, setMeta] = useState<Record<string, string>>({});
   const [profile, setProfile] = useState<Profile>(DEFAULT_PROFILE);
@@ -37,7 +38,7 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: Roi
     try {
       const m: Record<string, unknown> = {};
       for (const f of FIELDS) { const v = meta[f.key]; if (v !== undefined && v !== "") m[f.key] = f.type === "number" ? Number(v) : v; }
-      await api.recordingArm(name, m, withVisible && visibleAvailable, rois, trigger, nucHold);
+      await api.recordingArm(name, m, withVisible && visibleAvailable, rois, trigger, nucHold, masks);
       setStatus(await api.recordingStatus());
     } catch (e) { setErr(String(e)); } finally { setBusy(false); }
   }
@@ -60,7 +61,7 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: Roi
         const v = meta[f.key];
         if (v !== undefined && v !== "") m[f.key] = f.type === "number" ? Number(v) : v;
       }
-      await api.recordingStart(name, m, withVisible && visibleAvailable, rois, nucHold, everyNth);
+      await api.recordingStart(name, m, withVisible && visibleAvailable, rois, nucHold, everyNth, masks);
       setStatus(await api.recordingStatus());
     } catch (e) { setErr(String(e)); } finally { setBusy(false); }
   }
@@ -176,6 +177,7 @@ export function RecordPanel({ acquiring, rois }: { acquiring: boolean; rois: Roi
       )}
       <div className="kv">
         <span>ROIs saved</span><span className="v">{rois.length}</span>
+        <span>mask saved</span><span className="v">{masks && masks.length ? `${masks.length} region${masks.length > 1 ? "s" : ""}` : "none"}</span>
         <span>State</span><span className="v">{recording ? <span className="badge rec">● REC</span> : status.state}</span>
         {recording && (<>
           <span>Written</span><span className="v">{status.frames_written ?? 0} / {status.frames_received ?? 0}</span>

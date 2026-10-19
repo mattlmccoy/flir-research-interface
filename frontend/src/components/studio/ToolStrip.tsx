@@ -42,19 +42,25 @@ interface Props {
   disabledTools?: readonly Tool[];
   zoom?: Zoom;
   onZoom?: (z: Zoom) => void;
+  /** Region-mask drawing mode (the drawing tools add mask regions instead of ROIs). */
+  maskMode?: boolean;
+  onMaskMode?: (on: boolean) => void;
 }
+
+/** Tools that can draw a mask region (rect, polygon, freehand); the rest are greyed in mask mode. */
+export const MASK_TOOLS: readonly Tool[] = ["select", "rect", "polygon", "freehand"];
 
 /**
  * Left icon strip (spec §3). Disabled tools stay visible so the layout never shifts between
  * releases; they use aria-disabled (not the disabled attribute) so their tooltip still shows.
  */
-export function ToolStrip({ tool, onTool, onCollapseAll, leading, extras, disabledTools = [], zoom = "fit", onZoom, collapsed = false }: Props) {
+export function ToolStrip({ tool, onTool, onCollapseAll, leading, extras, disabledTools = [], zoom = "fit", onZoom, collapsed = false, maskMode = false, onMaskMode }: Props) {
   return (
     <nav className="strip" aria-label="tools">
       {leading}
       {TOOLS.map((id) => {
         const m = TOOL_META[id];
-        const enabled = m.enabled && !disabledTools.includes(id);
+        const enabled = m.enabled && !disabledTools.includes(id) && (!maskMode || MASK_TOOLS.includes(id));
         return (
           <button
             key={id}
@@ -69,6 +75,12 @@ export function ToolStrip({ tool, onTool, onCollapseAll, leading, extras, disabl
           </button>
         );
       })}
+      {onMaskMode && (
+        <button className={maskMode ? "active mask-mode" : ""} aria-pressed={maskMode}
+          aria-label={maskMode ? "Mask mode on: the drawing tools add mask regions (click to draw ROIs again)" : "Mask: draw include/exclude regions that set the colour range and frame stats"}
+          data-tip={maskMode ? "Mask mode on: rect / polygon / freehand add mask regions; shift-click a region flips include/exclude. Click to draw ROIs again." : "Mask: draw include/exclude regions that set the colour range and frame stats (data unaltered)"}
+          onClick={() => onMaskMode(!maskMode)}>◩</button>
+      )}
       {extras && <><span className="divider" role="separator" />{extras}</>}
       <span className="spacer" />
       {onZoom && (

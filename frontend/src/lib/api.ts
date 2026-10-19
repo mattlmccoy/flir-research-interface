@@ -111,7 +111,7 @@ export interface Experiment {
   last_seen_utc?: string | null;
 }
 
-export interface ExperimentInfo { name: string; path: string; n_frames: number; size_bytes?: number; width: number; height: number; duration_s: number; complete: boolean; ir_format: string | null; conversion: Record<string, unknown> | null; experiment: Record<string, unknown> | null; camera: Record<string, unknown> | null; software: Record<string, unknown> | null; started_utc: string | null; events?: Record<string, unknown>[]; manifest: Record<string, unknown> | null; visible?: { file?: string | null; measured_fps?: number | null; error?: string | null; segments?: VisibleSegment[] | null; gaps?: VisibleGap[] | null } | null; visible_timeline?: VisibleSegment[] | null; visible_alignment?: Record<string, unknown> | null; rois?: Record<string, unknown>[] | null; thermal_preview?: { path: string; bytes: number } | null; exports?: { name: string; bytes: number }[]; }
+export interface ExperimentInfo { name: string; path: string; n_frames: number; size_bytes?: number; width: number; height: number; duration_s: number; complete: boolean; ir_format: string | null; conversion: Record<string, unknown> | null; experiment: Record<string, unknown> | null; camera: Record<string, unknown> | null; software: Record<string, unknown> | null; started_utc: string | null; events?: Record<string, unknown>[]; manifest: Record<string, unknown> | null; visible?: { file?: string | null; measured_fps?: number | null; error?: string | null; segments?: VisibleSegment[] | null; gaps?: VisibleGap[] | null } | null; visible_timeline?: VisibleSegment[] | null; visible_alignment?: Record<string, unknown> | null; rois?: Record<string, unknown>[] | null; masks?: Record<string, unknown>[] | null; thermal_preview?: { path: string; bytes: number } | null; exports?: { name: string; bytes: number }[]; }
 export interface Timeline { t_s: number[]; frame_id: number[]; }
 export interface ExperimentEvent { t_s?: number; type?: string; name?: string; [k: string]: unknown; }
 export interface RoiSeries {
@@ -140,6 +140,8 @@ export const api = {
   exportThermalVideo: (name: string) =>
     j<ThermalVideoExport>(req(`/api/experiments/${encodeURIComponent(name)}/export/thermal-video`, { method: "POST" })),
   /** Persist the ROIs currently on screen into the recording so derived files can match them. */
+  putMasks: (name: string, masks: unknown[]) =>
+    j<{ masks: number }>(req(`/api/experiments/${encodeURIComponent(name)}/masks`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ masks }) })),
   putRois: (name: string, rois: unknown[]) =>
     j<{ rois: number }>(req(`/api/experiments/${encodeURIComponent(name)}/rois`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ rois }) })),
   /** Start a background regenerate of the ROI-dependent derived files; poll exportDerivedStatus.
@@ -175,11 +177,11 @@ export const api = {
     if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
     return res.arrayBuffer();
   },
-  recordingStart: (name: string, metadata: Record<string, unknown>, visible = false, rois: unknown[] | null = null, nucHold = true, everyNth = 1) =>
-    j<{ state: string; experiment_dir: string; visible?: VisibleStatus }>(req("/api/recording/start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, metadata, visible, rois, nuc_hold: nucHold, every_nth: everyNth }) })),
+  recordingStart: (name: string, metadata: Record<string, unknown>, visible = false, rois: unknown[] | null = null, nucHold = true, everyNth = 1, masks: unknown[] | null = null) =>
+    j<{ state: string; experiment_dir: string; visible?: VisibleStatus }>(req("/api/recording/start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, metadata, visible, rois, masks, nuc_hold: nucHold, every_nth: everyNth }) })),
   recordingStop: () => j<Record<string, unknown>>(req("/api/recording/stop", { method: "POST" })),
-  recordingArm: (name: string, metadata: Record<string, unknown>, visible: boolean, rois: unknown[] | null, trigger: unknown, nucHold = true) =>
-    j<{ state: string }>(req("/api/recording/arm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, metadata, visible, rois, trigger, nuc_hold: nucHold }) })),
+  recordingArm: (name: string, metadata: Record<string, unknown>, visible: boolean, rois: unknown[] | null, trigger: unknown, nucHold = true, masks: unknown[] | null = null) =>
+    j<{ state: string }>(req("/api/recording/arm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, metadata, visible, rois, masks, trigger, nuc_hold: nucHold }) })),
   recordingDisarm: () => j<Record<string, unknown>>(req("/api/recording/disarm", { method: "POST" })),
   recordingArmStart: () => j<Record<string, unknown>>(req("/api/recording/arm/start", { method: "POST" })),
   recordingStatus: () => j<RecordingStatus>(req("/api/recording/status")),
