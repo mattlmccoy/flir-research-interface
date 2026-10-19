@@ -9,6 +9,7 @@ import {
   maskPixels,
   maskReducer,
   maskedStats,
+  regionPixelCount,
   saveMasks,
   toolForMaskMode,
   type MaskShape,
@@ -162,4 +163,9 @@ test("the include/exclude choice is not remembered between sessions", () => {
   const st = memStorage();
   saveMasks(st, maskReducer(EMPTY_MASKS, { type: "setDrawMode", mode: "exclude" }), "live");
   assert.equal(loadMasks(st, "live").drawMode, "include");
+});
+
+test("each region row reports how many pixels the region covers, clipped to the frame", () => {
+  assert.equal(regionPixelCount(rect(1, "include", 2, 2, 6, 5), W, H), 12);
+  assert.equal(regionPixelCount(rect(2, "exclude", 8, 6, 20, 20), W, H), 4); // only 2x2 lies inside 10x8
 });

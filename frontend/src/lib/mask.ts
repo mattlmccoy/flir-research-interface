@@ -115,6 +115,11 @@ export function maskPixels(shapes: readonly MaskShape[], w: number, h: number): 
   return used;
 }
 
+/** Pixels one region covers inside the frame (same rasteriser as the mask itself). */
+export function regionPixelCount(shape: MaskShape, w: number, h: number): number {
+  return roiPixels(shape as unknown as Roi, w, h).length;
+}
+
 /** Id of the topmost (last drawn) shape covering pixel (x, y), or null. */
 export function maskAt(shapes: readonly MaskShape[], x: number, y: number, w: number, h: number): number | null {
   const i = y * w + x;

@@ -453,7 +453,10 @@ button:disabled .spinner { opacity: 0.7; }
 .strip button.mask-mode { color: var(--mask-include); }
 .mask-panel { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
 .mask-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
-.mask-list li { display: flex; align-items: center; gap: 6px; }
-.mask-chip { font-size: 11px; padding: 0 6px; border-radius: 8px; border: 1px solid currentColor; }
+.mask-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.mask-list li { display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 1px 4px; border-radius: 4px; }
+.mask-list li.selected { outline: 1px solid var(--mask-include); }
+.mask-list .mask-name { flex: 1 1 auto; min-width: 0; }
+.mask-chip { width: 10px; height: 10px; border-radius: 2px; border: 1px solid currentColor; background: currentColor; flex: 0 0 auto; }
 .mask-chip.include { color: var(--mask-include); }
 .mask-chip.exclude { color: var(--mask-exclude); }
