@@ -42,7 +42,8 @@ import { LiveControl } from "./lib/liveControl.ts";
 import { evalRateAlarm, loadRateAlarm, saveRateAlarm, slopeOver, type RateAlarmState } from "./lib/rate.ts";
 import { RatePanel } from "./components/RatePanel.tsx";
 import { MaskPanel } from "./components/MaskPanel.tsx";
-import { EMPTY_MASKS, hasMasks, loadMasks, maskPixels, maskReducer, maskedStats, masksAsRois, saveMasks, toolForMaskMode } from "./lib/mask.ts";
+import { EMPTY_MASKS, hasMasks, loadMasks, maskPixels, maskedStats, masksAsRois, saveMasks, toolForMaskMode } from "./lib/mask.ts";
+import { initMaskHistory, maskHistoryReducer, type MaskHistoryAction } from "./lib/maskHistory.ts";
 import type { RoiAction } from "./lib/roi.ts";
 
 type Page = "live" | "setup" | "experiments" | "playback";
@@ -76,6 +77,8 @@ export function App() {
   useEffect(() => { saveLayout(storage, layout); }, [layout]);
   const [roiHist, roiDispatch] = useReducer(roiHistoryReducer, EMPTY_ROIS, () => initHistory(loadRois(storage)));
   const rois = roiHist.present;
+  const maskModeRef = useRef(false);
+  const maskDispatchRef = useRef<(a: MaskHistoryAction) => void>(() => undefined);
   // Cmd/Ctrl+Z undoes an ROI edit; Cmd/Ctrl+Y or Cmd/Ctrl+Shift+Z redoes. Text fields keep their own undo.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -87,7 +90,9 @@ export function App() {
       if (el instanceof HTMLElement && (el.isContentEditable || el.tagName === "TEXTAREA"
         || (el instanceof HTMLInputElement && !["range", "checkbox", "radio", "button", "color"].includes(el.type)))) return;
       e.preventDefault();
-      roiDispatch({ type: undo ? "undo" : "redo" });
+      // in mask mode the shortcut undoes mask edits; otherwise ROI edits
+      if (maskModeRef.current) maskDispatchRef.current({ type: undo ? "undo" : "redo" });
+      else roiDispatch({ type: undo ? "undo" : "redo" });
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -117,8 +122,11 @@ export function App() {
   }, [rois.rois, roiScope]);
   // Region masks follow the ROI scopes (live / exp.<name>); they only pick the pixels behind the
   // colour auto-range and the frame stats. A run's stored masks are seeded by PlaybackPage.
-  const [masks, maskDispatch] = useReducer(maskReducer, EMPTY_MASKS, () => loadMasks(storage, roiScope));
+  const [maskHist, maskDispatch] = useReducer(maskHistoryReducer, EMPTY_MASKS, () => initMaskHistory(loadMasks(storage, roiScope)));
+  const masks = maskHist.present;
   const [maskMode, setMaskMode] = useState(false);
+  maskModeRef.current = maskMode;
+  maskDispatchRef.current = maskDispatch;
   const maskScopeRef = useRef(roiScope);
   useEffect(() => {
     if (maskScopeRef.current === roiScope) return;

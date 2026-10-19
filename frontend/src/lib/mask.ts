@@ -25,7 +25,15 @@ export type MaskGeometry =
   | Pick<Polygon, "kind" | "points">;
 
 export interface MaskState { shapes: MaskShape[]; enabled: boolean; drawMode: MaskMode; nextId: number; selected: number | null; selectedIds: number[]; }
-export const EMPTY_MASKS: MaskState = Object.freeze({ shapes: [], enabled: true, drawMode: "exclude", nextId: 1, selected: null, selectedIds: [] }) as MaskState;
+export const EMPTY_MASKS: MaskState = Object.freeze({ shapes: [], enabled: true, drawMode: "include", nextId: 1, selected: null, selectedIds: [] }) as MaskState;
+
+/** Smallest region worth keeping: a click without a drag (1 px) is an accident, not a mask. */
+const MIN_SIDE_PX = 3;
+function tooSmall(g: MaskGeometry): boolean {
+  if (g.kind === "rect") return g.x1 - g.x0 < MIN_SIDE_PX || g.y1 - g.y0 < MIN_SIDE_PX;
+  const xs = g.points.map((p) => p[0]), ys = g.points.map((p) => p[1]);
+  return Math.max(...xs) - Math.min(...xs) < MIN_SIDE_PX || Math.max(...ys) - Math.min(...ys) < MIN_SIDE_PX;
+}
 
 export type MaskAction =
   | { type: "add"; shape: MaskGeometry }
@@ -66,6 +74,7 @@ export function asMask(x: unknown): MaskShape | null {
 export function maskReducer(s: MaskState, a: MaskAction): MaskState {
   switch (a.type) {
     case "add":
+      if (tooSmall(a.shape)) return s;
       return { ...s, shapes: [...s.shapes, { ...a.shape, id: s.nextId, mode: s.drawMode } as MaskShape], nextId: s.nextId + 1 };
     case "remove": {
       const drop = (id: number | null) => (id === a.id ? null : id);
@@ -73,7 +82,9 @@ export function maskReducer(s: MaskState, a: MaskAction): MaskState {
     }
     case "edit": {
       if (a.action.type === "add") return s;  // new regions come through "add" with the draw mode
-      const out = roiReducer({ rois: masksAsRois(s.shapes), selected: s.selected, selectedIds: s.selectedIds, nextId: s.nextId }, a.action);
+      const rois = masksAsRois(s.shapes);
+      const out = roiReducer({ rois, selected: s.selected, selectedIds: s.selectedIds, nextId: s.nextId }, a.action);
+      if (out.rois === rois) return { ...s, selected: out.selected, selectedIds: out.selectedIds };  // selection only
       const modeOf = new Map(s.shapes.map((m) => [m.id, m.mode]));
       const shapes = out.rois.map((r) => asMask({ ...r, mode: modeOf.get(r.id) })).filter((m): m is MaskShape => m !== null);
       return { ...s, shapes, selected: out.selected, selectedIds: out.selectedIds };
@@ -87,7 +98,7 @@ export function maskReducer(s: MaskState, a: MaskAction): MaskState {
     case "clear":
       return { ...s, shapes: [], selected: null, selectedIds: [] };
     case "load": {
-      const shapes = a.shapes.map(asMask).filter((m): m is MaskShape => m !== null);
+      const shapes = a.shapes.map(asMask).filter((m): m is MaskShape => m !== null && !tooSmall(m));
       return { ...s, shapes, nextId: shapes.reduce((n, m) => Math.max(n, m.id), 0) + 1, selected: null, selectedIds: [] };
     }
   }
@@ -140,14 +151,14 @@ export function loadMasks(storage: Storage | null, scope = "live"): MaskState {
     if (!raw) return EMPTY_MASKS;
     const p = JSON.parse(raw) as { shapes?: unknown; enabled?: unknown; drawMode?: unknown };
     const s = maskReducer(EMPTY_MASKS, { type: "load", shapes: Array.isArray(p.shapes) ? p.shapes : [] });
-    return { ...s, enabled: p.enabled !== false, drawMode: p.drawMode === "include" ? "include" : "exclude" };
+    return { ...s, enabled: p.enabled !== false };  // new regions always start as include
   } catch {
     return EMPTY_MASKS;
   }
 }
 
 export function saveMasks(storage: Storage | null, s: MaskState, scope = "live"): void {
-  try { storage?.setItem(keyFor(scope), JSON.stringify({ shapes: s.shapes, enabled: s.enabled, drawMode: s.drawMode })); } catch { /* ignore */ }
+  try { storage?.setItem(keyFor(scope), JSON.stringify({ shapes: s.shapes, enabled: s.enabled })); } catch { /* ignore */ }
 }
 
 export function hasMasks(storage: Storage | null, scope: string): boolean {

@@ -81,8 +81,8 @@ test("maskedStats summarise only masked, valid pixels", () => {
 
 test("new shapes take the draw mode; shift-click flips; remove and switch off keep the rest", () => {
   let s = maskReducer(EMPTY_MASKS, { type: "setDrawMode", mode: "exclude" });
-  s = maskReducer(s, { type: "add", shape: { kind: "rect", x0: 0, y0: 0, x1: 2, y1: 2 } });
-  s = maskReducer(s, { type: "add", shape: { kind: "polygon", points: [[0, 0], [3, 0], [0, 3]] } });
+  s = maskReducer(s, { type: "add", shape: { kind: "rect", x0: 0, y0: 0, x1: 5, y1: 5 } });
+  s = maskReducer(s, { type: "add", shape: { kind: "polygon", points: [[0, 0], [6, 0], [0, 6]] } });
   assert.deepEqual(s.shapes.map((m) => [m.id, m.mode]), [[1, "exclude"], [2, "exclude"]]);
   s = maskReducer(s, { type: "toggleMode", id: 2 });
   assert.equal(s.shapes[1].mode, "include");
@@ -101,7 +101,7 @@ test("masks persist per scope and malformed storage falls back to none", () => {
   assert.deepEqual(loadMasks(st, "live").shapes, []);
   st.setItem("flir.masks.v1.live", "{nope");
   assert.deepEqual(loadMasks(st, "live"), EMPTY_MASKS);
-  s = maskReducer(EMPTY_MASKS, { type: "load", shapes: [{ id: 4, kind: "spot" }, rect(7, "include", 0, 0, 1, 1)] });
+  s = maskReducer(EMPTY_MASKS, { type: "load", shapes: [{ id: 4, kind: "spot" }, rect(7, "include", 0, 0, 4, 4)] });
   assert.deepEqual(s.shapes.map((m) => m.id), [7]); // only rasterisable shapes survive a load
   assert.equal(s.nextId, 8);
 });
@@ -122,7 +122,8 @@ test("entering mask mode lands on a drawing tool, so the first drag draws a regi
 });
 
 test("in mask mode the ROI editing actions select, move, reshape and delete mask regions", () => {
-  let s = maskReducer(EMPTY_MASKS, { type: "add", shape: { kind: "rect", x0: 10, y0: 10, x1: 20, y1: 20 } });
+  let s = maskReducer(EMPTY_MASKS, { type: "setDrawMode", mode: "exclude" });
+  s = maskReducer(s, { type: "add", shape: { kind: "rect", x0: 10, y0: 10, x1: 20, y1: 20 } });
   s = maskReducer(s, { type: "setDrawMode", mode: "include" });
   s = maskReducer(s, { type: "add", shape: { kind: "polygon", points: [[0, 0], [8, 0], [0, 8]] } });
   s = maskReducer(s, { type: "edit", action: { type: "select", id: 1 } });
@@ -141,4 +142,23 @@ test("mask regions are shown to the editing layer as labelled, mode-coloured ROI
   const rois = masksAsRois(shapes);
   assert.deepEqual(rois.map((r) => [r.id, r.kind, r.name]), [[1, "rect", "exclude 1"], [2, "polygon", "include 2"]]);
   assert.notEqual(rois[0].color, rois[1].color);
+});
+
+test("new regions are include by default (draw the area you want to see)", () => {
+  const s = maskReducer(EMPTY_MASKS, { type: "add", shape: { kind: "rect", x0: 0, y0: 0, x1: 10, y1: 10 } });
+  assert.equal(s.shapes[0].mode, "include");
+});
+
+test("a click without a drag makes no region, and stray specks are dropped on load", () => {
+  const speck = { kind: "rect" as const, x0: 5, y0: 5, x1: 6, y1: 6 };
+  assert.equal(maskReducer(EMPTY_MASKS, { type: "add", shape: speck }).shapes.length, 0);
+  const sliver: MaskShape = { id: 3, kind: "polygon", points: [[0, 0], [1, 0], [0, 1]], mode: "exclude" };
+  const s = maskReducer(EMPTY_MASKS, { type: "load", shapes: [{ ...speck, id: 2, mode: "exclude" }, sliver, rect(4, "include", 0, 0, 10, 10)] });
+  assert.deepEqual(s.shapes.map((m) => m.id), [4]);
+});
+
+test("the include/exclude choice is not remembered between sessions", () => {
+  const st = memStorage();
+  saveMasks(st, maskReducer(EMPTY_MASKS, { type: "setDrawMode", mode: "exclude" }), "live");
+  assert.equal(loadMasks(st, "live").drawMode, "include");
 });
