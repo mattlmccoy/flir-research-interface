@@ -42,7 +42,8 @@ import { LiveControl } from "./lib/liveControl.ts";
 import { evalRateAlarm, loadRateAlarm, saveRateAlarm, slopeOver, type RateAlarmState } from "./lib/rate.ts";
 import { RatePanel } from "./components/RatePanel.tsx";
 import { MaskPanel } from "./components/MaskPanel.tsx";
-import { EMPTY_MASKS, hasMasks, loadMasks, maskPixels, maskReducer, maskedStats, saveMasks, toolForMaskMode } from "./lib/mask.ts";
+import { EMPTY_MASKS, hasMasks, loadMasks, maskPixels, maskReducer, maskedStats, masksAsRois, saveMasks, toolForMaskMode } from "./lib/mask.ts";
+import type { RoiAction } from "./lib/roi.ts";
 
 type Page = "live" | "setup" | "experiments" | "playback";
 const storage = (() => {
@@ -132,6 +133,9 @@ export function App() {
     if (scope !== "live" && masks.shapes.length === 0 && !hasMasks(storage, scope)) return;
     saveMasks(storage, masks, scope);
   }, [masks]);
+  // In mask mode the image's editing layer works on the mask regions (ROI handles, move, Delete).
+  const maskRois = useMemo(() => masksAsRois(masks.shapes), [masks.shapes]);
+  const maskEdit = useCallback((a: RoiAction) => maskDispatch({ type: "edit", action: a }), []);
   const toggleMaskMode = (on: boolean) => {
     setMaskMode(on);
     if (on && toolForMaskMode(layout.tool) !== layout.tool) dispatch({ type: "setTool", tool: toolForMaskMode(layout.tool) });
@@ -362,7 +366,7 @@ export function App() {
       center={
         <div className={`center-split ${(layout.visibleMode === "side" || calibrating) && visibleAvailable ? "on" : ""}`}>
           <ThermalView frame={frame} palette={palette} scaleMode={scaleMode} manual={manual} onScale={setShown} setManual={setManual} setScaleMode={setScaleMode}
-            rois={rois.rois} selected={rois.selected} selectedIds={rois.selectedIds} tool={layout.tool} roisHidden={layout.roisHidden} labelScope={roiScope} zoom={layout.zoom} onRoi={roiDispatch} onStats={onStats} rad={rad} extremes={layout.extremes} isotherm={layout.isotherm} onField={setField} reference={reference} hold={layout.hold} flipH={layout.flipH} flipV={layout.flipV} agc={layout.agc} filter={layout.filter} units={layout.units} valid={layout.segment.on ? { min: layout.segment.min, max: layout.segment.max } : null} mask={maskPx} maskShapes={masks.enabled || maskMode ? masks.shapes : []} maskMode={maskMode} onMask={maskDispatch}
+            rois={maskMode ? maskRois : rois.rois} statsRois={rois.rois} selected={maskMode ? masks.selected : rois.selected} selectedIds={maskMode ? masks.selectedIds : rois.selectedIds} tool={layout.tool} roisHidden={!maskMode && layout.roisHidden} labelScope={maskMode ? `${roiScope}.mask` : roiScope} zoom={layout.zoom} onRoi={maskMode ? maskEdit : roiDispatch} onStats={onStats} rad={rad} extremes={layout.extremes} isotherm={layout.isotherm} onField={setField} reference={reference} hold={layout.hold} flipH={layout.flipH} flipV={layout.flipV} agc={layout.agc} filter={layout.filter} units={layout.units} valid={layout.segment.on ? { min: layout.segment.min, max: layout.segment.max } : null} mask={maskPx} maskShapes={masks.enabled || maskMode ? masks.shapes : []} maskMode={maskMode} onMask={maskDispatch}
             overlay={layout.visibleMode === "overlay" && !calibrating && visibleAvailable ? <VisibleLive plain /> : undefined} overlayStyle={layout.overlay} overlayH={align.H}
             topLayer={calibrating ? <PickLayer label="IR" flipH={layout.flipH} flipV={layout.flipV} color="var(--live)" points={align.pairs.map((p) => p.ir)} pending={align.pending?.ir} onPick={(p) => alignDispatch({ type: "pick", side: "ir", p })} /> : undefined} />
           {(layout.visibleMode === "side" || calibrating) && visibleAvailable && (

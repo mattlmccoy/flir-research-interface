@@ -14,7 +14,8 @@ import type { LayoutAction, LayoutState } from "../lib/layout.ts";
 import { SPEEDS, clampIndex, nextFrameDelayMs, speedLabel } from "../lib/playback.ts";
 import type { RoiHistoryAction } from "../lib/roiHistory.ts";
 import { hasRois, loadRois, roiLabel, roisDifferFromStored, type Roi, type RoiState } from "../lib/roi.ts";
-import { hasMasks, maskPixels, maskedStats, type MaskAction, type MaskState } from "../lib/mask.ts";
+import { hasMasks, maskPixels, maskedStats, masksAsRois, type MaskAction, type MaskState } from "../lib/mask.ts";
+import type { RoiAction } from "../lib/roi.ts";
 import { MaskPanel } from "./MaskPanel.tsx";
 
 const roiStorage: Storage | null = (() => { try { return typeof localStorage !== "undefined" ? localStorage : null; } catch { return null; } })();
@@ -236,6 +237,10 @@ export function PlaybackPage(p: Props) {
   const maskPx = useMemo(() => (p.masks.enabled && field ? maskPixels(p.masks.shapes, field.w, field.h) : null), [p.masks.enabled, p.masks.shapes, field?.w, field?.h]); // eslint-disable-line react-hooks/exhaustive-deps
   const maskUsed = useMemo(() => (maskPx ? maskPx.reduce((n, v) => n + v, 0) : null), [maskPx]);
   const maskStats = maskPx && field ? maskedStats(field.c, maskPx) : null;
+  // In mask mode the image's editing layer works on the mask regions (ROI handles, move, Delete).
+  const maskRois = useMemo(() => masksAsRois(p.masks.shapes), [p.masks.shapes]);
+  const { maskDispatch } = p;
+  const maskEdit = useCallback((a: RoiAction) => maskDispatch({ type: "edit", action: a }), [maskDispatch]);
   const [reference, setReference] = useState<Float32Array | null>(null);
   const rad = useMemo(() => radiometryFromCamera(info?.camera), [info]);
   const active = cam.active_case as { low_c?: number; high_c?: number } | undefined;
@@ -345,7 +350,7 @@ export function PlaybackPage(p: Props) {
             <div className="load-overlay"><span className="spinner" /> loading frame {index + 1}…</div>
           ) : null}
           <ThermalView frame={frame} palette={p.palette} scaleMode={p.scaleMode} manual={p.manual} onScale={setShown} setManual={p.setManual} setScaleMode={p.setScaleMode}
-            rois={p.rois.rois} selected={p.rois.selected} selectedIds={p.rois.selectedIds} tool={p.layout.tool} roisHidden={p.layout.roisHidden} labelScope={`exp.${p.name}`} zoom={p.layout.zoom} onRoi={p.roiDispatch} onStats={onStats} rad={rad} extremes={p.layout.extremes} isotherm={p.layout.isotherm} onField={setField} reference={reference} hold={p.layout.hold} flipH={p.layout.flipH} flipV={p.layout.flipV} agc={p.layout.agc} filter={p.layout.filter} units={p.layout.units} valid={p.layout.segment.on ? { min: p.layout.segment.min, max: p.layout.segment.max } : null} mask={maskPx} maskShapes={p.masks.enabled || p.maskMode ? p.masks.shapes : []} maskMode={p.maskMode} onMask={p.maskDispatch}
+            rois={p.maskMode ? maskRois : p.rois.rois} statsRois={p.rois.rois} selected={p.maskMode ? p.masks.selected : p.rois.selected} selectedIds={p.maskMode ? p.masks.selectedIds : p.rois.selectedIds} tool={p.layout.tool} roisHidden={!p.maskMode && p.layout.roisHidden} labelScope={p.maskMode ? `exp.${p.name}.mask` : `exp.${p.name}`} zoom={p.layout.zoom} onRoi={p.maskMode ? maskEdit : p.roiDispatch} onStats={onStats} rad={rad} extremes={p.layout.extremes} isotherm={p.layout.isotherm} onField={setField} reference={reference} hold={p.layout.hold} flipH={p.layout.flipH} flipV={p.layout.flipV} agc={p.layout.agc} filter={p.layout.filter} units={p.layout.units} valid={p.layout.segment.on ? { min: p.layout.segment.min, max: p.layout.segment.max } : null} mask={maskPx} maskShapes={p.masks.enabled || p.maskMode ? p.masks.shapes : []} maskMode={p.maskMode} onMask={p.maskDispatch}
             overlay={p.layout.visibleMode === "overlay" && hasVideo ? <VisibleVideo plain name={p.name} t={t} playing={playing} speed={speed} vis={playVis} /> : undefined} overlayStyle={p.layout.overlay} overlayH={overlayH} />
           {p.layout.visibleMode === "side" && hasVideo && <VisibleVideo big flipH={p.layout.flipH} flipV={p.layout.flipV} name={p.name} t={t} playing={playing} speed={speed} vis={playVis} measuredFps={info?.visible?.measured_fps} />}
         </div>

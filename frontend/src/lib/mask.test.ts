@@ -4,6 +4,7 @@ import {
   EMPTY_MASKS,
   loadMasks,
   maskAt,
+  masksAsRois,
   maskField,
   maskPixels,
   maskReducer,
@@ -118,4 +119,26 @@ test("entering mask mode lands on a drawing tool, so the first drag draws a regi
   assert.equal(toolForMaskMode("polygon"), "polygon");
   assert.equal(toolForMaskMode("freehand"), "freehand");
   assert.equal(toolForMaskMode("rect"), "rect");
+});
+
+test("in mask mode the ROI editing actions select, move, reshape and delete mask regions", () => {
+  let s = maskReducer(EMPTY_MASKS, { type: "add", shape: { kind: "rect", x0: 10, y0: 10, x1: 20, y1: 20 } });
+  s = maskReducer(s, { type: "setDrawMode", mode: "include" });
+  s = maskReducer(s, { type: "add", shape: { kind: "polygon", points: [[0, 0], [8, 0], [0, 8]] } });
+  s = maskReducer(s, { type: "edit", action: { type: "select", id: 1 } });
+  assert.equal(s.selected, 1);
+  s = maskReducer(s, { type: "edit", action: { type: "move", id: 1, dx: 5, dy: -3 } });
+  assert.deepEqual(s.shapes[0], { id: 1, kind: "rect", x0: 15, y0: 7, x1: 25, y1: 17, mode: "exclude" });
+  s = maskReducer(s, { type: "edit", action: { type: "setVertex", id: 2, index: 1, x: 12, y: 1 } });
+  assert.deepEqual(s.shapes[1], { id: 2, kind: "polygon", points: [[0, 0], [12, 1], [0, 8]], mode: "include" });
+  s = maskReducer(s, { type: "edit", action: { type: "remove", id: 1 } });
+  assert.deepEqual(s.shapes.map((m) => m.id), [2]);
+  assert.equal(s.selected, null);
+});
+
+test("mask regions are shown to the editing layer as labelled, mode-coloured ROIs", () => {
+  const shapes: MaskShape[] = [rect(1, "exclude", 0, 0, 4, 4), { id: 2, kind: "polygon", points: [[0, 0], [5, 0], [0, 5]], mode: "include" }];
+  const rois = masksAsRois(shapes);
+  assert.deepEqual(rois.map((r) => [r.id, r.kind, r.name]), [[1, "rect", "exclude 1"], [2, "polygon", "include 2"]]);
+  assert.notEqual(rois[0].color, rois[1].color);
 });

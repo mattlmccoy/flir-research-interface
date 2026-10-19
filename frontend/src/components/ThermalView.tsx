@@ -86,6 +86,9 @@ interface Props {
   /** Drawing tools add mask shapes (rect / polygon / freehand) instead of ROIs. */
   maskMode?: boolean;
   onMask?: (a: MaskAction) => void;
+  /** ROIs whose readouts are computed (default: ``rois``). In mask mode ``rois`` holds the mask
+   *  regions for editing while the real ROIs keep being measured. */
+  statsRois?: Roi[];
 }
 
 const NO_MASKS: readonly MaskShape[] = [];
@@ -113,7 +116,7 @@ export function dragShape(tool: Tool, a: Pt, b: Pt, w: number, h: number): RoiIn
 /** Renders raw counts -> °C -> palette on a canvas, with an ROI overlay layer. Data arrays are never mutated. */
 const divergingLut = buildLut("diverging");
 
-export function ThermalView({ frame, palette, scaleMode, manual, onScale, setManual, setScaleMode, rois = NO_ROIS, selected = null, selectedIds = NO_IDS, tool = "select", roisHidden = false, labelScope, zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null, hold = "off", flipH = false, flipV = false, agc = LINEAR_AGC, valid = null, filter = "off", units = "C", mask = null, maskShapes = NO_MASKS, maskMode = false, onMask }: Props) {
+export function ThermalView({ frame, palette, scaleMode, manual, onScale, setManual, setScaleMode, rois = NO_ROIS, selected = null, selectedIds = NO_IDS, tool = "select", roisHidden = false, labelScope, zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null, hold = "off", flipH = false, flipV = false, agc = LINEAR_AGC, valid = null, filter = "off", units = "C", mask = null, maskShapes = NO_MASKS, maskMode = false, onMask, statsRois }: Props) {
   const viewRef = useRef<HTMLDivElement>(null);
   const holdRef = useRef<HoldBuffer | null>(null);
   const freehand = useRef<[number, number][] | null>(null);
@@ -216,10 +219,10 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
     const c = celsiusRef.current;
     if (!frame || !c) return;
     const m: StatsMap = new Map();
-    for (const r of rois) m.set(r.id, roiStats(c, frame.header.width, frame.header.height, r, rad, valid));
+    for (const r of statsRois ?? rois) m.set(r.id, roiStats(c, frame.header.width, frame.header.height, r, rad, valid));
     setStats(m);
     onStats?.(m, frame);
-  }, [frame, rois, onStats, rad, valid]);
+  }, [frame, rois, statsRois, onStats, rad, valid]);
 
   function pix(e: { currentTarget: HTMLCanvasElement; clientX: number; clientY: number }): Pt | null {
     if (!hdr) return null;
@@ -385,7 +388,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
             : { transform: `translate(${overlayStyle?.dx ?? 0}%, ${overlayStyle?.dy ?? 0}%) scale(${overlayStyle?.scale ?? 1})` }}>{overlay}</div>
         </div>
       )}
-      {hdr && box && maskShapes.length > 0 && (
+      {hdr && box && maskShapes.length > 0 && !maskMode && (  /* in mask mode the editing layer draws them */
         <svg className="mask-outlines" viewBox={`0 0 ${hdr.width} ${hdr.height}`} preserveAspectRatio="none" aria-hidden="true"
           style={{ left: box.left, top: box.top, width: box.width, height: box.height, transform: flipH || flipV ? `scale(${flipH ? -1 : 1}, ${flipV ? -1 : 1})` : undefined }}>
           {maskShapes.map((m) => {

@@ -4,7 +4,7 @@
  * touched, and masks are not ROIs (no readout, no series). Coverage reuses the ROI rasteriser, so a
  * mask rect or polygon covers exactly the pixels the same ROI would.
  */
-import { roiPixels, type Polygon, type Rect, type Roi } from "./roi.ts";
+import { roiPixels, roiReducer, type Polygon, type Rect, type Roi, type RoiAction } from "./roi.ts";
 import type { Tool } from "./layout.ts";
 
 /** Tools that draw a mask region. */
@@ -24,8 +24,8 @@ export type MaskGeometry =
   | Pick<Rect, "kind" | "x0" | "y0" | "x1" | "y1">
   | Pick<Polygon, "kind" | "points">;
 
-export interface MaskState { shapes: MaskShape[]; enabled: boolean; drawMode: MaskMode; nextId: number; }
-export const EMPTY_MASKS: MaskState = Object.freeze({ shapes: [], enabled: true, drawMode: "exclude", nextId: 1 }) as MaskState;
+export interface MaskState { shapes: MaskShape[]; enabled: boolean; drawMode: MaskMode; nextId: number; selected: number | null; selectedIds: number[]; }
+export const EMPTY_MASKS: MaskState = Object.freeze({ shapes: [], enabled: true, drawMode: "exclude", nextId: 1, selected: null, selectedIds: [] }) as MaskState;
 
 export type MaskAction =
   | { type: "add"; shape: MaskGeometry }
@@ -34,7 +34,17 @@ export type MaskAction =
   | { type: "setEnabled"; enabled: boolean }
   | { type: "setDrawMode"; mode: MaskMode }
   | { type: "clear" }
-  | { type: "load"; shapes: unknown[] };
+  | { type: "load"; shapes: unknown[] }
+  /** An ROI editing action (select / move / setVertex / remove …) applied to the mask regions. */
+  | { type: "edit"; action: RoiAction };
+
+/** Outline colours on the editing canvas (match the --mask-include / --mask-exclude tokens). */
+const MASK_COLOR: Record<MaskMode, string> = { include: "#5cff8a", exclude: "#ff5f56" };
+
+/** The regions as ROIs for the image's editing layer: same handles, move and delete as ROIs. */
+export function masksAsRois(shapes: readonly MaskShape[]): Roi[] {
+  return shapes.map(({ mode, ...geo }) => ({ ...geo, name: `${mode} ${geo.id}`, color: MASK_COLOR[mode] }) as Roi);
+}
 
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
@@ -57,8 +67,17 @@ export function maskReducer(s: MaskState, a: MaskAction): MaskState {
   switch (a.type) {
     case "add":
       return { ...s, shapes: [...s.shapes, { ...a.shape, id: s.nextId, mode: s.drawMode } as MaskShape], nextId: s.nextId + 1 };
-    case "remove":
-      return { ...s, shapes: s.shapes.filter((m) => m.id !== a.id) };
+    case "remove": {
+      const drop = (id: number | null) => (id === a.id ? null : id);
+      return { ...s, shapes: s.shapes.filter((m) => m.id !== a.id), selected: drop(s.selected), selectedIds: s.selectedIds.filter((i) => i !== a.id) };
+    }
+    case "edit": {
+      if (a.action.type === "add") return s;  // new regions come through "add" with the draw mode
+      const out = roiReducer({ rois: masksAsRois(s.shapes), selected: s.selected, selectedIds: s.selectedIds, nextId: s.nextId }, a.action);
+      const modeOf = new Map(s.shapes.map((m) => [m.id, m.mode]));
+      const shapes = out.rois.map((r) => asMask({ ...r, mode: modeOf.get(r.id) })).filter((m): m is MaskShape => m !== null);
+      return { ...s, shapes, selected: out.selected, selectedIds: out.selectedIds };
+    }
     case "toggleMode":
       return { ...s, shapes: s.shapes.map((m) => (m.id === a.id ? { ...m, mode: m.mode === "include" ? "exclude" : "include" } : m)) };
     case "setEnabled":
@@ -66,10 +85,10 @@ export function maskReducer(s: MaskState, a: MaskAction): MaskState {
     case "setDrawMode":
       return { ...s, drawMode: a.mode };
     case "clear":
-      return { ...s, shapes: [] };
+      return { ...s, shapes: [], selected: null, selectedIds: [] };
     case "load": {
       const shapes = a.shapes.map(asMask).filter((m): m is MaskShape => m !== null);
-      return { ...s, shapes, nextId: shapes.reduce((n, m) => Math.max(n, m.id), 0) + 1 };
+      return { ...s, shapes, nextId: shapes.reduce((n, m) => Math.max(n, m.id), 0) + 1, selected: null, selectedIds: [] };
     }
   }
 }
