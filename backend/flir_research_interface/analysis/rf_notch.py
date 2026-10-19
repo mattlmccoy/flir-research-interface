@@ -7,8 +7,11 @@ around (fy, fx) = (+0.19, +0.34) cycles/px (~60 % of the excess power) and (+0.2
 Each patch is *detected* on its core band: its mean power against the median power of the rest of
 the fine-detail spectrum (above 0.2 cycles/px, away from the banding and from the camera's own
 row/column pattern on the axes). Truly RF-off frames score <= 2.9, riser runs with RF on <= 2.5,
-pre-riser runs 5..811. A detected patch is removed whole over a slightly wider band, then the frame
-is rebuilt. Nothing detected -> the frame comes back unchanged.
+pre-riser runs 5..811. A detected patch is only removed when the banding it carries is at least the
+camera noise (both estimated from the same frame), because removing a patch also removes the scene's
+fine texture in it: below the noise that costs more than it saves (20261019_182233_Run at 150 W:
+~9 mK banding vs ~28 mK noise). A removed patch goes whole over a slightly wider band, then the
+frame is rebuilt. Nothing removed -> the frame comes back unchanged.
 
 Recorded counts are never modified: callers get a new array for display. Numbers (ROI readouts,
 CSVs, frame stats) must keep using the raw counts.
@@ -72,12 +75,26 @@ def rf_notch(
     for m in cores.values():
         floor_px &= ~m
     floor = float(np.median(power[floor_px]))
-    found = [n for n, m in cores.items() if floor > 0 and power[m].mean() > DETECT_RATIO * floor]
+    detected = [n for n, m in cores.items() if floor > 0 and power[m].mean() > DETECT_RATIO * floor]
+    # sizes in kelvin (Parseval): white noise from the floor, banding as the patch's excess power
+    n_px = counts.size
+    noise_k = float(np.sqrt(floor / n_px)) if floor > 0 else 0.0
+    wide = {n: _patch(fy, fx, RF_BANDS[n], REMOVE_MARGIN) for n in detected}
+    size_k = {
+        n: float(np.sqrt(max(0.0, float((power[m] - floor).sum())))) / n_px for n, m in wide.items()
+    }
+    found = [n for n in detected if size_k[n] >= noise_k]
+    below = [n for n in detected if n not in found]
+    sizes = {
+        "banding_mk": round(max(size_k.values(), default=0.0) * 1e3, 2),
+        "noise_mk": round(noise_k * 1e3, 2),
+        "below_noise": below,
+    }
     if not found:
-        return counts, {"applied": True, "bands": [], "rms_mk": 0.0, "max_mk": 0.0}
+        return counts, {"applied": True, "bands": [], "rms_mk": 0.0, "max_mk": 0.0, **sizes}
     kill = np.zeros(counts.shape, dtype=bool)
     for name in found:
-        kill |= _patch(fy, fx, RF_BANDS[name], REMOVE_MARGIN)
+        kill |= wide[name]
     removed = np.real(np.fft.ifft2(np.fft.ifftshift(np.where(kill, spec, 0))))
     if over is not None:
         removed[over] = 0.0
@@ -89,6 +106,7 @@ def rf_notch(
         "bands": found,
         "rms_mk": round(float(removed.std()) * 1e3, 2),
         "max_mk": round(float(np.abs(removed).max()) * 1e3, 2),
+        **sizes,
     }
 
 

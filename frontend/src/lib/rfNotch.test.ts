@@ -10,3 +10,8 @@ test("the status line says what the RF-banding filter actually did, never just '
   assert.equal(rfNotchStatus(true, { applied: true, bands: ["diag+", "diag-"], rms_mk: 773.9, max_mk: 2679.3 }), "removed RF banding · 774 mK rms (2 bands)");
   assert.equal(rfNotchStatus(true, { applied: true, bands: ["diag+"], rms_mk: 16.4, max_mk: 40 }), "removed RF banding · 16 mK rms (1 band)");
 });
+
+test("weak banding below the camera noise says it was left alone, with both sizes", () => {
+  assert.equal(rfNotchStatus(true, { applied: true, bands: [], rms_mk: 0, max_mk: 0, below_noise: ["diag+"], banding_mk: 8.7, noise_mk: 27.8 }),
+    "RF banding below camera noise: not filtered (9 vs 28 mK)");
+});

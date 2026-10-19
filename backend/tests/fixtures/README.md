@@ -15,3 +15,10 @@ the recording was stopped, yet its manifest said `complete: true`) and the last 
 events 60–82 (`t_utc`, `frame_id`, `forward_w`, `reverse_w`) of the real run `20260923_175956_Run`.
 The camera reconnected twice mid-run: ids 9177 → 1 at t = 67.8 s and 71 → 1 at t = 83.0 s, so ids
 1–71 occur twice. Copied from `thermal.zarr` and `events.json` unchanged (t_s rounded to 1 µs).
+
+`rf_banding_frames.npz` — real A70 frames (uint16 counts, TemperatureLinear10mK) for the RF-banding
+filter: `pre_riser_rf_off` / `pre_riser_rf_off_next` (frames 42 and 43 of `20261019_120320_Run`,
+RF generator at 0 W), `pre_riser_rf_on` (frame 212 of the same run, heavy diagonal banding),
+`riser_rf_on` (frame 1986 of `20261019_131145_Run`, camera on the riser) and `strap_weak_banding`
+(frame 1065 of `20261019_182233_Run` at 150 W after the coax strap: banding ~9 mK, under the
+~28 mK camera noise). Copied from `thermal.zarr` unchanged (`ir_format` stored alongside).

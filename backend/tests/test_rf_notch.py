@@ -97,3 +97,17 @@ def test_frames_that_are_not_temperature_linear_pass_through() -> None:
     out, info = rf_notch(raw, None)
     assert np.array_equal(out, raw)
     assert info["applied"] is False and "temperature" in info["reason"]
+
+
+def test_banding_weaker_than_the_camera_noise_is_left_alone() -> None:
+    raw = FX["strap_weak_banding"]  # detectable (~9 mK) but under the ~28 mK noise
+    out, info = rf_notch(raw, K)
+    assert np.array_equal(out, raw)
+    assert info["bands"] == [] and info["below_noise"] == ["diag+"]
+    assert info["banding_mk"] < info["noise_mk"]
+
+
+def test_visible_banding_reports_its_size_against_the_noise() -> None:
+    _, info = rf_notch(FX["pre_riser_rf_on"], K)
+    assert info["bands"] == ["diag+", "diag-"] and info["below_noise"] == []
+    assert info["banding_mk"] > info["noise_mk"]
