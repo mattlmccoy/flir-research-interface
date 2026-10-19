@@ -123,7 +123,7 @@ export function PlaybackPage(p: Props) {
   const maskSyncRef = useRef<string | null>(null);
   useEffect(() => {
     if (seededRef.current !== p.name || maskSyncRef.current === null) return;
-    const want = JSON.stringify(p.masks.enabled ? p.masks.shapes : []);
+    const want = JSON.stringify(p.masks.shapes);  // the on/off switch is display-only: never erase the run's shapes
     if (want === maskSyncRef.current) return;
     const t = setTimeout(() => {
       api.putMasks(p.name, JSON.parse(want) as unknown[])
