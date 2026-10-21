@@ -342,3 +342,51 @@ def test_hot_neighbour_does_not_move_gaussian_edge(spot_c: float) -> None:
         assert r.dims is not None
         assert abs(r.dims["area_px"] - first.dims["area_px"]) <= 0.03 * first.dims["area_px"]
         assert abs(r.dims["centroid_x"] - first.dims["centroid_x"]) < 1
+
+
+# --- label wire format ---------------------------------------------------------------------------
+
+KNOWN_CROP = np.array([[0, 1, 1, 0], [1, 1, 1, 2], [2, 2, 2, 2]], dtype=np.uint8)
+KNOWN_VECTOR = "AAEAAAABAgAAAAABAAAAAQMAAAACBQAAAA=="  # runs (0,1)(1,2)(0,1)(1,3)(2,5)
+
+
+def _ref_decode(b64: str, w: int, h: int) -> np.ndarray:
+    import base64
+    import struct
+
+    raw = base64.b64decode(b64)
+    flat: list[int] = []
+    for i in range(0, len(raw), 5):
+        value, run = struct.unpack_from("<BI", raw, i)
+        flat += [value] * run
+    return np.array(flat, dtype=np.uint8).reshape(h, w)
+
+
+def test_encode_round_trip() -> None:
+    from flir_research_interface.analysis.smart_wire import encode_labels
+
+    rng = np.random.default_rng(7)
+    crop = rng.integers(0, 5, size=(5, 7)).astype(np.uint8)
+    crop[2, :] = 1  # a long run too
+    assert np.array_equal(_ref_decode(encode_labels(crop), 7, 5), crop)
+
+
+def test_encode_known_vector() -> None:
+    from flir_research_interface.analysis.smart_wire import encode_labels
+
+    assert encode_labels(KNOWN_CROP) == KNOWN_VECTOR
+
+
+def test_smart_overlay_shape() -> None:
+    from flir_research_interface.analysis.smart_wire import smart_overlay
+
+    res = SmartResult(state="locked", valid=True, bbox=(2, 3, 6, 6), labels=KNOWN_CROP)
+    assert smart_overlay(res, 4) == {
+        "id": 4,
+        "state": "locked",
+        "valid": True,
+        "bbox": [2, 3, 6, 6],
+        "labels": KNOWN_VECTOR,
+    }
+    off = smart_overlay(SmartResult(state="searching", valid=False), 4)
+    assert off["bbox"] is None and off["labels"] is None and off["valid"] is False
