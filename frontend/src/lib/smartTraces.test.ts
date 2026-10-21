@@ -94,3 +94,8 @@ test("minor3: the empty-plot text tells error, nothing selected, loading and not
   assert.match(plotEmptyText({ ...base, rois: [smartRoi], smart: [{ kind: "missing" }] }), /not computed/);
   assert.match(plotEmptyText({ ...base, smartShown: false, rois: [smartRoi], smart: [{ kind: "ready", series: series() }] }), /nothing selected/);
 });
+
+test("hidden rings are left out of the ring traces (display only)", () => {
+  const rings = smartTraces(series(), { ...ALL, hiddenRings: [10] }, ROI).filter((t) => t.dash);
+  assert.deepEqual(rings.map((t) => t.label), ["graphite ring 0–5 px mean", "graphite ring 10–25 px mean"]);
+});

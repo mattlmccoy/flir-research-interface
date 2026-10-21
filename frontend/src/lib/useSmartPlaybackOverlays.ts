@@ -1,44 +1,50 @@
-// Fetches and caches a recorded run's stored smart ROI outlines, a block of frames at a time, so
-// stepping or playing never waits per frame (GET /api/experiments/{name}/smart-roi/{id}/overlay).
-import { useEffect, useMemo, useRef, useState } from "react";
+// Fetches and caches a recorded run's stored smart ROI outlines, a block of frames at a time
+// (GET /api/experiments/{name}/smart-roi/{id}/overlay); the pure store is smartPlayback.ts
+// overlayStore. PlaybackPage awaits `ensure` before it shows a frame, so a frame and its outline
+// appear together, and calls `retain` as the playhead moves, so stale fetches are aborted.
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api.ts";
 import type { SmartOverlay } from "./smartLabels.ts";
-import { OVERLAY_BLOCK, overlayBlock, overlayOnError, pickOverlays, type OverlayCache } from "./smartPlayback.ts";
+import { OVERLAY_BLOCK, overlayStore } from "./smartPlayback.ts";
 
-const RETRY_MS = 3000;
+export interface PlaybackOverlays {
+  /** The stored outlines of the frame on screen (`shown`), never of the playhead. */
+  overlays: SmartOverlay[];
+  /** Resolves when frame `index`'s overlay block is cached or known missing (rejects if aborted). */
+  ensure: (index: number) => Promise<void>;
+  /** Abort overlay fetches that hold none of these frame indices. */
+  retain: (indexes: number[]) => void;
+}
 
-/** Overlays for frame `index` of run `name` for the given smart ROI ids. `version` drops the cache
- *  (bump it after the stored series is recomputed). */
-export function useSmartPlaybackOverlays(name: string, ids: number[], index: number, version = 0): SmartOverlay[] {
-  const cache = useRef<OverlayCache>(new Map());
-  const inflight = useRef(new Set<string>());
+/** `shown` = index of the frame on screen (null: none). `version` drops the cache (bump it after
+ *  the stored series is recomputed). */
+export function useSmartPlaybackOverlays(name: string, ids: number[], shown: number | null, version = 0): PlaybackOverlays {
   const mounted = useRef(true);
   const [tick, setTick] = useState(0);
   const [retry, setRetry] = useState(0);  // bumped after a transient failure so the fetch runs again
-  const key = `${name}|${version}`;
-  const keyRef = useRef(key);
-  if (keyRef.current !== key) { keyRef.current = key; cache.current = new Map(); inflight.current = new Set(); }
-  const idsKey = ids.join(",");
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const key = `${name}|${version}`;
+  const store = useMemo(() => overlayStore(
+    (id, start, signal) => api.smartOverlay(name, id, start, OVERLAY_BLOCK, signal),
+    OVERLAY_BLOCK,
+    {
+      onChange: () => { if (mounted.current) setTick((t) => t + 1); },
+      onRetry: () => { if (mounted.current) setRetry((r) => r + 1); },  // after the store's back-off
+    },
+  ), [key]);  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => store.abortAll(), [store]);
+  const idsRef = useRef(ids);
+  idsRef.current = ids;
+  const idsKey = ids.join(",");
+  // the shown frame's outline when it was not loaded through `ensure` (a smart ROI just added,
+  // the cache dropped after a recompute, or a retry after a transient failure)
   useEffect(() => {
-    if (!ids.length) return;
-    const start = overlayBlock(index, OVERLAY_BLOCK);
-    const want = [start];
-    if (index - start >= OVERLAY_BLOCK - 20) want.push(start + OVERLAY_BLOCK);  // prefetch while playing
-    const c = cache.current, busy = inflight.current;
-    for (const id of ids) for (const b of want) {
-      const k = `${id}:${b}`;
-      if (c.has(k) || busy.has(k)) continue;
-      busy.add(k);
-      api.smartOverlay(name, id, b, OVERLAY_BLOCK)
-        .then((list) => { c.set(k, list); })
-        .catch((e: unknown) => {
-          if (overlayOnError(e) === "missing") c.set(k, "missing");  // not computed yet: no outline
-          else window.setTimeout(() => { if (mounted.current) setRetry((r) => r + 1); }, RETRY_MS);
-        })
-        .finally(() => { busy.delete(k); if (mounted.current) setTick((t) => t + 1); });
-    }
-  }, [name, idsKey, index, version, retry]);  // eslint-disable-line react-hooks/exhaustive-deps
-  // a stable array per (frame, loaded data) so the outline decode in ThermalView runs only on change
-  return useMemo(() => pickOverlays(cache.current, ids, index, OVERLAY_BLOCK), [key, idsKey, index, tick]);  // eslint-disable-line react-hooks/exhaustive-deps
+    if (shown === null || !ids.length) return;
+    store.ensure(ids, shown).catch(() => undefined);
+  }, [store, idsKey, shown, retry]);  // eslint-disable-line react-hooks/exhaustive-deps
+  const ensure = useCallback((index: number) => (idsRef.current.length ? store.ensure(idsRef.current, index) : Promise.resolve()), [store]);
+  const retain = useCallback((indexes: number[]) => store.retain(indexes), [store]);
+  // a stable array per (shown frame, loaded data) so the outline decode in ThermalView runs only on change
+  const overlays = useMemo(() => (shown === null ? [] : store.pick(ids, shown)), [store, idsKey, shown, tick]);  // eslint-disable-line react-hooks/exhaustive-deps
+  return { overlays, ensure, retain };
 }

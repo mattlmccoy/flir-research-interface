@@ -6,6 +6,7 @@ import { isZoom, type Zoom } from "./zoom.ts";
 import { NEUTRAL_ADJUST, clampAdjust, type VisibleAdjust } from "./visibleAdjust.ts";
 import { PALETTE_NAMES, type PaletteName } from "./palette.ts";
 import type { Range, ScaleMode } from "./scale.ts";
+import { parseSmartView, toggleSmartExpanded, toggleSmartRing, type SmartViewPrefs } from "./smartView.ts";
 export const TOOLS = ["select", "spot", "rect", "circle", "ellipse", "line", "polyline", "polygon", "freehand", "smart"] as const;
 const isDelta = (v: unknown): v is { a: number; b: number } => !!v && typeof v === "object" && Number.isInteger((v as { a: unknown }).a) && Number.isInteger((v as { b: unknown }).b);
 export interface Agc { mode: "linear" | "plateau"; plateau: number; }
@@ -82,6 +83,8 @@ export interface LayoutState {
   /** Thermal palette and colour range (auto, or the manual min/max in °C); shared by live and playback. */
   display: DisplayState;
   sections: Record<Section, boolean>;
+  /** Per smart ROI (scope + id): rail row expanded, ring bands hidden (display only, lib/smartView.ts). */
+  smartView: SmartViewPrefs;
 }
 export interface DisplayState { palette: PaletteName; scaleMode: ScaleMode; manual: Range; }
 const DEFAULT_DISPLAY: DisplayState = Object.freeze({ palette: "iron", scaleMode: "auto", manual: Object.freeze({ min: 20, max: 40 }) }) as DisplayState;
@@ -161,6 +164,7 @@ export const DEFAULT_LAYOUT: LayoutState = {
   visibleAdjust: Object.freeze({ ...NEUTRAL_ADJUST }) as VisibleAdjust,
   display: DEFAULT_DISPLAY,
   sections: { measurements: true, profile: false, camera: true, experiment: true, recording: true, display: true, export: true, visible: true },
+  smartView: {},
 };
 Object.freeze(DEFAULT_LAYOUT.sections);
 Object.freeze(DEFAULT_LAYOUT);
@@ -191,6 +195,8 @@ export type LayoutAction =
   | { type: "setOverlay"; patch: Partial<Overlay> }
   | { type: "setVisibleAdjust"; adjust: VisibleAdjust }
   | { type: "setDisplay"; patch: Partial<DisplayState> }
+  | { type: "toggleSmartExpanded"; scope: string; id: number }
+  | { type: "toggleSmartRing"; scope: string; id: number; px: number }
   | { type: "collapseAll" }
   | { type: "restoreAll" };
 
@@ -225,6 +231,8 @@ export function layoutReducer(s: LayoutState, a: LayoutAction): LayoutState {
     case "setOverlay": return { ...s, overlay: clampOverlay({ ...s.overlay, ...a.patch }) };
     case "setVisibleAdjust": return { ...s, visibleAdjust: clampAdjust(a.adjust) };
     case "setDisplay": return { ...s, display: parseDisplay({ ...s.display, ...a.patch }, s.display) };
+    case "toggleSmartExpanded": return { ...s, smartView: toggleSmartExpanded(s.smartView, a.scope, a.id) };
+    case "toggleSmartRing": return { ...s, smartView: toggleSmartRing(s.smartView, a.scope, a.id, a.px) };
     case "collapseAll": return { ...s, strip: true, rail: false, dock: false };
     case "restoreAll": return { ...s, strip: true, rail: true, dock: true };
   }
@@ -291,6 +299,7 @@ export function loadLayout(storage: Storage | null): LayoutState {
       sections: Object.fromEntries(
         SECTIONS.map((k) => [k, bool(sec[k], DEFAULT_LAYOUT.sections[k])]),
       ) as Record<Section, boolean>,
+      smartView: parseSmartView(parsed.smartView),
     };
   } catch {
     return DEFAULT_LAYOUT;

@@ -6,7 +6,8 @@ import type { AxisTrace } from "./controlOverlay.ts";
 import { rowValid, type SmartSeries, type SmartSeriesState } from "./smartSeries.ts";
 
 export type SmartDimChoice = "off" | "area" | "length" | "width";
-export interface SmartTraceChoice { sample: boolean; rings: boolean; dims: SmartDimChoice; }
+/** `hiddenRings`: ring outer offsets (px) switched off in the rail (display only, lib/smartView.ts). */
+export interface SmartTraceChoice { sample: boolean; rings: boolean; dims: SmartDimChoice; hiddenRings?: readonly number[]; }
 /** A plot trace plus the axis it belongs on. */
 export type SmartTrace = AxisTrace & { axis: "temp" | "size" };
 
@@ -25,10 +26,13 @@ export function smartTraces(series: SmartSeries, choose: SmartTraceChoice, roi: 
   const out: SmartTrace[] = [];
   if (choose.sample) out.push({ id: roi.id, label: `${roi.label} mean${suffix}`, color: roi.color, axis: "temp", t: series.t_s, v: gap(series.sample.mean) });
   if (choose.rings) {
-    series.rings.forEach((g, q) => out.push({
-      id: ringId(roi.id, q), label: `${roi.label} ring ${g.inner_px}–${g.outer_px} px mean${suffix}`, color: roi.color,
-      dash: [...RING_DASH], axis: "temp", t: series.t_s, v: gap(g.mean),
-    }));
+    series.rings.forEach((g, q) => {
+      if (choose.hiddenRings?.includes(g.outer_px)) return;  // switched off in the rail; q keeps the id stable
+      out.push({
+        id: ringId(roi.id, q), label: `${roi.label} ring ${g.inner_px}–${g.outer_px} px mean${suffix}`, color: roi.color,
+        dash: [...RING_DASH], axis: "temp", t: series.t_s, v: gap(g.mean),
+      });
+    });
   }
   if (choose.dims !== "off") {
     out.push({

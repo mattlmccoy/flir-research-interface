@@ -323,3 +323,20 @@ test("setDisplay with an invalid range keeps the current range, not the default"
   const badPalette = layoutReducer(s, { type: "setDisplay", patch: { palette: "plaid" as never } });
   assert.equal(badPalette.display.palette, "inferno");
 });
+
+test("smart ROI rows: expanded and hidden rings persist per ROI id across a reload", () => {
+  const st = memStorage();
+  let s = layoutReducer(DEFAULT_LAYOUT, { type: "toggleSmartExpanded", scope: "exp.run", id: 3 });
+  s = layoutReducer(s, { type: "toggleSmartRing", scope: "exp.run", id: 3, px: 10 });
+  assert.deepEqual(DEFAULT_LAYOUT.smartView, {}, "the default is untouched");
+  saveLayout(st, s);
+  assert.deepEqual(loadLayout(st).smartView, { "exp.run:3": { expanded: true, hiddenRings: [10] } });
+});
+
+test("smart ROI rows: a malformed stored smartView falls back to defaults, not the whole layout", () => {
+  const st = memStorage();
+  st.setItem("fri.layout.v1", JSON.stringify({ units: "K", smartView: "garbage" }));
+  const s = loadLayout(st);
+  assert.deepEqual(s.smartView, {});
+  assert.equal(s.units, "K");
+});

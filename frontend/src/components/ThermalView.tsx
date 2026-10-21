@@ -22,6 +22,7 @@ import type { Tool } from "../lib/layout.ts";
 import { RoiOverlay, type Draft, type SmartDraw } from "./RoiOverlay.tsx";
 import type { SmartOverlay } from "../lib/smartLabels.ts";
 import { smartOutlines } from "../lib/smartOutline.ts";
+import { smartPrefs, visibleOutlineRings, type SmartViewPrefs } from "../lib/smartView.ts";
 import type { SmartReadoutEntry } from "../lib/smartReadout.ts";
 import { displaySize, type Zoom } from "../lib/zoom.ts";
 import { toCssMatrix3d, type H3 } from "../lib/homography.ts";
@@ -102,6 +103,8 @@ interface Props {
   smartStale?: ReadonlySet<number>;
   /** The operator's smart ROI readouts (live feed) for the on-image chips. */
   smartFeed?: Map<number, SmartReadoutEntry>;
+  /** Ring bands switched off per smart ROI (layout.smartView): not drawn. Display only. */
+  smartView?: SmartViewPrefs;
 }
 
 const NO_MASKS: readonly MaskShape[] = [];
@@ -129,7 +132,7 @@ export function dragShape(tool: Tool, a: Pt, b: Pt, w: number, h: number): RoiIn
 /** Renders raw counts -> °C -> palette on a canvas, with an ROI overlay layer. Data arrays are never mutated. */
 const divergingLut = buildLut("diverging");
 
-export function ThermalView({ frame, palette, scaleMode, manual, onScale, setManual, setScaleMode, rois = NO_ROIS, selected = null, selectedIds = NO_IDS, tool = "select", roisHidden = false, labelScope, zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null, hold = "off", flipH = false, flipV = false, agc = LINEAR_AGC, valid = null, filter = "off", units = "C", mask = null, maskShapes = NO_MASKS, maskMode = false, onMask, statsRois, useDisplay = false, smartOverlays, smartStale, smartFeed }: Props) {
+export function ThermalView({ frame, palette, scaleMode, manual, onScale, setManual, setScaleMode, rois = NO_ROIS, selected = null, selectedIds = NO_IDS, tool = "select", roisHidden = false, labelScope, zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null, hold = "off", flipH = false, flipV = false, agc = LINEAR_AGC, valid = null, filter = "off", units = "C", mask = null, maskShapes = NO_MASKS, maskMode = false, onMask, statsRois, useDisplay = false, smartOverlays, smartStale, smartFeed, smartView }: Props) {
   const viewRef = useRef<HTMLDivElement>(null);
   const holdRef = useRef<HoldBuffer | null>(null);
   const freehand = useRef<[number, number][] | null>(null);
@@ -151,11 +154,24 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
   const [stats, setStats] = useState<StatsMap>(new Map());
   const hdr = frame?.header;
   const smartSrc = smartOverlays === undefined ? hdr?.smart : smartOverlays;
-  const smartDraw = useMemo(() => {
+  const smartDecoded = useMemo(() => {
     const m = new Map<number, SmartDraw>();
     for (const o of smartSrc ?? []) m.set(o.id, { state: o.state, valid: o.valid, stale: smartStale?.has(o.id) ?? false, outline: smartOutlines(o) });
     return m;
   }, [smartSrc, smartStale]);
+  // hidden ring bands are left out after the decode, so a toggle never re-decodes the labels
+  const smartDraw = useMemo(() => {
+    if (!smartView || !Object.keys(smartView).length) return smartDecoded;
+    const m = new Map<number, SmartDraw>();
+    for (const [id, d] of smartDecoded) {
+      const r = rois.find((x) => x.id === id);
+      const hidden = smartPrefs(smartView, labelScope ?? "live", id).hiddenRings;
+      m.set(id, d.outline && r?.kind === "smart" && hidden.length
+        ? { ...d, outline: { ...d.outline, rings: visibleOutlineRings(d.outline.rings, r.rings_px, hidden) } }
+        : d);
+    }
+    return m;
+  }, [smartDecoded, smartView, rois, labelScope]);
 
   useEffect(() => { lutRef.current = buildLut(palette); }, [palette]);
   useEffect(() => { setVertices([]); setDraft(null); dragStart.current = null; }, [tool]);

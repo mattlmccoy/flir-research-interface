@@ -1,7 +1,7 @@
 // A recorded run's stored smart ROI series (GET /api/experiments/{name}/smart-roi/{id}, backend
 // analysis/smart_series.py series_payload + `stale`) and the playback readout / compute-job view
 // built from it. Pure: fetching and polling live in components/useSmartSeries.ts.
-import { smartReadoutLines, type SmartReadoutEntry, type SmartState } from "./smartReadout.ts";
+import { smartSummary, type SmartReadoutEntry, type SmartState } from "./smartReadout.ts";
 import type { SmartRowView } from "./smartFeed.ts";
 import { roiLabel, smartTracking, type Smart } from "./roi.ts";
 
@@ -69,6 +69,30 @@ export function parseSmartSeries(raw: unknown): SmartSeries | null {
   };
 }
 
+/** Points fetched per stored series: the API's cap (smart_roi_routes.py `le=200_000`), so the
+ *  playhead readout is per-frame exact for any real run. With a strided series the readout
+ *  alternated exact / "≈ nearest" frame to frame: the side panel flickered at the frame rate. */
+export const SMART_READOUT_POINTS = 200_000;
+/** The plot's copy is strided down client-side to this many points. */
+export const SMART_PLOT_POINTS = 4000;
+
+/** Every `stride`-th row so at most `maxPoints` remain (the same stride rule as the backend's
+ *  series_payload); the series itself when it is already short enough. */
+export function downsampleSmartSeries(s: SmartSeries, maxPoints: number): SmartSeries {
+  const n = s.index.length;
+  const stride = Math.max(1, Math.ceil(n / Math.max(1, maxPoints)));
+  if (stride === 1) return s;
+  const pick = <T,>(a: T[]): T[] => a.filter((_, i) => i % stride === 0);
+  const dims = {} as SmartSeries["dims"];
+  for (const k of DIM_KEYS) dims[k] = pick(s.dims[k]);
+  return {
+    ...s, index: pick(s.index), t_s: pick(s.t_s), state: pick(s.state), valid: pick(s.valid),
+    sample: { mean: pick(s.sample.mean), max: pick(s.sample.max), min: pick(s.sample.min) },
+    rings: s.rings.map((g) => ({ ...g, mean: pick(g.mean), max: pick(g.max), min: pick(g.min) })),
+    dims,
+  };
+}
+
 /** True when a (re)load shows a different stored compute than the one last seen for this ROI
  *  (`seen` undefined = nothing seen yet, null = it was missing): cached outlines must be dropped. */
 export function seriesRecomputed(seen: string | null | undefined, utc: string | null): boolean {
@@ -112,7 +136,7 @@ export function smartRowAt(s: SmartSeries, frame: number): { frame: number; exac
   return { frame: s.index[k], exact: s.index[k] === frame, entry };
 }
 
-const none = (line: string): SmartRowView => ({ lines: [line], tone: "none", mean: null, marker: null });
+const none = (line: string): SmartRowView => ({ summary: line, entry: null, notes: [], tone: "none", mean: null, marker: null });
 
 /** Context for the playhead readout: `edited` = the on-screen ROI's tracking settings differ from
  *  the stored ones the series was computed from; `overlay` = the stored per-frame state at exactly
@@ -132,15 +156,21 @@ export function smartPlaybackRow(st: SmartSeriesState, frame: number, ctx: Smart
   const e = ov && (!ov.valid || ov.state === "searching") && r.entry.valid
     ? { ...r.entry, state: ov.state, valid: false, dims: null }  // this exact frame is not a reading
     : r.entry;
-  const lines = smartReadoutLines(e);
-  if (!r.exact && e.valid) lines.push(`≈ values at frame ${r.frame + 1} (nearest stored point before frame ${frame + 1}; the plot series is downsampled)`);
-  if (st.series.stale) lines.push("stale: the ROI or recording changed since this series was computed; recompute it");
-  else if (ctx.edited) lines.push("stale: the ROI was edited on screen since this series was computed; recompute it");
-  if (!e.valid) return { lines, tone: e.state === "searching" ? "searching" : "invalid", mean: null, marker: e.state === "searching" ? "searching" : "not valid" };
+  const notes: string[] = [];
+  let summary = smartSummary(e);
+  if (!r.exact && e.valid) {
+    notes.push(`≈ values at frame ${r.frame + 1} (nearest stored point before frame ${frame + 1}; the plot series is downsampled)`);
+    summary += ` · ≈ frame ${r.frame + 1}`;
+  }
+  if (st.series.stale) notes.push("stale: the ROI or recording changed since this series was computed; recompute it");
+  else if (ctx.edited) notes.push("stale: the ROI was edited on screen since this series was computed; recompute it");
   const stale = st.series.stale || !!ctx.edited;
+  if (stale) summary += " · stale";
+  const row = { summary, entry: e, notes };
+  if (!e.valid) return { ...row, tone: e.state === "searching" ? "searching" : "invalid", mean: null, marker: e.state === "searching" ? "searching" : "not valid" };
   const marks = [stale ? "stale" : null, r.exact ? null : "≈", e.state === "holding" ? "holding" : null].filter((m): m is string => m !== null);
   const tone = stale || !r.exact ? "invalid" : e.state === "holding" ? "holding" : "locked";
-  return { lines, tone, mean: e.sample.mean_c, marker: marks.length ? marks.join(" ") : null };
+  return { ...row, tone, mean: e.sample.mean_c, marker: marks.length ? marks.join(" ") : null };
 }
 
 export interface SmartComputeAction { label: string; kind: "compute" | "reload"; disabled: boolean; }

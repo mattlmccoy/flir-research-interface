@@ -7,11 +7,13 @@ import { radiometryFromCamera } from "../lib/emissivity.ts";
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import type { Dispatch, ReactNode } from "react";
 import { api, type ControlSeries, type ExperimentInfo, type RecordingStatus, type RoiSeries, type Status, type Timeline } from "../lib/api.ts";
-import { type FrameMessage, decodeFrameBlock } from "../lib/protocol.ts";
 import type { PaletteName } from "../lib/palette.ts";
 import type { Range, ScaleMode } from "../lib/scale.ts";
 import type { LayoutAction, LayoutState } from "../lib/layout.ts";
 import { SPEEDS, clampIndex, nextFrameDelayMs, speedLabel } from "../lib/playback.ts";
+import { loadFailure } from "../lib/frameBlocks.ts";
+import { useFrameBlocks, type FrameOverlays } from "../lib/useFrameBlocks.ts";
+import { shownIndex } from "../lib/smartPlayback.ts";
 import type { RoiHistoryAction } from "../lib/roiHistory.ts";
 import { hasRois, loadRois, roiLabel, roisDifferFromStored, type Roi, type RoiState } from "../lib/roi.ts";
 import { hasMasks, maskPixels, maskedStats, masksAsRois, type MaskAction, type MaskState } from "../lib/mask.ts";
@@ -87,7 +89,6 @@ export function PlaybackPage(p: Props) {
   const [info, setInfo] = useState<ExperimentInfo | null>(null);
   const [tl, setTl] = useState<Timeline | null>(null);
   const [index, setIndex] = useState(0);
-  const [frame, setFrame] = useState<FrameMessage | null>(null);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [shown, setShown] = useState<Range>({ min: 0, max: 100 });
@@ -95,8 +96,6 @@ export function PlaybackPage(p: Props) {
   const [stats, setStats] = useState<StatsMap>(new Map());
   const [series, setSeries] = useState<RoiSeries | null>(null);
   const [seriesStatus, setSeriesStatus] = useState<"idle" | "loading" | "error">("idle");
-  const [frameStatus, setFrameStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [frameErr, setFrameErr] = useState<string | null>(null);
   const [control, setControl] = useState<ControlSeries | null>(null);
   const [rightMode, setRightMode] = useState<RightAxisMode>("rf");
   const [showMedia, setShowMedia] = useState(false);
@@ -104,15 +103,10 @@ export function PlaybackPage(p: Props) {
   // smart ROI plot choices: sample / ring-band means on the °C axis; one dimension on the right axis
   const [smartShow, setSmartShow] = useState({ sample: true, rings: false });
   const [sizeDim, setSizeDim] = useState<Exclude<SmartDimChoice, "off">>("area");
-  const cache = useRef(new Map<number, FrameMessage>());
-  const inflight = useRef(new Map<number, Promise<void>>());
-  const BLOCK = 60;
   const n = info?.n_frames ?? 0;
   const onStats = useCallback((m: StatsMap) => setStats(m), []);
 
   useEffect(() => {
-    cache.current.clear();
-    inflight.current.clear();
     Promise.all([api.experiment(p.name), api.timeline(p.name)])
       .then(([i, t]) => { setInfo(i); setTl(t); setIndex(0); }).catch((e) => setErr(String(e)));
   }, [p.name]);
@@ -169,58 +163,26 @@ export function PlaybackPage(p: Props) {
     return () => { alive = false; };
   }, [p.name, info]);
 
-  // With the RF-banding filter on, frames carry a display copy; a cached frame without one is refetched.
-  const rf = p.layout.rfNotch;
-  const ensureBlock = useCallback((start: number): Promise<void> => {
-    const key = start * 2 + (rf ? 1 : 0);
-    const running = inflight.current.get(key);
-    if (running) return running;
-    const promise = api.frameBlock(p.name, start, BLOCK, rf)
-      .then((buf) => {
-        for (const m of decodeFrameBlock(buf)) {
-          const idx = (m.header as { index?: number }).index;
-          if (typeof idx === "number") cache.current.set(idx, m);
-        }
-        // keep the cache bounded to a few blocks around the play head
-        if (cache.current.size > BLOCK * 4) {
-          const keys = [...cache.current.keys()].sort((a, b) => a - b);
-          for (const k of keys.slice(0, keys.length - BLOCK * 3)) cache.current.delete(k);
-        }
-      })
-      .finally(() => { inflight.current.delete(key); });
-    inflight.current.set(key, promise);
-    return promise;
-  }, [p.name, rf]);
-
-  const load = useCallback(async (i: number): Promise<FrameMessage> => {
-    const hit = cache.current.get(i);
-    if (hit && (!rf || hit.display)) return hit;
-    await ensureBlock(Math.floor(i / BLOCK) * BLOCK);
-    const m = cache.current.get(i);
-    if (!m) throw new Error(`frame ${i} not returned`);
-    return m;
-  }, [ensureBlock, rf]);
-
-  useEffect(() => {
-    if (!info || n === 0) return;
-    let alive = true;
-    const hit = cache.current.get(index);
-    if (!hit || (rf && !hit.display)) setFrameStatus("loading");  // only show the spinner when we actually have to fetch
-    load(index)
-      .then((m) => { if (alive) { setFrame(m); setFrameStatus("ready"); setFrameErr(null); } })
-      .catch((e) => { if (alive) { setFrameStatus("error"); setFrameErr(String(e)); } });
-    // prefetch the next block once we're into the current one, so playback never waits
-    const blockStart = Math.floor(index / BLOCK) * BLOCK;
-    if (index - blockStart >= BLOCK - 20 && blockStart + BLOCK < n) void ensureBlock(blockStart + BLOCK).catch(() => undefined);
-    return () => { alive = false; };
-  }, [index, info, n, load, ensureBlock]);
+  // Frames load a block at a time, each shown only together with its smart ROI outline; the
+  // outline and readout follow the frame on screen (`shownFrame`), never the playhead, so the
+  // outline of frame N can never sit over the image of frame M.
+  const overlaysRef = useRef<FrameOverlays>({ ensureOverlays: () => Promise.resolve(), retainOverlays: () => undefined });
+  const { frame, status: frameStatus, error: frameErr, load, retry: retryFrame } = useFrameBlocks({
+    name: p.name, n, index, rf: p.layout.rfNotch, active: !!info, overlays: overlaysRef,
+  });
+  const shownFrame = shownIndex(frame);
+  const smartPb = useSmartPlayback({
+    name: p.name, rois: p.rois.rois, info, setInfo, setErr, shown: shownFrame, index, show: smartShow, sizeDim, view: p.layout.smartView,
+  });
+  const { smartIds, smart, overlays: smartOverlays, stale: smartStale, rows: smartRows, plot: smartPlot } = smartPb;
+  overlaysRef.current = smartPb;
 
   useEffect(() => {
     if (!playing || !tl || n === 0) return;
     if (index >= n - 1) { setPlaying(false); return; }
     if (!Number.isFinite(speed)) {
       let cancelled = false;
-      load(index + 1).then(() => { if (!cancelled) setIndex((i) => clampIndex(i + 1, n)); }).catch(() => setPlaying(false));
+      load(index + 1).then(() => { if (!cancelled) setIndex((i) => clampIndex(i + 1, n)); }).catch((e: unknown) => { if (loadFailure(e, !cancelled) !== null) setPlaying(false); });
       return () => { cancelled = true; };
     }
     const t = window.setTimeout(() => setIndex((i) => clampIndex(i + 1, n)), nextFrameDelayMs(tl.t_s[index], tl.t_s[index + 1], speed));
@@ -247,9 +209,6 @@ export function PlaybackPage(p: Props) {
   }, [n]);
 
   const t = tl ? tl.t_s[index] : 0;
-  const { smartIds, smart, overlays: smartOverlays, stale: smartStale, rows: smartRows, plot: smartPlot } = useSmartPlayback({
-    name: p.name, rois: p.rois.rois, info, setInfo, setErr, index, show: smartShow, sizeDim,
-  });
   const hdr = frame?.header;
   const exp = (info?.experiment ?? {}) as Record<string, unknown>;
   const cam = (info?.camera ?? {}) as Record<string, unknown>;
@@ -379,14 +338,14 @@ export function PlaybackPage(p: Props) {
             <div className="load-overlay error" role="alert">
               <div>couldn’t load frame {index + 1}</div>
               <div className="hint">{frameErr}</div>
-              <button className="secondary" onClick={() => { cache.current.delete(index); inflight.current.delete(Math.floor(index / BLOCK) * BLOCK * 2 + (rf ? 1 : 0)); setFrameStatus("loading"); load(index).then((m) => { setFrame(m); setFrameStatus("ready"); setFrameErr(null); }).catch((e) => { setFrameStatus("error"); setFrameErr(String(e)); }); }}>retry</button>
+              <button className="secondary" onClick={retryFrame}>retry</button>
             </div>
           ) : frameStatus === "loading" && !frame ? (
             <div className="load-overlay"><span className="spinner" /> loading frame {index + 1}…</div>
           ) : null}
           <ThermalView frame={frame} palette={p.palette} scaleMode={p.scaleMode} manual={p.manual} onScale={setShown} setManual={p.setManual} setScaleMode={p.setScaleMode}
             rois={p.maskMode ? maskRois : p.rois.rois} statsRois={p.rois.rois} selected={p.maskMode ? p.masks.selected : p.rois.selected} selectedIds={p.maskMode ? p.masks.selectedIds : p.rois.selectedIds} tool={p.layout.tool} roisHidden={!p.maskMode && p.layout.roisHidden} labelScope={p.maskMode ? `exp.${p.name}.mask` : `exp.${p.name}`} zoom={p.layout.zoom} onRoi={p.maskMode ? maskEdit : p.roiDispatch} onStats={onStats} rad={rad} extremes={p.layout.extremes} isotherm={p.layout.isotherm} onField={setField} reference={reference} hold={p.layout.hold} flipH={p.layout.flipH} flipV={p.layout.flipV} agc={p.layout.agc} filter={p.layout.filter} units={p.layout.units} useDisplay={p.layout.rfNotch} valid={p.layout.segment.on ? { min: p.layout.segment.min, max: p.layout.segment.max } : null} mask={maskPx} maskShapes={p.masks.enabled || p.maskMode ? p.masks.shapes : []} maskMode={p.maskMode} onMask={p.maskDispatch}
-            overlay={p.layout.visibleMode === "overlay" && hasVideo ? <VisibleVideo plain name={p.name} t={t} playing={playing} speed={speed} vis={playVis} adjust={vAdjust.adjust} /> : undefined} overlayStyle={p.layout.overlay} overlayH={overlayH} smartOverlays={smartOverlays} smartStale={smartStale} />
+            overlay={p.layout.visibleMode === "overlay" && hasVideo ? <VisibleVideo plain name={p.name} t={t} playing={playing} speed={speed} vis={playVis} adjust={vAdjust.adjust} /> : undefined} overlayStyle={p.layout.overlay} overlayH={overlayH} smartOverlays={smartOverlays} smartStale={smartStale} smartView={p.layout.smartView} />
           {p.layout.visibleMode === "overlay" && hasVideo && vRangeNote && <span className="range-tag overlay-note" role="status">visible overlay: {vRangeNote}</span>}
           {p.layout.visibleMode === "side" && hasVideo && <VisibleVideo big flipH={p.layout.flipH} flipV={p.layout.flipV} name={p.name} t={t} playing={playing} speed={speed} vis={playVis} measuredFps={info?.visible?.measured_fps} adjust={vAdjust.adjust} rangeNote={vRangeNote} />}
         </div>
@@ -466,7 +425,7 @@ export function PlaybackPage(p: Props) {
                 <span className="hint">discards edits and restores the ROIs as they were recorded (exports/roi_series.csv matches them)</span>
               </div>
             )}
-            <RoiRows rois={p.rois.rois} smartPlayback={smartRows} units={p.layout.units} conv={field?.conv ?? null} stats={stats} selected={p.rois.selected} selectedIds={p.rois.selectedIds} extremes={p.layout.extremes} onExtremes={(on) => p.dispatch({ type: "setExtremes", on })}
+            <RoiRows rois={p.rois.rois} smartPlayback={smartRows} smartView={p.layout.smartView} onSmartView={p.dispatch} scope={`exp.${p.name}`} units={p.layout.units} conv={field?.conv ?? null} stats={stats} selected={p.rois.selected} selectedIds={p.rois.selectedIds} extremes={p.layout.extremes} onExtremes={(on) => p.dispatch({ type: "setExtremes", on })}
               dispatch={p.roiDispatch} />
             <MaskPanel state={p.masks} dispatch={p.maskDispatch} maskMode={p.maskMode} onMaskMode={p.onMaskMode} usedPx={maskUsed} frame={field ? { w: field.w, h: field.h } : null} />
             <DeltaPicker rois={p.rois.rois} delta={p.layout.delta} onChange={(delta) => p.dispatch({ type: "setDelta", delta })} />

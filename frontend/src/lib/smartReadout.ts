@@ -87,6 +87,42 @@ export function smartReadoutLines(e: SmartReadoutEntry): string[] {
   return lines;
 }
 
+/** The collapsed rail row: one line, state · sample mean · max · area. Not valid: the badge text
+ *  only (the same status as smartReadoutLines), never a number. */
+export function smartSummary(e: SmartReadoutEntry): string {
+  if (!e.valid) return smartReadoutLines(e)[0];
+  const d = e.dims;
+  return `${smartBadge(e.state)} · ${pad(t(e.sample.mean_c), 5)} °C · max ${pad(t(e.sample.max_c), 5)}${d ? ` · area ${pad(String(d.area_px), 6)} px` : ""}`;
+}
+
+/** Left-pads a number with figure spaces (digit-wide) so the collapsed row keeps one shape from
+ *  frame to frame (with tabular-nums in CSS nothing shifts). */
+const pad = (s: string, w: number): string => s.padStart(w, "\u2007");
+
+export interface SmartDetailRow { label: string; value: string; }
+
+/** The expanded rail row as label/value rows: sample, each shown ring band (`hiddenRings` = outer
+ *  offsets left out), then the thermal-edge size. Not valid: no rows (no numbers). */
+export function smartDetails(e: SmartReadoutEntry, hiddenRings: readonly number[] = []): SmartDetailRow[] {
+  if (!e.valid) return [];
+  const rows: SmartDetailRow[] = [{ label: "sample", value: temps(e.sample) }];
+  for (const g of e.rings) if (!hiddenRings.includes(g.outer_px)) rows.push({ label: `ring ${g.inner_px}–${g.outer_px} px`, value: temps(g) });
+  const d = e.dims;
+  if (!d) return rows;
+  // one short value per row: a long row would wrap differently as its digits change frame to frame
+  rows.push(
+    { label: "length (edge)", value: `${d.length_px.toFixed(1)} px` },
+    { label: "width (edge)", value: `${d.width_px.toFixed(1)} px` },
+    { label: "perimeter", value: `${d.perimeter_px} px` },
+    { label: "sharpness", value: d.sharpness_c_per_px === null ? "n/a" : `${d.sharpness_c_per_px.toFixed(2)} °C/px` },
+    { label: "Δ area", value: pct(d.area_change_pct) },
+    { label: "Δ length", value: pct(d.length_change_pct) },
+    { label: "Δ width", value: pct(d.width_change_pct) },
+    { label: "centroid", value: `${d.centroid_x.toFixed(1)}, ${d.centroid_y.toFixed(1)} px` },
+  );
+  return rows;
+}
+
 /** The smart entries of a GET /api/live/roi-temps payload, by ROI id. */
 export function smartFeedMap(payload: unknown): Map<number, SmartReadoutEntry> {
   const out = new Map<number, SmartReadoutEntry>();
