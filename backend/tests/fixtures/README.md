@@ -62,3 +62,11 @@ uint8 `expected` output for the row. Those numbers are **not captured from any d
 spec formula** (`slope = contrast * 2**exposure_ev`, `intercept = 0.5 - 0.5 * contrast + brightness`,
 `out = floor(clip(slope * u/255 + intercept, 0, 1) * 255 + 0.5)`), computed once with plain Python
 `math`, so the tests check both implementations against the written rule and against each other.
+
+`camera_info_a70_20261021.json` — the real `GET /api/camera/info` response of the FLIR A70 (firmware
+42.0.0, Spinnaker 4.4.0.246) captured on 2026-10-21 with the camera connected and idle (read-only
+request, nothing written to the camera), copied unchanged. It is the shape `thermal_from_camera_info`
+in `presets.py` reads: `nodes.IRFrameRate` / `NUCMode` / `CurrentCase` / `NumCases`,
+`active_case.index`, `nuc_mode`, `object_parameters` (the 7 float nodes plus `EstimatedTransmission`
+and `UseWindowTemperature`, which presets leave out) and `enum_options`. The serial number
+(89903739) is left in as captured.

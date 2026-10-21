@@ -33,6 +33,7 @@ from flir_research_interface import labels as labels_mod
 from flir_research_interface import visible_adjust_store as vadj_store
 from flir_research_interface.acquisition.service import AcquisitionService, ServiceState
 from flir_research_interface.api.frames import encode_frame_message
+from flir_research_interface.api.presets_routes import make_presets_router
 from flir_research_interface.api.reveal import Runner, contained, reveal
 from flir_research_interface.camera import CAMERA_BACKENDS, create_backend
 from flir_research_interface.camera.base import CameraBackend, CameraError, DeviceDescriptor, Frame
@@ -364,6 +365,8 @@ def create_app(
 
     def recorder() -> Recorder | None:
         return app.state.recorder  # type: ignore[no-any-return]
+
+    app.include_router(make_presets_router(lambda: app.state.experiments_root, service))
 
     def _make_service(cam: CameraBackend) -> AcquisitionService:
         """Every operator-owned camera runs resiliently: it retries the first connect and, if the
