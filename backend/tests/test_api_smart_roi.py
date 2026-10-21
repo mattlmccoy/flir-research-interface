@@ -63,6 +63,25 @@ def test_compute_refuses_non_smart_roi(tmp_path: Path) -> None:
         assert c.post(f"/api/experiments/{name}/smart-roi/5/compute").status_code == 404
 
 
+def test_compute_bad_stored_spec_is_400_not_500(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stored spec that fails parsing with TypeError (as stored_smart_specs allows) is a 400."""
+    from flir_research_interface.api import smart_roi_routes
+
+    def bad(_raw: dict[str, Any]) -> Any:
+        raise TypeError("unhashable stored value")
+
+    name = make_smart_run(tmp_path, n=2).name
+    monkeypatch.setattr(smart_roi_routes, "parse_smart_roi", bad)
+    with TestClient(
+        create_app(default_backend="simulated", experiments_root=tmp_path, min_free_gb=0.0),
+        raise_server_exceptions=False,
+    ) as c:
+        r = c.post(f"/api/experiments/{name}/smart-roi/7/compute")
+        assert r.status_code == 400 and "smart ROI 7" in r.json()["detail"]
+
+
 def test_overlay_window(tmp_path: Path) -> None:
     name = make_smart_run(tmp_path, n=8).name
     with _client(tmp_path) as c:
@@ -170,6 +189,28 @@ def test_regenerate_recomputes_stale_smart_series(tmp_path: Path) -> None:
         assert (tmp_path / name / "smart_roi" / "7.npz").stat().st_mtime_ns != mtime
         text = (tmp_path / name / "exports" / "roi_series.csv").read_text()
         assert "sensitivity=0.4" in text
+
+
+def test_regenerate_surfaces_a_failed_smart_compute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A smart series that fails to compute must not leave the regenerate reading "done"."""
+    from flir_research_interface.api import smart_roi_routes
+
+    def boom(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("tracker exploded")
+
+    monkeypatch.setattr(smart_roi_routes, "compute_smart_series", boom)
+    name = make_smart_run(tmp_path, n=4).name
+    with _client(tmp_path) as c:
+        assert c.post(f"/api/experiments/{name}/export/derived?video=false").status_code == 200
+        job = _wait_derived(c, name)
+        assert job["state"] == "error", job
+        assert "smart ROI 7" in job["error"] and "tracker exploded" in job["error"]
+        assert "smart" in job["step"]
+        # the rest of the derived files were still written (smart columns blank, says so)
+        text = (tmp_path / name / "exports" / "roi_series.csv").read_text()
+        assert "no stored series" in text
 
 
 def test_playback_series_route_skips_smart_roi(tmp_path: Path) -> None:

@@ -65,12 +65,14 @@ def _run_job(job: dict[str, Any], reader: ExperimentReader, spec: SmartRoiSpec) 
 
 def compute_stored_smart_rois(
     app: FastAPI, exp_dir: Path, *, only_missing_or_stale: bool = False
-) -> None:
+) -> list[str]:
     """Compute every stored smart ROI's series, publishing progress in ``app.state.smart_jobs``.
 
     Post-stop (threadpool, caller holds the run's render lock) it computes all of them; the
-    derived regenerate passes ``only_missing_or_stale`` so a fresh series is kept."""
+    derived regenerate passes ``only_missing_or_stale`` so a fresh series is kept. Returns one
+    ``"smart ROI <id>: <error>"`` line per ROI whose compute failed (empty when all succeeded)."""
     reader = ExperimentReader(exp_dir)
+    failed: list[str] = []
     for spec in stored_smart_specs(reader):
         if only_missing_or_stale:
             data = load_smart_series(exp_dir, spec.id)
@@ -79,6 +81,9 @@ def compute_stored_smart_rois(
         job = _new_job(reader.n_frames)
         app.state.smart_jobs[(exp_dir.name, spec.id)] = job
         _run_job(job, reader, spec)
+        if job["state"] == "error":
+            failed.append(f"smart ROI {spec.id}: {job['error']}")
+    return failed
 
 
 def register_smart_roi_routes(app: FastAPI, exp_dir: Callable[[str], Path]) -> None:
@@ -113,7 +118,7 @@ def register_smart_roi_routes(app: FastAPI, exp_dir: Callable[[str], Path]) -> N
                     raise HTTPException(400, f"ROI {roi_id} is not a smart ROI")
                 try:
                     return parse_smart_roi(raw)
-                except ValueError as exc:
+                except (ValueError, TypeError) as exc:
                     raise HTTPException(400, f"smart ROI {roi_id}: {exc}") from exc
         raise HTTPException(404, f"run has no ROI {roi_id}")
 

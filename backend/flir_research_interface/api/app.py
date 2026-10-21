@@ -426,9 +426,10 @@ def create_app(
         """Full-rate smart ROI series for every smart ROI stored with the recording."""
         compute_stored_smart_rois(app, exp_dir)
 
-    def _refresh_smart_rois(exp_dir: Path) -> None:
-        """Regenerate: compute only the smart series that is missing or stale (ROI edited)."""
-        compute_stored_smart_rois(app, exp_dir, only_missing_or_stale=True)
+    def _refresh_smart_rois(exp_dir: Path) -> list[str]:
+        """Regenerate: compute only the smart series that is missing or stale (ROI edited).
+        Returns the failed computes (one line each)."""
+        return compute_stored_smart_rois(app, exp_dir, only_missing_or_stale=True)
 
     def _write_run_summary(exp_dir: Path) -> None:
         """README.txt + exports/roi_plot.png + peak_frame(.png|_rois.png), derived, regenerable."""
@@ -1627,10 +1628,12 @@ def create_app(
                                "exports": None, "error": None}
         app.state.derived_jobs[name] = job
 
-        def _work() -> None:
+        def _work() -> list[str]:
+            """Regenerate; returns the smart ROI series that failed to compute (the other
+            derived files are still written, with that ROI's columns blank)."""
             exp_dir = _exp_dir(name)
             job["step"] = "smart roi series"
-            _refresh_smart_rois(exp_dir)
+            smart_failed = _refresh_smart_rois(exp_dir)
             job["step"] = "roi series"
             _export_roi_series(exp_dir)
             job["step"] = "images"
@@ -1643,6 +1646,7 @@ def create_app(
                     job["done"], job["total"] = done, total
 
                 render_thermal_video(reader, with_rois=True, on_progress=_cb)
+            return smart_failed
 
         async def _job() -> None:
             try:
@@ -1650,9 +1654,18 @@ def create_app(
                 if lock.locked():  # a post-stop render (or another regenerate) is finishing first
                     job["step"] = "waiting for the current render"
                 async with lock:
-                    await run_in_threadpool(_work)
-                job["step"] = "done"
+                    smart_failed = await run_in_threadpool(_work)
                 job["exports"] = experiment_info(name)["exports"]
+                if smart_failed:  # never "done" with a smart series missing
+                    job["step"] = "smart roi series failed"
+                    job["error"] = (
+                        "; ".join(smart_failed)
+                        + " (the other derived files were regenerated; that ROI's columns are"
+                        " blank)"
+                    )
+                    job["state"] = "error"
+                    return
+                job["step"] = "done"
                 job["state"] = "done"
             except Exception as exc:  # noqa: BLE001 - surface the failure to the poller
                 job["state"], job["error"] = "error", str(exc)
