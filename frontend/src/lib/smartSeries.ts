@@ -69,6 +69,30 @@ export function parseSmartSeries(raw: unknown): SmartSeries | null {
   };
 }
 
+/** Points fetched per stored series: the API's cap (smart_roi_routes.py `le=200_000`), so the
+ *  playhead readout is per-frame exact for any real run. With a strided series the readout
+ *  alternated exact / "≈ nearest" frame to frame: the side panel flickered at the frame rate. */
+export const SMART_READOUT_POINTS = 200_000;
+/** The plot's copy is strided down client-side to this many points. */
+export const SMART_PLOT_POINTS = 4000;
+
+/** Every `stride`-th row so at most `maxPoints` remain (the same stride rule as the backend's
+ *  series_payload); the series itself when it is already short enough. */
+export function downsampleSmartSeries(s: SmartSeries, maxPoints: number): SmartSeries {
+  const n = s.index.length;
+  const stride = Math.max(1, Math.ceil(n / Math.max(1, maxPoints)));
+  if (stride === 1) return s;
+  const pick = <T,>(a: T[]): T[] => a.filter((_, i) => i % stride === 0);
+  const dims = {} as SmartSeries["dims"];
+  for (const k of DIM_KEYS) dims[k] = pick(s.dims[k]);
+  return {
+    ...s, index: pick(s.index), t_s: pick(s.t_s), state: pick(s.state), valid: pick(s.valid),
+    sample: { mean: pick(s.sample.mean), max: pick(s.sample.max), min: pick(s.sample.min) },
+    rings: s.rings.map((g) => ({ ...g, mean: pick(g.mean), max: pick(g.max), min: pick(g.min) })),
+    dims,
+  };
+}
+
 /** True when a (re)load shows a different stored compute than the one last seen for this ROI
  *  (`seen` undefined = nothing seen yet, null = it was missing): cached outlines must be dropped. */
 export function seriesRecomputed(seen: string | null | undefined, utc: string | null): boolean {

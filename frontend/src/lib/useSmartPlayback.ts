@@ -5,7 +5,7 @@ import { createElement, useCallback, useMemo, useRef } from "react";
 import { api, type ExperimentInfo } from "./api.ts";
 import { roiColor } from "./overlay.ts";
 import { roiLabel, type Roi } from "./roi.ts";
-import { saveSmartForCompute, smartComputeAction, smartEdited, smartJobText, smartPlaybackRow } from "./smartSeries.ts";
+import { SMART_PLOT_POINTS, downsampleSmartSeries, saveSmartForCompute, smartComputeAction, smartEdited, smartJobText, smartPlaybackRow } from "./smartSeries.ts";
 import { smartTraces, type SmartDimChoice, type SmartTrace } from "./smartTraces.ts";
 import type { SmartOverlay } from "./smartLabels.ts";
 import { useSmartPlaybackOverlays } from "./useSmartPlaybackOverlays.ts";
@@ -94,11 +94,12 @@ export function useSmartPlayback({ name, rois, info, setInfo, setErr, shown, ind
     }
     return m;
   }, [rois, smart.states, smart.jobs, smart.compute, smart.reload, at, info?.rois, overlays]);  // eslint-disable-line react-hooks/exhaustive-deps
-  const plot = rois.flatMap((r, i) => {
+  // the readout uses the per-frame series; the plot a light copy, strided once per loaded series
+  const plot = useMemo(() => rois.flatMap((r, i) => {
     const st = smart.states.get(r.id);
     if (r.kind !== "smart" || r.hidden || st?.kind !== "ready") return [];
     const isStale = st.series.stale || smartEdited(r, info?.rois);
-    return smartTraces(st.series, { ...show, dims: sizeDim, hiddenRings: smartPrefs(view, `exp.${name}`, r.id).hiddenRings }, { id: r.id, label: roiLabel(r), color: roiColor(r, i), stale: isStale });
-  });
+    return smartTraces(downsampleSmartSeries(st.series, SMART_PLOT_POINTS), { ...show, dims: sizeDim, hiddenRings: smartPrefs(view, `exp.${name}`, r.id).hiddenRings }, { id: r.id, label: roiLabel(r), color: roiColor(r, i), stale: isStale });
+  }), [rois, smart.states, info?.rois, show, sizeDim, view, name]);
   return { smartIds, smart, overlays, ensureOverlays, retainOverlays, stale, rows, plot };
 }

@@ -2,10 +2,8 @@
 // a ROI that has none or a stale one (POST …/compute, poll …/status). Pure logic: smartSeries.ts.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api.ts";
-import { SMART_POLL_MS, isNotFound, parseSmartSeries, seriesRecomputed, smartPollStep, type SmartJob, type SmartPollEvent, type SmartPollState, type SmartSeriesState } from "./smartSeries.ts";
+import { SMART_POLL_MS, SMART_READOUT_POINTS, isNotFound, parseSmartSeries, seriesRecomputed, smartPollStep, type SmartJob, type SmartPollEvent, type SmartPollState, type SmartSeriesState } from "./smartSeries.ts";
 
-/** Points per stored series fetched for the plot and the playhead readout (the API strides down). */
-export const SMART_SERIES_POINTS = 4000;
 
 export interface SmartSeriesHook {
   states: Map<number, SmartSeriesState>;
@@ -32,7 +30,7 @@ export function useSmartSeries(name: string, ids: number[], beforeCompute: (id: 
 
   const load = useCallback((id: number, g: number): Promise<SmartSeriesState> => {
     setState(id, { kind: "loading" });
-    return api.smartSeries(name, id, SMART_SERIES_POINTS)
+    return api.smartSeries(name, id, SMART_READOUT_POINTS)  // per frame: the readout never flips to ≈
       .then((raw): SmartSeriesState => {
         const s = parseSmartSeries(raw);
         return s ? { kind: "ready", series: s } : { kind: "error", message: "the operator returned a malformed smart ROI series" };

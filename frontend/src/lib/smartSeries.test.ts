@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import type { Smart } from "./roi.ts";
 import { test } from "node:test";
-import { isNotFound, parseSmartSeries, smartComputeAction, smartJobText, smartPlaybackRow, smartRowAt, type SmartSeries, type SmartSeriesState } from "./smartSeries.ts";
+import { SMART_PLOT_POINTS, SMART_READOUT_POINTS, downsampleSmartSeries, isNotFound, parseSmartSeries, smartComputeAction, smartJobText, smartPlaybackRow, smartRowAt, type SmartSeries, type SmartSeriesState } from "./smartSeries.ts";
 
 // Real API payload (see smartTraces.test.ts): rows 0, 36–45 searching; 1–5, 46–47 locked; 6–35 holding.
 const FIX = JSON.parse(readFileSync(new URL("./fixtures/smart_series_20261020.json", import.meta.url), "utf8")) as Record<string, unknown> & { _capture: { missing_status: number; missing_body: { detail: string } } };
@@ -68,7 +68,7 @@ test("smartPlaybackRow: readout at the playhead, never a number when unknown", (
   const locked = smartPlaybackRow(ready(), 5);
   assert.equal(locked.tone, "locked");
   assert.ok(locked.mean !== null && Math.abs(locked.mean - 111.02618369144791) < 1e-9);
-  assert.match(locked.summary, /^locked · 111 °C · max 147 · area \d+ px$/);
+  assert.match(locked.summary.replace(/\u2007/g, ""), /^locked · 111 °C · max 147 · area \d+ px$/);
   assert.deepEqual(locked.entry?.rings.map((g) => g.outer_px), [5, 10, 25], "the expanded table's rings");
   assert.deepEqual(locked.notes, []);
   const holding = smartPlaybackRow(ready(), 10);
@@ -285,4 +285,43 @@ test("saveSmartForCompute: a failed refresh still carries the list it saved; une
   const same = await saveSmartForCompute(r, { rois: [r] }, { ...io, putRois: async () => { throw new Error("must not save"); } });
   assert.equal(same.ok, true);
   assert.equal((await saveSmartForCompute(r, { rois: [] }, { ...io, confirm: () => false })).ok, false);
+});
+
+// --- flicker: the playhead readout must be per-frame exact, not alternate exact / ≈ ---
+
+/** A locked, valid run of `n` frames whose mean ramps (all columns full resolution). */
+function rampSeries(n: number): SmartSeries {
+  const idx = Array.from({ length: n }, (_, i) => i);
+  const c = (f: (i: number) => number) => idx.map(f);
+  const ring = (o: number) => ({ inner_px: o === 5 ? 0 : 5, outer_px: o, mean: c(() => 25), max: c(() => 25), min: c(() => 25) });
+  return {
+    index: idx, t_s: c((i) => i / 30), state: idx.map(() => "locked" as const), valid: idx.map(() => true),
+    sample: { mean: c((i) => 40 + i * 0.013), max: c((i) => 41 + i * 0.013), min: c((i) => 39 + i * 0.013) },
+    rings: [ring(5), ring(10)],
+    dims: {
+      area_px: c(() => 5025), length_px: c(() => 81), width_px: c(() => 81), perimeter_px: c(() => 224), centroid_x: c(() => 320), centroid_y: c(() => 240),
+      sharpness_c_per_px: c(() => 15), area_change_pct: c(() => 0), length_change_pct: c(() => 0), width_change_pct: c(() => 0),
+    },
+    stale: false, computed_utc: "2026-10-21T00:00:00Z",
+  };
+}
+
+test("downsampleSmartSeries strides like the backend (series_payload) and keeps a short series as is", () => {
+  const s = rampSeries(5550);
+  const d = downsampleSmartSeries(s, 4000);
+  assert.equal(d.index.length, 2775);
+  assert.deepEqual(d.index.slice(0, 3), [0, 2, 4]);
+  assert.equal(d.sample.mean[1], s.sample.mean[2]);
+  assert.equal(d.rings[1].mean.length, 2775);
+  assert.equal(d.dims.area_px.length, 2775);
+  assert.equal(downsampleSmartSeries(s, 6000), s);
+});
+
+test("the readout series is per-frame for a 5,550-frame run: consecutive frames never alternate exact / ≈", () => {
+  assert.ok(SMART_READOUT_POINTS >= 200_000, "fetched at the API's cap (smart_roi_routes.py le=200_000)");
+  assert.ok(SMART_PLOT_POINTS <= 4000, "the plot keeps a light copy");
+  const st: SmartSeriesState = { kind: "ready", series: downsampleSmartSeries(rampSeries(5550), SMART_READOUT_POINTS) };
+  const rows = Array.from({ length: 40 }, (_, k) => smartPlaybackRow(st, 1000 + k));
+  assert.deepEqual(new Set(rows.map((r) => r.tone)), new Set(["locked"]));
+  assert.ok(rows.every((r) => r.marker === null && !r.summary.includes("≈")), rows.map((r) => r.summary).join("\n"));
 });
