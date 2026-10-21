@@ -110,8 +110,10 @@ For each visible frame (skip each segment's first `FRAME0_SKIP_S`):
   because the encoder's periodic refresh shifts brightness slightly.
 
 **Threshold:** one value per run, chosen from the first 5 s of analysed frames (Otsu's method on the
-analysis region), then held fixed. A fixed threshold keeps an exposure drift from masquerading as
-area change. The chosen value goes into `visible_sample.json`. On this run Otsu gives 178 and a
+analysis region), then held fixed. A fixed threshold keeps the frames comparable (one rule for all of
+them), but an exposure change still moves the count: a global brightening lifts pixels that sat just
+below the threshold out of "dark". `sample_mean_luma` and `bed_clipped_frac` are the columns to check
+before reading a change in `sample_dark_px` as slump. The chosen value goes into `visible_sample.json`. On this run Otsu gives 178 and a
 start-of-run dark area of ≈1,096 px; the spike's fixed 170 gave ≈1,047 px.
 
 ### Flash events

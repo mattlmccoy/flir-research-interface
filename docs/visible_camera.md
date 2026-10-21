@@ -240,9 +240,12 @@ beside the export files. Events are not written into `events.json`.
 
 Method: the analysis region is the sample outline mapped into the visible frame through the
 alignment, grown by 30 visible px. "Dark" means luma **strictly below** the run's threshold, one
-Otsu value chosen from the first 5 s of analysed frames and then held fixed, so an exposure drift
-cannot pass as an area change. `brightening` is the 99.5th percentile of (luma - previous frame's
-luma) over the region. A non-keyframe is flagged when `brightening >= max(15, median + 6 x
+Otsu value chosen from the first 5 s of analysed frames and then held fixed, so every frame is
+judged by the same rule and the counts stay comparable. That does not make the count immune to
+exposure: a global brightening lifts pixels that sat just below the threshold out of "dark", and
+`sample_dark_px` falls without the sample changing. Check `sample_mean_luma` and `bed_clipped_frac`
+before reading a change in `sample_dark_px` as slump. `brightening` is the 99.5th percentile of
+(luma - previous frame's luma) over the region. A non-keyframe is flagged when `brightening >= max(15, median + 6 x
 max(MAD, 1))` over the run's non-keyframe values; flagged frames within 1.0 s form one event.
 
 ### Reference run `20261020_144402_Run` (run on 2026-10-21, `visible.mp4` sha256 `c61f66fc...`)
