@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { blockLoader, isAbort, wantedBlocks } from "./frameBlocks.ts";
+import { blockLoader, ensureLatest, isAbort, loadFailure, wantedBlocks } from "./frameBlocks.ts";
 
 /** A fetch that never settles on its own: it resolves on `finish(start)` or rejects on abort. */
 function fakeFetch() {
@@ -82,4 +82,37 @@ test("isAbort tells an abort apart from a real failure", () => {
   assert.equal(isAbort(new Error("500 boom")), false);
   assert.equal(isAbort(new TypeError("Failed to fetch")), false);
   assert.equal(isAbort(null), false);
+});
+
+// --- review round: a store swap mid-ensure, and which load failures may show ---
+
+const abortErr = () => new DOMException("aborted", "AbortError");
+
+test("ensureLatest: an abort caused by a store swap is retried against the current store", async () => {
+  const calls: string[] = [];
+  const oldStore = (i: number) => { calls.push(`old ${i}`); return Promise.reject(abortErr()); };  // abortAll() on swap
+  const newStore = (i: number) => { calls.push(`new ${i}`); return Promise.resolve(); };
+  let current: (i: number) => Promise<void> = oldStore;
+  const p = ensureLatest(() => current, 7);
+  current = newStore;  // smart.version bumped while the old ensure was in flight
+  await p;  // resolves: the frame is not left "loading" forever
+  assert.deepEqual(calls, ["old 7", "new 7"]);
+});
+
+test("ensureLatest: an abort from the same store (the playhead moved on) is passed on", async () => {
+  const same = () => Promise.reject(abortErr());
+  await assert.rejects(ensureLatest(() => same, 3), (e: unknown) => isAbort(e));
+});
+
+test("ensureLatest gives up after a bounded number of swaps", async () => {
+  let k = 0;
+  const get = () => { k++; return () => Promise.reject(abortErr()); };  // a new store every time
+  await assert.rejects(ensureLatest(get, 1, 3), (e: unknown) => isAbort(e));
+  assert.ok(k <= 4);
+});
+
+test("loadFailure: aborts and loads for a frame no longer wanted are silent, never 'AbortError' on screen", () => {
+  assert.equal(loadFailure(abortErr(), true), null);
+  assert.equal(loadFailure(new Error("500 boom"), false), null, "scrubbed away: not this frame's error");
+  assert.equal(loadFailure(new Error("500 boom"), true), "Error: 500 boom");
 });

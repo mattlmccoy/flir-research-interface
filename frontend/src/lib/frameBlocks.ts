@@ -64,3 +64,28 @@ export function blockLoader<T>(fetch: (start: number, signal: AbortSignal) => Pr
     inflight() { return [...running.keys()]; },
   };
 }
+
+/** Run the current `ensure` for frame `i`. If it is aborted because the store behind it was
+ *  replaced meanwhile (a recompute bumps the overlay cache version and aborts the old store),
+ *  retry against the new one, so a load never hangs on a silent abort. An abort from the store
+ *  that is still current (the playhead moved on) is passed on. At most `swaps` retries. */
+export async function ensureLatest(current: () => (i: number) => Promise<void>, i: number, swaps = 3): Promise<void> {
+  let ensure = current();
+  for (let k = 0; ; k++) {
+    try {
+      await ensure(i);
+      return;
+    } catch (e) {
+      if (!isAbort(e) || k >= swaps) throw e;
+      const now = current();
+      if (now === ensure) throw e;
+      ensure = now;
+    }
+  }
+}
+
+/** The error text a failed frame load may show, or null: an abort, or a load for a frame the
+ *  playhead has left (`alive` false), is never this frame's error. */
+export function loadFailure(e: unknown, alive: boolean): string | null {
+  return !alive || isAbort(e) ? null : String(e);
+}
