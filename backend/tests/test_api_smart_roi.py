@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from pathlib import Path
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 from smart_recording import SMART, make_smart_run
 
@@ -95,7 +97,16 @@ def test_arm_rejects_smart_trigger(tmp_path: Path) -> None:
         c.post("/api/camera/disconnect")
 
 
-def test_post_stop_computes_stored_smart_rois(tmp_path: Path) -> None:
+def _wait_idle(c: TestClient, timeout_s: float = 60.0) -> None:
+    t0 = time.monotonic()
+    while c.app.state.render_tasks and time.monotonic() - t0 < timeout_s:  # type: ignore[attr-defined]
+        time.sleep(0.05)
+    assert not c.app.state.render_tasks  # type: ignore[attr-defined]
+
+
+def test_post_stop_computes_stored_smart_rois(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     with _client(tmp_path) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
@@ -112,4 +123,50 @@ def test_post_stop_computes_stored_smart_rois(tmp_path: Path) -> None:
             time.sleep(0.05)
         assert job["state"] == "done", job
         assert (tmp_path / name / "smart_roi" / "7.npz").is_file()
+        _wait_idle(c)
+        failures = [r for r in caplog.records if r.levelno >= logging.ERROR]
+        assert not failures, [(r.getMessage(), r.exc_text) for r in failures]
+        csv_text = (tmp_path / name / "exports" / "roi_series.csv").read_text()
+        assert "smart ROI part: thermal edge" in csv_text and "part area px" in csv_text
+        assert (tmp_path / name / "exports" / "roi_plot.png").is_file()
         c.post("/api/camera/disconnect")
+
+
+def _wait_derived(c: TestClient, name: str) -> dict[str, Any]:
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < 60.0:
+        job: dict[str, Any] = c.get(f"/api/experiments/{name}/export/derived/status").json()
+        if job["state"] in ("done", "error"):
+            return job
+        time.sleep(0.05)
+    raise AssertionError("derived regenerate did not finish")
+
+
+def test_regenerate_computes_missing_smart_series(tmp_path: Path) -> None:
+    name = make_smart_run(tmp_path, n=6).name
+    with _client(tmp_path) as c:
+        assert c.post(f"/api/experiments/{name}/export/derived?video=false").status_code == 200
+        job = _wait_derived(c, name)
+        assert job["state"] == "done", job
+        assert (tmp_path / name / "smart_roi" / "7.npz").is_file()
+        text = (tmp_path / name / "exports" / "roi_series.csv").read_text()
+        assert "part area px" in text and "no stored series" not in text
+
+
+def test_regenerate_recomputes_stale_smart_series(tmp_path: Path) -> None:
+    name = make_smart_run(tmp_path, n=6).name
+    with _client(tmp_path) as c:
+        assert _compute(c, name)["state"] == "done"
+        mtime = (tmp_path / name / "smart_roi" / "7.npz").stat().st_mtime_ns
+        # fresh series: regenerate must NOT recompute it
+        c.post(f"/api/experiments/{name}/export/derived?video=false")
+        assert _wait_derived(c, name)["state"] == "done"
+        assert (tmp_path / name / "smart_roi" / "7.npz").stat().st_mtime_ns == mtime
+        # edit the stored ROI (sensitivity) -> the stored series is stale
+        edited = {**SMART, "sensitivity": 0.4}
+        assert c.put(f"/api/experiments/{name}/rois", json={"rois": [edited]}).status_code == 200
+        c.post(f"/api/experiments/{name}/export/derived?video=false")
+        assert _wait_derived(c, name)["state"] == "done"
+        assert (tmp_path / name / "smart_roi" / "7.npz").stat().st_mtime_ns != mtime
+        text = (tmp_path / name / "exports" / "roi_series.csv").read_text()
+        assert "sensitivity=0.4" in text

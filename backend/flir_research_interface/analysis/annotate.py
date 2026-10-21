@@ -121,6 +121,7 @@ def draw_rois(
     """Outline every ROI (sensor coordinates x ``scale``) in its color, with a label placed to
     avoid overlapping the other labels; a leader line ties a moved label back to its ROI so the
     labels do not sit on top of the shapes when there is room beside them."""
+    rois = [r for r in rois if r.get("kind") != "smart"]  # tracked outline has no static shape
     d = ImageDraw.Draw(img, "RGBA")
     font = _font(max(11, int(7 * scale)))
     img_w, img_h = img.size
@@ -258,6 +259,8 @@ def roi_values_at(
     h, w = celsius.shape
     cam = reader.metadata.get("camera")
     for r in rois:
+        if r["kind"] == "smart":
+            continue  # no static pixels; its measurements come from the stored series
         field = roi_field(celsius[None, :, :], r, cam, True)[0]
         if r["kind"] == "spot":
             x, y = int(r["x"]), int(r["y"])

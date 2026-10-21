@@ -24,6 +24,7 @@ from PIL import Image
 
 from flir_research_interface import __version__
 from flir_research_interface.analysis.series import roi_series
+from flir_research_interface.analysis.smart_export import smart_csv_block, split_smart
 from flir_research_interface.labels import export_label, read_labels
 from flir_research_interface.playback.reader import ExperimentReader
 from flir_research_interface.radiometry.temperature_linear import (
@@ -67,6 +68,12 @@ def _roi_optics(r: dict[str, Any]) -> str:
 
 def _roi_geom(r: dict[str, Any]) -> str:
     k = r["kind"]
+    if k == "smart":
+        rings = r.get("rings_px") or [5, 10, 25]
+        return (
+            f"M{r['id']}: smart ROI search={r.get('search')} rings_px={rings} "
+            f"rule={r.get('rule', 'relative')} (tracked outline per frame)"
+        )
     if k == "spot":
         box = " (mean of 3x3)" if r.get("box") == 3 else ""
         return f"S{r['id']}: spot x={r['x']} y={r['y']}{box}"
@@ -86,17 +93,21 @@ def _roi_geom(r: dict[str, Any]) -> str:
 
 def series_csv(reader: ExperimentReader, rois: list[dict[str, Any]]) -> str:
     """ROI values on every frame as CSV with ``#`` header comments documenting units and ROIs."""
-    data = roi_series(reader, rois)
+    geo, smart = split_smart(rois)
+    data = roi_series(reader, geo)
     buf = io.StringIO()
     buf.write(f"# FLIR Research Interface {__version__} ROI series\n")
     buf.write(f"# experiment: {reader.path.name}\n")
     buf.write(f"# units: {data['units']}\n")
     buf.write("# t_s: seconds since the first recorded frame (camera clock)\n")
-    for r in rois:
+    for r in geo:
         buf.write(f"# {_roi_desc(r)}\n")
+    blocks = [smart_csv_block(reader, r) for r in smart]
+    for note, _names, _cells in blocks:
+        buf.write(f"# {note}\n")
     header = ["t_s", "frame_id"]
     cols: list[list[float | None]] = []
-    for r in rois:
+    for r in geo:
         s = data["series"][str(r["id"])]
         prefix = {"spot": "S", "rect": "R", "circle": "C", "line": "L", "polygon": "P"}[r["kind"]]
         if r["kind"] == "spot":
@@ -106,10 +117,15 @@ def series_csv(reader: ExperimentReader, rois: list[dict[str, Any]]) -> str:
             for k in ("mean", "min", "max", "std", "n"):
                 header.append(f"{prefix}{r['id']}_{k}")
                 cols.append(s[k])
+    for _note, names, _cells in blocks:
+        header += names
     w = csv.writer(buf, lineterminator="\n")
     w.writerow(header)
     for i, (t, fid) in enumerate(zip(data["t_s"], data["frame_id"], strict=True)):
-        w.writerow([f"{t:.6f}", fid] + ["" if c[i] is None else f"{c[i]:.4f}" for c in cols])
+        row = [f"{t:.6f}", fid] + ["" if c[i] is None else f"{c[i]:.4f}" for c in cols]
+        for _note, _names, cells in blocks:
+            row += [c[i] for c in cells]
+        w.writerow(row)
     return buf.getvalue()
 
 

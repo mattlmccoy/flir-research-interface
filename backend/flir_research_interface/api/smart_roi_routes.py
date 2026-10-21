@@ -64,11 +64,34 @@ def _run_job(job: dict[str, Any], reader: ExperimentReader, spec: SmartRoiSpec) 
         logger.exception("smart ROI %d series failed for %s", spec.id, reader.path)
 
 
-def compute_stored_smart_rois(app: FastAPI, exp_dir: Path) -> None:
-    """Post-stop step (threadpool, caller holds the run's render lock): compute every stored
-    smart ROI's series, publishing progress in ``app.state.smart_jobs``."""
+def smart_series_stale(reader: ExperimentReader, spec: SmartRoiSpec, data: dict[str, Any]) -> bool:
+    """True when the stored series was computed from a different ROI spec / optics / frame count
+    than the run now stores (the ROI was edited after the series was computed)."""
+    now = {**dataclasses.asdict(spec), "search": [list(p) for p in spec.search],
+           "rings_px": list(spec.rings_px)}
+    then = dict(data.get("spec") or {})
+    now.pop("name", None)  # a rename does not change the tracking
+    then.pop("name", None)
+    return (
+        now != then
+        or stored_optics(reader, spec.id) != data.get("optics")
+        or reader.n_frames != len(data["state"])
+    )
+
+
+def compute_stored_smart_rois(
+    app: FastAPI, exp_dir: Path, *, only_missing_or_stale: bool = False
+) -> None:
+    """Compute every stored smart ROI's series, publishing progress in ``app.state.smart_jobs``.
+
+    Post-stop (threadpool, caller holds the run's render lock) it computes all of them; the
+    derived regenerate passes ``only_missing_or_stale`` so a fresh series is kept."""
     reader = ExperimentReader(exp_dir)
     for spec in stored_smart_specs(reader):
+        if only_missing_or_stale:
+            data = load_smart_series(exp_dir, spec.id)
+            if data is not None and not smart_series_stale(reader, spec, data):
+                continue
         job = _new_job(reader.n_frames)
         app.state.smart_jobs[(exp_dir.name, spec.id)] = job
         _run_job(job, reader, spec)
@@ -172,16 +195,12 @@ def register_smart_roi_routes(app: FastAPI, exp_dir: Callable[[str], Path]) -> N
             spec = _spec(reader, roi_id)
         except HTTPException:
             return True  # the ROI was removed or changed kind since
-        now = {**dataclasses.asdict(spec), "search": [list(p) for p in spec.search],
-               "rings_px": list(spec.rings_px)}
-        then = dict(data.get("spec") or {})
-        now.pop("name", None)
-        then.pop("name", None)
-        return (
-            now != then
-            or stored_optics(reader, roi_id) != data.get("optics")
-            or reader.n_frames != len(data["state"])
-        )
+        return smart_series_stale(reader, spec, data)
 
 
-__all__ = ["compute_stored_smart_rois", "register_smart_roi_routes", "stored_smart_specs"]
+__all__ = [
+    "compute_stored_smart_rois",
+    "register_smart_roi_routes",
+    "smart_series_stale",
+    "stored_smart_specs",
+]

@@ -426,6 +426,10 @@ def create_app(
         """Full-rate smart ROI series for every smart ROI stored with the recording."""
         compute_stored_smart_rois(app, exp_dir)
 
+    def _refresh_smart_rois(exp_dir: Path) -> None:
+        """Regenerate: compute only the smart series that is missing or stale (ROI edited)."""
+        compute_stored_smart_rois(app, exp_dir, only_missing_or_stale=True)
+
     def _write_run_summary(exp_dir: Path) -> None:
         """README.txt + exports/roi_plot.png + peak_frame(.png|_rois.png), derived, regenerable."""
         from flir_research_interface.analysis.annotate import write_annotated_frames
@@ -1625,6 +1629,8 @@ def create_app(
 
         def _work() -> None:
             exp_dir = _exp_dir(name)
+            job["step"] = "smart roi series"
+            _refresh_smart_rois(exp_dir)
             job["step"] = "roi series"
             _export_roi_series(exp_dir)
             job["step"] = "images"

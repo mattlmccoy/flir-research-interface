@@ -20,6 +20,7 @@ from PIL import Image, ImageDraw, ImageFont
 from flir_research_interface.analysis.export import _roi_desc
 from flir_research_interface.analysis.masks import mask_desc
 from flir_research_interface.analysis.series import roi_series
+from flir_research_interface.analysis.smart_export import smart_plot_trace, split_smart
 from flir_research_interface.camera.frame_ids import index_in_order
 from flir_research_interface.playback.reader import ExperimentReader
 
@@ -221,7 +222,8 @@ def mark_indices(
 
 def roi_plot_png(reader: ExperimentReader, rois: list[dict[str, Any]]) -> bytes:
     """Traces of every ROI (value, or mean with min–max band) vs time, with operator marks."""
-    series = roi_series(reader, rois)
+    geo, smart = split_smart(rois)
+    series = roi_series(reader, geo)
     t = np.asarray(series["t_s"], dtype=float)
     font = ImageFont.load_default(size=26)
     img = Image.new("RGB", (PLOT_W, PLOT_H), (16, 17, 20))
@@ -231,6 +233,13 @@ def roi_plot_png(reader: ExperimentReader, rois: list[dict[str, Any]]) -> bytes:
     traces: list[tuple[dict[str, Any], np.ndarray, np.ndarray | None, np.ndarray | None]] = []
     lo, hi = math.inf, -math.inf
     for r in rois:
+        if r.get("kind") == "smart":  # stored tracker series: sample mean, blank while searching
+            trace = smart_plot_trace(reader, r)
+            if trace is not None and trace.size == t.size:
+                if np.isfinite(trace).any():
+                    lo, hi = min(lo, float(np.nanmin(trace))), max(hi, float(np.nanmax(trace)))
+                traces.append((r, trace, None, None))
+            continue
         s = series["series"].get(str(r["id"]))  # keyed by ROI id as a string
         if s is None:
             continue
