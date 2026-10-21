@@ -13,6 +13,7 @@ const FEED_LOCKED = FEED.locked.rois[0] as Record<string, unknown> & { rings: Re
 const FEED_HOLDING = FEED.holding.rois[0];
 const FEED_SEARCHING = FEED.searching.rois[0];
 
+const unpad = (s: string): string => s.replace(/\u2007/g, "");  // figure-space padding (fixed row shape)
 const entry = (raw: unknown): SmartReadoutEntry => {
   const e = smartEntryFromFeed(raw);
   assert.ok(e, "feed entry should parse");
@@ -131,9 +132,9 @@ test("smartChip: a stale stored outline (playback) is muted and says stale, neve
 // --- the rail row: one collapsed line, and a compact table when expanded ---
 
 test("smartSummary: one line, state · mean · max · area", () => {
-  assert.equal(smartSummary(entry(FEED_LOCKED)), "locked · 111 °C · max 147 · area 1172 px");
-  assert.equal(smartSummary(entry(FEED_HOLDING)), "holding — edge lost · 25.0 °C · max 25.0 · area 1172 px");
-  assert.equal(smartSummary(entry({ ...FEED_LOCKED, dims: null })), "locked · 111 °C · max 147", "no dims, no area");
+  assert.equal(unpad(smartSummary(entry(FEED_LOCKED))), "locked · 111 °C · max 147 · area 1172 px");
+  assert.equal(unpad(smartSummary(entry(FEED_HOLDING))), "holding — edge lost · 25.0 °C · max 25.0 · area 1172 px");
+  assert.equal(unpad(smartSummary(entry({ ...FEED_LOCKED, dims: null }))), "locked · 111 °C · max 147", "no dims, no area");
 });
 
 test("smartSummary: not valid reads the badge only, never a number", () => {
@@ -149,9 +150,13 @@ test("smartDetails: sample, each ring, size, sharpness, change and centroid as l
     { label: "ring 0–5 px", value: "mean 68.9 °C · max 82.3 · min 51.2" },
     { label: "ring 5–10 px", value: "mean 48.7 °C · max 64.2 · min 38.1" },
     { label: "ring 10–25 px", value: "mean 33.1 °C · max 48.4 · min 26.7" },
-    { label: "size (edge)", value: "length 42.8 · width 35.6 · perimeter 119 px" },
+    { label: "length (edge)", value: "42.8 px" },
+    { label: "width (edge)", value: "35.6 px" },
+    { label: "perimeter", value: "119 px" },
     { label: "sharpness", value: "6.20 °C/px" },
-    { label: "change", value: "area +13.3 % · length +7.6 % · width −5.9 %" },
+    { label: "Δ area", value: "+13.3 %" },
+    { label: "Δ length", value: "+7.6 %" },
+    { label: "Δ width", value: "−5.9 %" },
     { label: "centroid", value: "60.4, 59.4 px" },
   ]);
 });
@@ -164,4 +169,12 @@ test("smartDetails leaves hidden rings out (keyed by the ring's outer offset)", 
 test("smartDetails: not valid has no rows; missing dims give no size rows", () => {
   assert.deepEqual(smartDetails(entry(FEED_SEARCHING)), []);
   assert.deepEqual(smartDetails(entry({ ...FEED_LOCKED, rings: [], dims: null })), [{ label: "sample", value: "mean 111 °C · max 147 · min 82.4" }]);
+});
+
+test("flicker: consecutive locked summaries keep one fixed shape (same length, separators in place)", () => {
+  const at = (mean: number, max: number, area: number) => smartSummary(entry({ ...FEED_LOCKED, mean_c: mean, max_c: max, dims: { ...FEED_LOCKED.dims, area_px: area } }));
+  const lines = [at(99.94, 99.96, 998), at(99.96, 100.4, 1004), at(100.4, 101.2, 1010), at(9.5, 12.25, 87)];
+  const shape = (s: string) => s.replace(/[0-9.  ]/g, "#");
+  assert.deepEqual(new Set(lines.map((l) => l.length)).size, 1, lines.join("\n"));
+  assert.equal(new Set(lines.map(shape)).size, 1, lines.join("\n"));
 });

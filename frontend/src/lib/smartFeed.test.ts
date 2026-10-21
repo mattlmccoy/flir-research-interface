@@ -48,9 +48,9 @@ test("smartRowView: locked is live-toned with its mean; holding is warn-toned wi
   assert.equal(h.tone, "holding");
   assert.equal(h.mean, 25.0);
   assert.equal(h.marker, "holding");
-  assert.equal(h.summary, "holding — edge lost · 25.0 °C · max 25.0 · area 1172 px");
+  assert.equal(h.summary.replace(/\u2007/g, ""), "holding — edge lost · 25.0 °C · max 25.0 · area 1172 px");
   assert.equal(h.entry?.state, "holding", "the expanded table reads the same entry");
-  assert.match(l.summary, /^locked · \d+ °C · max \d+ · area \d+ px$/, "collapsed: one line");
+  assert.match(l.summary.replace(/\u2007/g, ""), /^locked · \d+ °C · max \d+ · area \d+ px$/, "collapsed: one line");
 });
 
 test("smartRowView: searching / missing entry / no feed yet carry no number", () => {

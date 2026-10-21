@@ -92,8 +92,12 @@ export function smartReadoutLines(e: SmartReadoutEntry): string[] {
 export function smartSummary(e: SmartReadoutEntry): string {
   if (!e.valid) return smartReadoutLines(e)[0];
   const d = e.dims;
-  return `${smartBadge(e.state)} · ${t(e.sample.mean_c)} °C · max ${t(e.sample.max_c)}${d ? ` · area ${d.area_px} px` : ""}`;
+  return `${smartBadge(e.state)} · ${pad(t(e.sample.mean_c), 5)} °C · max ${pad(t(e.sample.max_c), 5)}${d ? ` · area ${pad(String(d.area_px), 6)} px` : ""}`;
 }
+
+/** Left-pads a number with figure spaces (digit-wide) so the collapsed row keeps one shape from
+ *  frame to frame (with tabular-nums in CSS nothing shifts). */
+const pad = (s: string, w: number): string => s.padStart(w, "\u2007");
 
 export interface SmartDetailRow { label: string; value: string; }
 
@@ -105,10 +109,15 @@ export function smartDetails(e: SmartReadoutEntry, hiddenRings: readonly number[
   for (const g of e.rings) if (!hiddenRings.includes(g.outer_px)) rows.push({ label: `ring ${g.inner_px}–${g.outer_px} px`, value: temps(g) });
   const d = e.dims;
   if (!d) return rows;
+  // one short value per row: a long row would wrap differently as its digits change frame to frame
   rows.push(
-    { label: "size (edge)", value: `length ${d.length_px.toFixed(1)} · width ${d.width_px.toFixed(1)} · perimeter ${d.perimeter_px} px` },
+    { label: "length (edge)", value: `${d.length_px.toFixed(1)} px` },
+    { label: "width (edge)", value: `${d.width_px.toFixed(1)} px` },
+    { label: "perimeter", value: `${d.perimeter_px} px` },
     { label: "sharpness", value: d.sharpness_c_per_px === null ? "n/a" : `${d.sharpness_c_per_px.toFixed(2)} °C/px` },
-    { label: "change", value: `area ${pct(d.area_change_pct)} · length ${pct(d.length_change_pct)} · width ${pct(d.width_change_pct)}` },
+    { label: "Δ area", value: pct(d.area_change_pct) },
+    { label: "Δ length", value: pct(d.length_change_pct) },
+    { label: "Δ width", value: pct(d.width_change_pct) },
     { label: "centroid", value: `${d.centroid_x.toFixed(1)}, ${d.centroid_y.toFixed(1)} px` },
   );
   return rows;
