@@ -34,6 +34,10 @@ from flir_research_interface.acquisition.service import AcquisitionService, Serv
 from flir_research_interface.acquisition.smart_live import SmartLive
 from flir_research_interface.api.frames import encode_frame_message
 from flir_research_interface.api.reveal import Runner, contained, reveal
+from flir_research_interface.api.smart_roi_routes import (
+    compute_stored_smart_rois,
+    register_smart_roi_routes,
+)
 from flir_research_interface.camera import CAMERA_BACKENDS, create_backend
 from flir_research_interface.camera.base import CameraBackend, CameraError, DeviceDescriptor, Frame
 from flir_research_interface.camera.simulated import HotspotRampScene
@@ -418,6 +422,10 @@ def create_app(
         (out_dir / "roi_series.csv").write_text(series_csv(reader, rois))
         logger.info("wrote %s", out_dir / "roi_series.csv")
 
+    def _compute_smart_rois(exp_dir: Path) -> None:
+        """Full-rate smart ROI series for every smart ROI stored with the recording."""
+        compute_stored_smart_rois(app, exp_dir)
+
     def _write_run_summary(exp_dir: Path) -> None:
         """README.txt + exports/roi_plot.png + peak_frame(.png|_rois.png), derived, regenerable."""
         from flir_research_interface.analysis.annotate import write_annotated_frames
@@ -455,6 +463,8 @@ def create_app(
         async def _job() -> None:
             async with app.state.render_locks.get(exp_dir.name):
                 for step, fn in (
+                    # smart series first: the ROI CSV and run summary read them (Task 6)
+                    ("smart ROI series", _compute_smart_rois),
                     ("automatic ROI series export", _export_roi_series),
                     ("run summary", _write_run_summary),
                     ("thermal preview video render", _render_thermal_video),
@@ -1181,6 +1191,9 @@ def create_app(
             rois = parse_rois(json.dumps(req.rois)) if req.rois else []
         except ValueError as exc:
             raise HTTPException(400, f"trigger: {exc}") from exc
+        smart_ids = {r["id"] for r in rois if r["kind"] == "smart"}
+        if {spec.start.roi, spec.end.roi} & smart_ids:  # spec §7a: no smart trigger ROIs
+            raise HTTPException(400, "trigger: a smart ROI cannot be the trigger ROI")
         _recording_extra(req)  # validate the rest now, not when the trigger fires
         # Ring sizing: the measured rate is unreliable right after connect, so never assume
         # fewer than 60 fps (A70 max is 30; 2 s at 60 fps of 640x480 uint16 is ~74 MB).
@@ -1339,6 +1352,8 @@ def create_app(
                 raise HTTPException(400, "experiment path is outside the experiments root")
             return d
         raise HTTPException(404, f"experiment {name!r} not found")
+
+    register_smart_roi_routes(app, _exp_dir)
 
     # -- external-drive storage (offload) ------------------------------------------------------
 
