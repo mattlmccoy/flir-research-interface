@@ -13,6 +13,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from flir_research_interface.analysis import visible_sample_io as vio
 from flir_research_interface.analysis import visible_sample_run as vsr
 from tests import visible_sample_helpers as vh
 from tests.visible_sample_helpers import (
@@ -62,7 +63,7 @@ def test_runner_writes_atomically_and_overwrites(
     # a decode that dies mid-stream: failed, with no half-written or older results left
     assert run_analysis(d)["status"] == "ok"
     png_path.write_bytes(b"stale")
-    real_decode = vsr._decode_luma
+    real_decode = vio.decode_luma
 
     def dies_mid_stream(*args: Any, **kw: Any) -> Iterator[Any]:
         for i, frame in enumerate(real_decode(*args, **kw)):
@@ -70,7 +71,7 @@ def test_runner_writes_atomically_and_overwrites(
                 raise RuntimeError("decoder died")
             yield frame
 
-    monkeypatch.setattr(vsr, "_decode_luma", dies_mid_stream)
+    monkeypatch.setattr(vio, "decode_luma", dies_mid_stream)
     out = run_analysis(d)
     assert out["status"] == "failed" and out["reason"] == "RuntimeError: decoder died"
     assert exported(d) == ["visible_sample.json"]
@@ -104,7 +105,7 @@ def test_runner_frame_count_mismatch_fails(
     fixed_threshold: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    real_probe = vsr._probe
+    real_probe = vio.probe
 
     def one_extra_packet(*args: Any, **kw: Any) -> Any:
         probe = real_probe(*args, **kw)
@@ -115,7 +116,7 @@ def test_runner_frame_count_mismatch_fails(
             keyframe=np.append(probe.keyframe, False),
         )
 
-    monkeypatch.setattr(vsr, "_probe", one_extra_packet)
+    monkeypatch.setattr(vio, "probe", one_extra_packet)
     d = experiment(tmp_path, real, [short_clip])
     out = run_analysis(d)
     assert out["status"] == "failed"

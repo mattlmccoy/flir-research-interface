@@ -19,7 +19,7 @@ import os
 import shutil
 import subprocess
 from collections import Counter
-from collections.abc import Generator, Iterator
+from collections.abc import Generator
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +28,7 @@ from typing import Any
 import numpy as np
 
 from flir_research_interface import __version__
+from flir_research_interface.analysis import visible_sample_io as vio
 from flir_research_interface.analysis.visible_overlay import ir_to_visible_coeffs
 from flir_research_interface.analysis.visible_sample import (
     coverage,
@@ -79,20 +80,6 @@ class _Skip(Exception):  # noqa: N818 - a control-flow signal, not an error
         self.reason = reason
 
 
-class _NoPacketsError(ValueError):
-    """A video file that ffprobe reads without error but that holds no video packet."""
-
-
-@dataclass(frozen=True)
-class _Packets:
-    """What ffprobe says about one video file: frame size and per-packet time and keyframe flag."""
-
-    width: int
-    height: int
-    pts_s: np.ndarray
-    keyframe: np.ndarray
-
-
 @dataclass(frozen=True)
 class _Seg:
     """One video file on the thermal time axis: ``t_start_s`` is where its first packet falls.
@@ -141,64 +128,10 @@ class _Plan:
 # -- ffprobe and ffmpeg -------------------------------------------------------------------------
 
 
-def _probe(ffprobe: str, path: Path) -> _Packets:
-    """Frame size and the display time and keyframe flag of every packet of ``path``.
-
-    The recorder's stream is Baseline H.264 (no B-frames), so packet order is display order; a file
-    where times go backwards is refused rather than analysed on a wrong time axis. A file with no
-    video packet (the recorder leaves one when the camera never delivered a frame) raises
-    ``_NoPacketsError``.
-    """
-    cmd = [ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries"]
-    cmd += ["packet=pts_time,flags:stream=width,height", "-of", "json", str(path)]
-    run = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-    if run.returncode != 0:
-        raise RuntimeError(f"ffprobe failed (rc {run.returncode}): {run.stderr.strip()[-300:]}")
-    doc = json.loads(run.stdout)
-    packets, streams = doc.get("packets") or [], doc.get("streams") or []
-    if not packets or not streams:
-        raise _NoPacketsError(f"{path.name} has no video packets")
-    pts = np.array([float(p["pts_time"]) for p in packets])
-    if np.any(np.diff(pts) < 0):
-        raise ValueError(f"packet times in {path.name} are not in display order")
-    key = np.array(["K" in str(p.get("flags", "")) for p in packets], dtype=bool)
-    return _Packets(int(streams[0]["width"]), int(streams[0]["height"]), pts, key)
-
-
 def _has_analysed_frame(pts_s: np.ndarray) -> bool:
     """Whether any frame falls after the start-up skip, which ``_analysed`` drops by the same
     rule; a file where none does has nothing to measure."""
     return bool(np.any(pts_s - pts_s[0] >= FRAME0_SKIP_S))
-
-
-def _decode_luma(
-    ffmpeg: str, path: Path, crop: tuple[int, int, int, int]
-) -> Iterator[np.ndarray]:
-    """Yield the luma crop ``(x, y, w, h)`` of every frame of ``path`` as a ``(h, w)`` uint8 array.
-
-    ``-fps_mode passthrough`` gives exactly one frame per packet (the default inserts duplicates,
-    which would shift every later time). Closing the generator early stops ffmpeg.
-    """
-    x, y, w, h = crop
-    cmd = [ffmpeg, "-v", "fatal", "-nostdin", "-i", str(path)]
-    cmd += ["-vf", f"extractplanes=y,crop={w}:{h}:{x}:{y}", "-fps_mode", "passthrough"]
-    cmd += ["-f", "rawvideo", "-"]
-    proc = subprocess.Popen(
-        cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-    )
-    assert proc.stdout is not None and proc.stderr is not None
-    try:
-        while len(buf := proc.stdout.read(w * h)) == w * h:
-            yield np.frombuffer(buf, dtype=np.uint8).reshape(h, w)
-        if proc.wait() != 0:
-            tail = proc.stderr.read().decode(errors="replace")[-300:]
-            raise RuntimeError(f"ffmpeg decode failed (rc {proc.returncode}): {tail}")
-    finally:
-        if proc.poll() is None:
-            proc.kill()
-            proc.wait()
-        proc.stdout.close()
-        proc.stderr.close()
 
 
 def _closeup_box(
@@ -318,8 +251,8 @@ def _plan(reader: ExperimentReader, ffmpeg: str | None, ffprobe: str | None) -> 
     segments, sizes, empty = [], set(), []
     for s in files:
         try:
-            packets = _probe(ffprobe_exe, reader.path / s["file"])
-        except _NoPacketsError:
+            packets = vio.probe(ffprobe_exe, reader.path / s["file"])
+        except vio.NoPacketsError:
             packets = None
         if packets is None or not _has_analysed_frame(packets.pts_s):
             empty.append(str(s["file"]))
@@ -392,7 +325,7 @@ def _analysed(plan: _Plan, seg: _Seg) -> Generator[tuple[int, float, np.ndarray]
     (a missing or extra frame would put every later time on the wrong frame)."""
     n = len(seg.pts_s)
     decoded = 0
-    for decoded, luma in enumerate(_decode_luma(plan.ffmpeg, seg.path, plan.crop), start=1):
+    for decoded, luma in enumerate(vio.decode_luma(plan.ffmpeg, seg.path, plan.crop), start=1):
         if decoded > n:
             break
         rel = float(seg.pts_s[decoded - 1] - seg.pts_s[0])
