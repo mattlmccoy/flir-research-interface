@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field
 from flir_research_interface import __version__, storage
 from flir_research_interface import labels as labels_mod
 from flir_research_interface.acquisition.service import AcquisitionService, ServiceState
+from flir_research_interface.acquisition.smart_live import SmartLive
 from flir_research_interface.api.frames import encode_frame_message
 from flir_research_interface.api.reveal import Runner, contained, reveal
 from flir_research_interface.camera import CAMERA_BACKENDS, create_backend
@@ -310,6 +311,7 @@ def create_app(
         app.state.rf_link_last_event = None
         app.state.rf_link_pending = None  # RF metadata for the next arm-loop rf-triggered start
         app.state.live_rois = []  # server-side copy of the on-screen ROIs, for the control feed
+        app.state.smart_live = SmartLive()  # live smart ROI trackers (attached per camera session)
         app.state.control_last = None  # last control-telemetry the RF controller posted
         app.state.autoconnect_paused = False  # set by a user disconnect, cleared by a user connect
         # Auto-connect the real camera on startup and keep retrying while none is connected (best
@@ -326,6 +328,7 @@ def create_app(
         await _finalize_recording()
         svc: AcquisitionService | None = app.state.service
         if svc is not None:
+            _detach_smart(svc)
             await run_in_threadpool(svc.disconnect)
 
     app = FastAPI(title="FLIR Research Interface", version=__version__, lifespan=lifespan)
@@ -342,6 +345,14 @@ def create_app(
 
     def recorder() -> Recorder | None:
         return app.state.recorder  # type: ignore[no-any-return]
+
+    def _attach_smart(svc: AcquisitionService) -> None:
+        """Run the live smart ROI trackers on this session's frames (camera thread)."""
+        svc.add_listener(app.state.smart_live.on_frame)
+
+    def _detach_smart(svc: AcquisitionService) -> None:
+        svc.remove_listener(app.state.smart_live.on_frame)
+        app.state.smart_live.clear()  # a new session starts from a fresh search
 
     def _make_service(cam: CameraBackend) -> AcquisitionService:
         """Every operator-owned camera runs resiliently: it retries the first connect and, if the
@@ -364,6 +375,7 @@ def create_app(
             if app.state.service is not None or app.state.autoconnect_paused:
                 await run_in_threadpool(svc.disconnect)  # the user acted while we were connecting
                 return False
+            _attach_smart(svc)
             svc.start()
             app.state.service = svc
             app.state.backend_name = autoconnect_backend
@@ -658,6 +670,7 @@ def create_app(
                 raise HTTPException(404, f"no camera with serial {req.serial!r}")
             svc = _make_service(cam)
             await run_in_threadpool(svc.connect, chosen)
+            _attach_smart(svc)
             svc.start()
         except CameraError as exc:
             cam.disconnect()
@@ -679,6 +692,7 @@ def create_app(
         await _finalize_recording()  # never lose a recording because the operator disconnected
         if svc is None or service() is not svc:
             return {"state": ServiceState.DISCONNECTED.value}
+        _detach_smart(svc)
         await run_in_threadpool(svc.disconnect)
         if service() is svc:
             app.state.service = None
@@ -873,6 +887,7 @@ def create_app(
         them, so the browser pushes them here for GET /api/live/roi-temps to use.
         """
         app.state.live_rois = _rois_with_labels(body.rois) if body.rois else []
+        app.state.smart_live.set_rois(app.state.live_rois)
         return {"count": len(app.state.live_rois)}
 
     @app.get("/api/live/roi-temps")
@@ -892,6 +907,7 @@ def create_app(
             frame_id=frame.frame_id if frame is not None else None,
             host_ts_ns=frame.host_timestamp_ns if frame is not None else None,
             now_ns=time.time_ns(),
+            smart=app.state.smart_live.latest(),
         )
 
     @app.post("/api/control/telemetry")
@@ -2075,12 +2091,14 @@ def create_app(
                 if wait > 0:
                     await asyncio.sleep(wait)
                 last_sent = time.monotonic()
+                smart = app.state.smart_live.overlays()  # outlines from the camera-thread trackers
+                extra = {"smart": smart} if smart else None
                 if notch:  # ~10-20 ms of FFT work: off the event loop
                     msg = await run_in_threadpool(
-                        encode_frame_message, frame, svc.stats(), rf_notch=True
+                        encode_frame_message, frame, svc.stats(), extra, rf_notch=True
                     )
                 else:
-                    msg = encode_frame_message(frame, svc.stats())
+                    msg = encode_frame_message(frame, svc.stats(), extra)
                 await ws.send_bytes(msg)
         except WebSocketDisconnect:
             return

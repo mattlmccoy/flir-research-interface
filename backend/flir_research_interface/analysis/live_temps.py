@@ -10,13 +10,16 @@ same ROI indexing and over-range exclusion as the recorded-series path.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from flir_research_interface.analysis.series import roi_index
 from flir_research_interface.radiometry.overrange import over_range_mask
 from flir_research_interface.radiometry.temperature_linear import IRFormat, counts_to_celsius
+
+if TYPE_CHECKING:
+    from flir_research_interface.analysis.smart_roi import SmartResult
 
 STALE_MS = 1000.0  # a frame older than this (or no frame) is untrustworthy for control
 
@@ -27,10 +30,39 @@ def _iso(ns: int) -> str:
 
 def _invalid_roi(roi: dict[str, Any], *, over_range: bool = False) -> dict[str, Any]:
     """An ROI entry with no trustworthy temperature (names the ROI so the roster stays stable)."""
-    return {
+    out: dict[str, Any] = {
         "id": roi.get("id"), "name": roi.get("name"), "kind": roi.get("kind"),
         "mean_c": None, "max_c": None, "min_c": None, "value_c": None,
         "over_range": over_range, "valid": False,
+    }
+    if roi.get("kind") == "smart":  # keep the smart keys present so the shape never changes
+        out.update({"state": "searching", "rings": [], "dims": None})
+    return out
+
+
+def _smart_entry(roi: dict[str, Any], result: SmartResult | None) -> dict[str, Any]:
+    """A smart ROI's feed entry: today's flat keys plus ``state``, ``rings`` and ``dims``
+    (spec §7a). Valid only when the tracker says so *and* it measured a sample temperature —
+    holding stays valid (spec §7b) until the tracker's hold window lapses."""
+    if result is None:  # no tracker result yet (new ROI, bad spec, no frame tracked)
+        return _invalid_roi(roi)
+    sample = result.sample or {}
+    temps = {k: sample.get(k) for k in ("mean_c", "max_c", "min_c")}
+    valid = bool(result.valid) and all(isinstance(v, float) for v in temps.values())
+    if not valid:
+        entry = _invalid_roi(roi, over_range=bool(result.over_range))
+        entry["state"] = result.state
+        entry["rings"] = [dict(g) for g in result.rings]
+        return entry
+    return {
+        "id": roi.get("id"), "name": roi.get("name"), "kind": "smart",
+        **temps,
+        "value_c": None,
+        "over_range": False,
+        "valid": True,
+        "state": result.state,
+        "rings": [dict(g) for g in result.rings],
+        "dims": dict(result.dims) if result.dims is not None else None,
     }
 
 
@@ -44,12 +76,14 @@ def live_roi_payload(
     host_ts_ns: int | None,
     now_ns: int,
     stale_ms: float = STALE_MS,
+    smart: dict[int, SmartResult] | None = None,
 ) -> dict[str, Any]:
     """Per-ROI °C from the latest acquired frame, with an explicit freshness/validity contract.
 
     ``counts`` is the latest frame (uint16), or None when the camera has produced no frame.
     ``acquiring`` is whether the camera is actively streaming. Returns the JSON-able payload
-    documented in the closed-loop design spec.
+    documented in the closed-loop design spec. ``smart`` holds the live trackers' latest
+    results by ROI id (``SmartLive.latest()``); a smart ROI without one reports invalid.
     """
     age_ms = (now_ns - host_ts_ns) / 1e6 if host_ts_ns is not None else None
     have_frame = (
@@ -84,6 +118,12 @@ def live_roi_payload(
     h, w = celsius.shape
     out: list[dict[str, Any]] = []
     for roi in rois:
+        if roi.get("kind") == "smart":
+            try:
+                out.append(_smart_entry(roi, (smart or {}).get(roi.get("id"))))  # type: ignore[arg-type]
+            except (KeyError, ValueError, TypeError, AttributeError):
+                out.append(_invalid_roi(roi))  # a malformed result only invalidates itself
+            continue
         try:
             ys, xs = roi_index(roi, w, h)
         except (KeyError, ValueError, TypeError, IndexError):
