@@ -170,3 +170,105 @@ Assessment for this project:
   during experiments unless needed, and never bridge it to the campus network.
 
 Decision: leave the radio off; revisit only if a wireless preview for the lab proves useful.
+
+## 4. Exposure control and post-run sample analysis (2026-10-20)
+
+On `20261020_144402_Run` (the reference run below) the white PA12 powder is clipped for the whole
+video: the right half of the powder sits at exactly 255 and the left half at 245-254. The camera's
+auto-exposure presumably meters the dark cage and metal and over-exposes the powder. The wanted
+uses of the visible camera were spotting sparks or arcs at the sample and watching the doped part
+densify and slump.
+
+### The visible exposure cannot be set (checked 2026-10-20, firmware 4.45.003, reading only)
+
+* **GenICam:** the 2026-09-01 dump has 249 device nodes; none controls the visible camera's
+  exposure.
+* **ONVIF:** the client was initialised with the `fliruser` account. The imaging service offers
+  Focus only, on both `video0` (IR) and `video1` (Visual).
+* **REST API and web UI:** no exposure, brightness or backlight control, including in the service
+  screen's JavaScript (5 bundles). `/api/image/adjustment` is the IR display scaling, not the
+  visible camera.
+* **Resource tree:** `/prod/res/` answers while `httpResource` is on. `.system.vcam` holds
+  `active`, `flash`, `fov`, `model` (OV5640), `test` and `torch`; there is no exposure entry. Leave
+  `httpResource` off: it allows unauthenticated reads.
+* **SSH:** the sensor's exposure is set inside the camera's Linux, reachable only through an
+  unpublished SSH login. Out of scope. A FLIR support request and a second camera were ruled out by
+  the operator.
+
+What the clipped video still holds, measured on the reference run (6,192 frames): the sample is well
+exposed (mean luma of its dark pixels 107.6 in the first analysed frame) and its outline changes
+over the run. The powder is unrecoverable: contrast-stretched, it shows only a lighting gradient
+and compression blocks.
+
+### What the post-run analysis writes
+
+`analyse_visible_sample` (`backend/flir_research_interface/analysis/visible_sample_run.py`) reads
+`visible.mp4`, the visible-to-IR alignment and the ROIs, and writes only into the run's `exports/`
+folder. It never touches `thermal.zarr`, `visible.mp4`, `metadata.json` or the camera. It runs in
+the post-stop export job (step "visible sample analysis", after the run summary and before the
+thermal preview video) and again in the derived-files regenerate job; a failure is logged and never
+blocks Stop.
+
+| File | Content |
+|---|---|
+| `visible_sample.json` | Always written. `status` (`ok`, `skipped`, `failed`) and `reason`; for `ok` also the inputs (sample and bed ROI, alignment `saved_utc` / `rmsPx`, `threshold`, `dark_rule`, `margin_px`, flash rule and `flash_threshold`), `coverage`, `events`, `files`. A skipped or failed run keeps only `status`, `reason`, `software`, `files`: nothing was analysed, so there is no coverage block to misread. |
+| `visible_sample.csv` | One row per analysed frame: `t_s` (thermal clock), `segment`, `frame` (index in its file), `keyframe`, `sample_dark_px`, `sample_mean_luma`, `bed_clipped_frac`, `brightening` (empty on keyframes). |
+| `visible_sample_plot.png` | Four panels on the thermal time axis: RF forward power; sample ROI max and mean (°C, with the 250 °C case limit); `sample_dark_px` with a 31-frame rolling median; `brightening`. Flash events are drawn as vertical lines labelled with the peak value. |
+| `visible_sample_closeup.mp4` | A 3x crop around the sample with one fixed contrast stretch (luma 58-250 on the reference run). Later segments get `_001`, `_002`, ... |
+
+The sample is the ROI whose name contains "sample" (smallest wins). Reasons for `skipped`: `no visible
+video`, `no visible alignment`, `no sample ROI (name containing 'sample')`, `ffmpeg not found`,
+`ffprobe not found`, `visible alignment is invalid`, `sample ROI maps outside the visible frame`.
+`GET /api/experiments/{name}` returns the JSON as `visible_sample`; playback draws the flash events
+as marks on the timeline, reachable with the existing ◆◀ / ▶◆ buttons, and shows `status` and `reason`
+beside the export files. Events are not written into `events.json`.
+
+Method: the analysis region is the sample outline mapped into the visible frame through the
+alignment, grown by 30 visible px. "Dark" means luma **strictly below** the run's threshold, one
+Otsu value chosen from the first 5 s of analysed frames and then held fixed, so an exposure drift
+cannot pass as an area change. `brightening` is the 99.5th percentile of (luma - previous frame's
+luma) over the region. A non-keyframe is flagged when `brightening >= max(15, median + 6 x
+max(MAD, 1))` over the run's non-keyframe values; flagged frames within 1.0 s form one event.
+
+### Reference run `20261020_144402_Run` (run on 2026-10-21, `visible.mp4` sha256 `c61f66fc...`)
+
+| Item | Result |
+|---|---|
+| Status, threshold | `ok`, 178; `flash_threshold` 15 (median 1.0 and MAD 1.48 leave the floor binding) |
+| Start-of-run dark area | 1,095 px (mean of the first 5 s, 24 frames; 1,100 in the first frame) |
+| Coverage | 6,189 frames analysed (the first 3 are skipped), 26.48-632.57 s, 61 gaps over 0.3 s (longest 0.84 s) |
+| Event 1 | 553.95-554.06 s, 2 frames, peak +20 at frame 5303 |
+| Event 2 | 615.66-615.85 s, 2 frames, peak +19 at frame 6005 |
+| Event 3 | 627.77-629.41 s, 7 frames, peak +97 at frame 6142 |
+| 413.3-414.0 s | no event: the largest `brightening` in the window is +5; the 413.65 s decoding glitch (a band of the image shifted sideways) reads 0.0, and the frame at 413.84 s is a keyframe, whose `brightening` is left empty |
+| Run time | 15.3 s on an Apple M2 Pro for 606.6 s of video: 2.0 s decoding and measuring, 3.3 s close-up encode, 9.4 s plot (it re-reads the thermal store), 0.5 s probing |
+
+The events line up with the thermal record: the sample ROI's max jumps at about 553 s and 615 s,
+and the 627.77 s event follows the max reaching 250 °C. The two small events are 4-5 levels above the
+15-level floor. A noisier run raises the threshold: at a median of 1.0, a MAD above about 3.2 puts
+it over +20 and drops events of that size. The effective threshold is written to every JSON for
+that reason.
+
+### Limits
+
+* **The powder is unrecoverable** and no exposure setting is reachable (above). Nothing here shows
+  powder state.
+* **Flash detection ignores H.264 keyframes.** The encoder's periodic refresh shifts brightness, so
+  `brightening` is left empty on keyframes (412 of the 6,189 analysed frames on the reference run).
+  A flash that lands on a keyframe is not flagged.
+* **The visible stream is about 10 fps with gaps.** `visible.json` records 10.2 fps for the
+  reference run (the camera throttles the stream while the radiometric stream runs, see the
+  2026-09-02 verification at the top of this file), and 61 gaps exceed 0.3 s. A flash shorter than the gap before or after one frame can be
+  missed; two of the three reference events are only two frames long.
+* **A "flash" is not proof of an arc or a spark.** It is a brightening in the sample region seen in
+  one or a few frames; the cause needs the thermal and RF record. "0 flashes" is only meaningful
+  with the coverage next to it: a run that could not be analysed says `skipped` or `failed` and
+  never reads as zero.
+* **Only the sample region is watched.** Flashes at the cage, electrodes or cables are not looked
+  for.
+* **The close-up is a viewing aid, not a frame-exact record.** On the reference run it holds 5,367
+  of the 6,189 analysed frames: with `-fps_mode vfr` its output times fall on a 98 ms grid (the
+  stream's 10.2 fps average) and ffmpeg drops the frames that land on the same grid point. `ffprobe` also lists the close-up's
+  frame timestamps out of order (x264 B-frames), so seeking to 601.77 s (627.77 s thermal) lands
+  next to the glow frame; the glow frame is labelled 601.48 s. Take times from the CSV and the
+  flash marks.
