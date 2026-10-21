@@ -26,7 +26,7 @@ from typing import Annotated, Any
 from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictFloat
 
 from flir_research_interface import __version__, storage
 from flir_research_interface import labels as labels_mod
@@ -107,21 +107,22 @@ class ConnectRequest(BaseModel):
 
 
 class VisibleAdjustIn(BaseModel):
-    """Slider values in effect when recording starts; stamped into ``metadata.json``."""
+    """Slider values in effect when recording starts; stamped into ``metadata.json``. Strict, so
+    ``true`` or ``"1.0"`` are refused rather than coerced before ``validate_adjust`` sees them."""
 
-    exposure_ev: float
-    brightness: float
-    contrast: float
+    exposure_ev: StrictFloat
+    brightness: StrictFloat
+    contrast: StrictFloat
     preset: str | None = None
     based_on: str | None = None
 
 
 class VisibleAdjustRequest(BaseModel):
-    """A run's saved visible adjustment (PUT body)."""
+    """A run's saved visible adjustment (PUT body); strict numbers, as ``VisibleAdjustIn``."""
 
-    exposure_ev: float
-    brightness: float
-    contrast: float
+    exposure_ev: StrictFloat
+    brightness: StrictFloat
+    contrast: StrictFloat
     library: str | None = None  # "local"|"drive"|None (None = first found, local-first)
 
 
@@ -1571,7 +1572,7 @@ def create_app(
                     for p in exp_dir.iterdir()
                     if p.is_file()
                     and not p.name.startswith(".")
-                    and not p.name.endswith(".part.mp4")
+                    and not p.name.endswith((".part.mp4", ".part"))  # being written
                 ),
                 key=lambda e: str(e["name"]),
             )

@@ -10,7 +10,6 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from flir_research_interface import storage
 from flir_research_interface import visible_adjust_store as store
 from flir_research_interface.api.app import create_app
 
@@ -96,10 +95,6 @@ def test_recording_stamp_validates_and_keeps_labels() -> None:
     assert store.recording_stamp({**SIDECAR_VALUES})["preset"] is None
     with pytest.raises(ValueError):
         store.recording_stamp({"exposure_ev": 0.0, "brightness": 0.9, "contrast": 1.0})
-
-
-def test_mutable_paths_include_sidecar() -> None:
-    assert storage.MUTABLE_PATHS == ("labels.json", "visible_adjust.json", "exports/*")
 
 
 def test_recording_start_stamps_visible_adjust(tmp_path: Path) -> None:

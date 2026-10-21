@@ -122,7 +122,7 @@ def test_full_range_copy_is_none_without_ffmpeg(tmp_path: Path) -> None:
     run = _run_dir(tmp_path)
     (run / "visible.mp4").write_bytes(b"not a video")
     assert full_range_copy(run, "visible.mp4", "/nonexistent") is None
-    assert full_range_copy(run, "visible.mp4", None) is None or FFMPEG is not None
+    assert full_range_copy(run, "visible.mp4", None) is None  # found or not, garbage never builds
 
 
 @needs_ffmpeg

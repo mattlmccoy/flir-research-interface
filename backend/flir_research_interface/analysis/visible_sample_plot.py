@@ -321,6 +321,34 @@ def _draw_brightening(panel: _Panel, arr: RowArrays, runs: list[slice], events: 
     panel.trace(arr.t, arr.brightening, runs, BRIGHT_RGB, 2)
 
 
+def _fmt_adjust(value: float, signed: bool) -> str:
+    """``value`` to 2 decimals, as the UI's adjusted status line shows it (``+`` when signed)."""
+    r = round(float(value), 2) + 0.0  # + 0.0 turns -0.0 into 0.0
+    text = f"{r:g}"
+    return f"+{text}" if signed and r > 0 else text
+
+
+def plot_title(summary: dict[str, Any]) -> str | None:
+    """The title of the adjusted plot (the adjustment it measured), ``None`` for the raw plot.
+
+    ``summary["adjust"]`` is what ``analyse_visible_sample`` records for the adjusted family; when
+    its values are missing the title still says the plot is adjusted.
+    """
+    if "adjust" not in summary:
+        return None
+    a = summary.get("adjust")
+    if not isinstance(a, dict):
+        return "(adjusted)"
+    try:
+        ev, b, c = (float(a[k]) for k in ("exposure_ev", "brightness", "contrast"))
+    except (KeyError, TypeError, ValueError):
+        return "(adjusted)"
+    return (
+        f"(adjusted: exposure {_fmt_adjust(ev, True)} EV, brightness {_fmt_adjust(b, True)}, "
+        f"contrast {_fmt_adjust(c, False)})"
+    )
+
+
 def visible_sample_plot_png(
     reader: ExperimentReader, rows: list[dict[str, Any]], summary: dict[str, Any]
 ) -> bytes:
@@ -371,6 +399,10 @@ def visible_sample_plot_png(
         panel.event_labels(events)
     label = "time since thermal frame 0 (s)"
     canvas.d.text((MARGIN_L, boxes[-1][1] + 48), label, fill=TICK_RGB, font=canvas.font)
+    title = plot_title(summary)
+    if title is not None:  # top right, level with the RF legend (which sits at the left)
+        top = boxes[0][0] - LEGEND_ABOVE - 2
+        canvas.d.text((canvas.x1, top), title, fill=LABEL_RGB, font=canvas.font, anchor="ra")
     buf = io.BytesIO()
     canvas.img.save(buf, format="PNG", optimize=True)
     return buf.getvalue()
@@ -380,6 +412,7 @@ __all__ = [
     "line_runs",
     "median_by_run",
     "panel_boxes",
+    "plot_title",
     "rolling_median",
     "row_arrays",
     "unit_label",

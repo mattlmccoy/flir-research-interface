@@ -36,6 +36,7 @@ from flir_research_interface.analysis.visible_sample_plot import (
     line_runs,
     median_by_run,
     panel_boxes,
+    plot_title,
     rolling_median,
     row_arrays,
     unit_label,
@@ -392,3 +393,27 @@ def test_runner_keeps_the_analysis_when_only_the_plot_fails(
     assert exported(d) == sorted(out["files"])
     assert (d / "exports" / "visible_sample.csv").is_file() and out["coverage"]["frames_analysed"]
     assert json.loads((d / "exports" / "visible_sample.json").read_text()) == out
+
+
+def test_plot_title_names_the_adjustment_only_for_the_adjusted_plot() -> None:
+    adjusted = {**_summary(), "adjust": {"exposure_ev": 0.5, "brightness": -0.1, "contrast": 1.5,
+                                         "source": "sidecar"}}
+    assert plot_title(adjusted) == "(adjusted: exposure +0.5 EV, brightness -0.1, contrast 1.5)"
+    neutral = {"adjust": {"exposure_ev": 0.0, "brightness": -0.0, "contrast": 1.0}}
+    assert plot_title(neutral) == "(adjusted: exposure 0 EV, brightness 0, contrast 1)"
+    assert plot_title({"adjust": {"exposure_ev": 1.0, "brightness": 0.123, "contrast": 0.255}}) == (
+        "(adjusted: exposure +1 EV, brightness +0.12, contrast 0.26)"
+    )
+    assert plot_title(_summary()) is None  # the raw plot has no title
+    assert plot_title({"adjust": None}) == "(adjusted)"  # values unknown: still says adjusted
+
+
+def test_adjusted_plot_draws_its_title_above_the_top_panel(tmp_path: Path) -> None:
+    reader = _thermal_run(tmp_path)
+    raw = _image(visible_sample_plot_png(reader, _rows(), _summary()))
+    adjust = {"exposure_ev": 0.5, "brightness": 0.0, "contrast": 1.0, "source": "sidecar"}
+    adj = _image(visible_sample_plot_png(reader, _rows(), {**_summary(), "adjust": adjust}))
+    strip = (slice(0, panel_boxes()[0][0]), slice(PLOT_W // 2, PLOT_W))  # above panel 1, right
+    assert np.abs(adj[strip] - raw[strip]).sum() > 0
+    below = (slice(panel_boxes()[0][0], PLOT_H), slice(0, PLOT_W))
+    assert np.array_equal(adj[below], raw[below])  # only the title differs
