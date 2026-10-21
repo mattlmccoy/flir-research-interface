@@ -43,5 +43,12 @@ for keyframes too. Check values: frames 6141, 6142, 6143 give 5, 97, 27; the reg
 byte-identical, sha256 `b3ab86b6…eaffc2`), copied unchanged. It is an mp4 container (`ftyp`,
 `moov` with no track, an empty `mdat`) with no video stream. `ffprobe -select_streams v:0
 -show_entries packet=pts_time,flags:stream=width,height -of json` exits 0 and prints empty
-`packets` and `streams`, which is what `_probe` in `analysis/visible_sample_run.py` reads as "no
+`packets` and `streams`, which is what `probe` in `analysis/visible_sample_io.py` reads as "no
 video packets". No pixel data.
+
+`rf_banding_frames.npz` — real A70 frames (uint16 counts, TemperatureLinear10mK) for the RF-banding
+filter: `pre_riser_rf_off` / `pre_riser_rf_off_next` (frames 42 and 43 of `20261019_120320_Run`,
+RF generator at 0 W), `pre_riser_rf_on` (frame 212 of the same run, heavy diagonal banding),
+`riser_rf_on` (frame 1986 of `20261019_131145_Run`, camera on the riser) and `strap_weak_banding`
+(frame 1065 of `20261019_182233_Run` at 150 W after the coax strap: banding ~9 mK, under the
+~28 mK camera noise). Copied from `thermal.zarr` unchanged (`ir_format` stored alongside).

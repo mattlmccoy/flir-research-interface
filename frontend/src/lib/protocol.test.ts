@@ -62,3 +62,19 @@ test("decodeFrameBlock splits a concatenated [len][msg] body into frames", () =>
   assert.equal(frames[0].header.frame_id, 0);
   assert.equal(frames[1].counts[0], 101);
 });
+
+test("a frame with a display copy decodes both arrays; raw counts stay first", () => {
+  const header = { type: "frame", frame_id: 4, width: 3, height: 1, kelvin_per_count: 0.01, kelvin_offset: 273.15, display: { rf_notch: { applied: true, bands: ["diag+"], rms_mk: 12.5, max_mk: 30 }, counts: true } };
+  const msg = decodeFrameMessage(build(header, new Uint16Array([10, 20, 30, 11, 19, 31])));
+  assert.deepEqual(Array.from(msg.counts), [10, 20, 30]);
+  assert.deepEqual(Array.from(msg.display!), [11, 19, 31]);
+  const info = msg.header.display?.rf_notch;
+  assert.ok(info && info.applied);
+  assert.deepEqual(info.bands, ["diag+"]);
+});
+
+test("a frame without a display copy has none, and a double payload without the flag is rejected", () => {
+  const header = { type: "frame", frame_id: 5, width: 3, height: 1 };
+  assert.equal(decodeFrameMessage(build(header, new Uint16Array([1, 2, 3]))).display, undefined);
+  assert.throws(() => decodeFrameMessage(build(header, new Uint16Array([1, 2, 3, 4, 5, 6]))), /payload/);
+});

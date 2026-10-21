@@ -170,6 +170,7 @@ class MediaRequest(BaseModel):
     visible_opacity: float = Field(default=0.0, ge=0.0, le=1.0)  # blend visible camera (0 = off)
     palette: str = "inferno"  # color palette for the thermal frame
     max_mb: float = Field(default=0.0, ge=0.0)  # cap output file size (MB); 0 = no limit
+    rf_notch: bool = False  # colour the clip with the RF banding removed (numbers stay raw)
     rois: list[dict[str, Any]] | None = None  # when given, persist first (on-screen ROIs)
 
 
@@ -1688,7 +1689,7 @@ def create_app(
             plot_roi=req.plot_roi, plot_rois=tuple(req.plot_rois), plot_stat=req.plot_stat,
             plot_stats=tuple(req.plot_stats), plot_series=_parse_series(req.plot_series),
             overlay_rois=tuple(req.overlay_rois), visible_opacity=req.visible_opacity,
-            palette=req.palette, max_mb=req.max_mb,
+            palette=req.palette, max_mb=req.max_mb, rf_notch=req.rf_notch,
         )
 
         def _work() -> dict[str, Any]:
@@ -1785,7 +1786,7 @@ def create_app(
         plot_series: Annotated[list[str] | None, Query()] = None,
         overlay_rois: Annotated[list[int] | None, Query()] = None,
         plot_stat: str = "mean", start: int = 0, stop: int = 0, visible_opacity: float = 0.0,
-        palette: str = "inferno",
+        palette: str = "inferno", rf_notch: bool = False,
     ) -> Response:
         """One composed frame (same overlays as the export) as PNG for the editor preview."""
         from flir_research_interface.analysis.media import MediaOptions, compose_preview
@@ -1797,7 +1798,7 @@ def create_app(
                             plot_series=_parse_series(plot_series or []),
                             overlay_rois=tuple(overlay_rois or ()),
                             visible_opacity=max(0.0, min(1.0, visible_opacity)), palette=palette,
-                            start=start, stop=stop)
+                            start=start, stop=stop, rf_notch=rf_notch)
         try:
             png = await run_in_threadpool(compose_preview, _open(name), opts, index)
         except ValueError as exc:
@@ -1835,7 +1836,7 @@ def create_app(
 
     @app.get("/api/experiments/{name}/frames")
     def experiment_frame_block(
-        name: str, start: int = 0, count: int = Query(32, ge=1, le=256)
+        name: str, start: int = 0, count: int = Query(32, ge=1, le=256), rf_notch: bool = False
     ) -> Response:
         """A run of frames in one response: repeated [uint32 length][frame message]. One request
         instead of one per frame keeps playback smooth (block Zarr reads are ~30x cheaper)."""
@@ -1859,6 +1860,7 @@ def create_app(
             msg = encode_frame_message(
                 frame,
                 extra={"index": i, "n_frames": r.n_frames, "t_s": r.t_s(i), "source": "playback"},
+                rf_notch=rf_notch,
             )
             parts.append(struct.pack(">I", len(msg)) + msg)
         return Response(
@@ -1868,7 +1870,7 @@ def create_app(
         )
 
     @app.get("/api/experiments/{name}/frames/{index}")
-    def experiment_frame(name: str, index: int) -> Response:
+    def experiment_frame(name: str, index: int, rf_notch: bool = False) -> Response:
         r = _open(name)
         try:
             frame = r.frame(index)
@@ -1882,6 +1884,7 @@ def create_app(
                 "t_s": r.t_s(index),
                 "source": "playback",
             },
+            rf_notch=rf_notch,
         )
         return Response(content=payload, media_type="application/octet-stream")
 
@@ -2083,6 +2086,8 @@ def create_app(
     @app.websocket("/ws/frames")
     async def ws_frames(ws: WebSocket) -> None:
         await ws.accept()
+        # ?rf_notch=1: add a display copy with the RF banding removed (raw counts still first)
+        notch = ws.query_params.get("rf_notch") in ("1", "true")
         min_interval = 1.0 / app.state.viz_fps if app.state.viz_fps > 0 else 0.0
         last_id: int | None = None
         last_sent = 0.0
@@ -2105,7 +2110,13 @@ def create_app(
                 if wait > 0:
                     await asyncio.sleep(wait)
                 last_sent = time.monotonic()
-                await ws.send_bytes(encode_frame_message(frame, svc.stats()))
+                if notch:  # ~10-20 ms of FFT work: off the event loop
+                    msg = await run_in_threadpool(
+                        encode_frame_message, frame, svc.stats(), rf_notch=True
+                    )
+                else:
+                    msg = encode_frame_message(frame, svc.stats())
+                await ws.send_bytes(msg)
         except WebSocketDisconnect:
             return
         except Exception:  # noqa: BLE001

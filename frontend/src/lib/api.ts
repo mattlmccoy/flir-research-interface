@@ -1,4 +1,5 @@
 import { apiUrl, loadOperatorBase, saveOperatorBase } from "./operator.ts";
+import { mediaPreviewQuery, type MediaPreviewOptions } from "./mediaQuery.ts";
 import type { VisibleGap, VisibleSegment } from "./visibleSegments.ts";
 import type { VisibleSampleSummary } from "./visibleSample.ts";
 
@@ -59,7 +60,7 @@ export interface ThermalVideoExport { path: string; frames: number; fps: number;
 /** Progress of an on-demand derived regenerate (background job). */
 export interface DerivedJob { state: "running" | "done" | "error" | "idle"; step?: string; done?: number; total?: number; exports?: { name: string; bytes: number }[] | null; error?: string | null; }
 /** Options for a media-export render (a window of frames to MP4/GIF with overlays). */
-export interface MediaOptions { start: number; stop: number; step?: number; scale?: number; speed?: number; fps?: number | null; fmt: "mp4" | "gif"; with_rois?: boolean; frame_stats?: boolean; timestamp?: boolean; colorbar?: boolean; title?: string | null; plot_roi?: number | null; plot_rois?: number[]; plot_stat?: string; plot_stats?: string[]; plot_series?: string[]; overlay_rois?: number[]; visible_opacity?: number; palette?: string; max_mb?: number; rois?: unknown[] | null; }
+export interface MediaOptions { start: number; stop: number; step?: number; scale?: number; speed?: number; fps?: number | null; fmt: "mp4" | "gif"; with_rois?: boolean; frame_stats?: boolean; timestamp?: boolean; colorbar?: boolean; title?: string | null; plot_roi?: number | null; plot_rois?: number[]; plot_stat?: string; plot_stats?: string[]; plot_series?: string[]; overlay_rois?: number[]; visible_opacity?: number; palette?: string; max_mb?: number; rois?: unknown[] | null; rf_notch?: boolean; }
 /** Progress of a media-export render (background job). */
 export interface MediaJob { state: "running" | "done" | "error" | "idle"; step?: string; done?: number; total?: number; file?: { name: string; bytes: number; note?: string | null } | null; error?: string | null; }
 export interface RangeJob { state: "running" | "done" | "error" | "idle"; done: number; total: number; error?: string | null; }
@@ -165,8 +166,8 @@ export const api = {
   clipUrl: (name: string, file: string) =>
     u(`/api/experiments/${encodeURIComponent(name)}/exports/clips/${encodeURIComponent(file)}`),
   /** A composed preview frame (PNG) for the editor: same overlays as the export, at `index`. */
-  mediaPreviewUrl: (name: string, index: number, o: { with_rois?: boolean; frame_stats?: boolean; timestamp?: boolean; colorbar?: boolean; title?: string | null; plot_series?: string[]; overlay_rois?: number[]; visible_opacity?: number; palette?: string; start?: number; stop?: number }) =>
-    u(`/api/experiments/${encodeURIComponent(name)}/export/media/preview?index=${index}&scale=1&with_rois=${o.with_rois !== false}&frame_stats=${!!o.frame_stats}&timestamp=${o.timestamp !== false}&colorbar=${o.colorbar !== false}${o.palette ? `&palette=${o.palette}` : ""}${o.title ? `&title=${encodeURIComponent(o.title)}` : ""}${(o.plot_series ?? []).map((s) => `&plot_series=${encodeURIComponent(s)}`).join("")}${(o.overlay_rois ?? []).map((r) => `&overlay_rois=${r}`).join("")}${o.visible_opacity ? `&visible_opacity=${o.visible_opacity}` : ""}${o.plot_series?.length ? `&start=${o.start ?? 0}&stop=${o.stop ?? 0}` : ""}`),
+  mediaPreviewUrl: (name: string, index: number, o: MediaPreviewOptions) =>
+    u(`/api/experiments/${encodeURIComponent(name)}/export/media/preview${mediaPreviewQuery(index, o)}`),
   exportFileUrl: (name: string, file: string) => u(`/api/experiments/${encodeURIComponent(name)}/exports/${encodeURIComponent(file)}`),
   thermalVideoUrl: (name: string) => u(`/api/experiments/${encodeURIComponent(name)}/thermal_preview.mp4`),
   frameBuffer: async (name: string, index: number): Promise<ArrayBuffer> => {
@@ -174,8 +175,8 @@ export const api = {
     if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
     return res.arrayBuffer();
   },
-  frameBlock: async (name: string, start: number, count: number): Promise<ArrayBuffer> => {
-    const res = await req(`/api/experiments/${encodeURIComponent(name)}/frames?start=${start}&count=${count}`);
+  frameBlock: async (name: string, start: number, count: number, rfNotch = false): Promise<ArrayBuffer> => {
+    const res = await req(`/api/experiments/${encodeURIComponent(name)}/frames?start=${start}&count=${count}${rfNotch ? "&rf_notch=1" : ""}`);
     if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
     return res.arrayBuffer();
   },

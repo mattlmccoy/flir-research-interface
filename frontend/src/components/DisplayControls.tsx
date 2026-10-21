@@ -27,11 +27,13 @@ interface Props {
   agc?: Agc; setAgc?: (a: Agc) => void;
   segment?: { on: boolean; min: number; max: number }; setSegment?: (s: { on: boolean; min: number; max: number }) => void;
   filter?: FilterName; setFilter?: (f: FilterName) => void;
+  /** Remove the 13.56 MHz RF banding (display only, done on the operator) and what it did. */
+  rfNotch?: boolean; setRfNotch?: (on: boolean) => void; rfStatus?: string | null;
   units?: Units; setUnits?: (u: Units) => void; conv?: Conversion | null;
 }
 
 /** Palette + display-range controls shared by live view and playback. Visualization only. */
-export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, manual, setManual, shown, isotherm, setIsotherm, hasReference, onSetReference, onClearReference, onSnapshot, onRangeFromRoi, hold = "off", setHold, flipH = false, flipV = false, setFlip, saturation, agc, setAgc, segment, setSegment, filter = "off", setFilter, units = "C", setUnits, conv = null }: Props) {
+export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, manual, setManual, shown, isotherm, setIsotherm, hasReference, onSetReference, onClearReference, onSnapshot, onRangeFromRoi, hold = "off", setHold, flipH = false, flipV = false, setFlip, saturation, agc, setAgc, segment, setSegment, filter = "off", setFilter, units = "C", setUnits, conv = null, rfNotch = false, setRfNotch, rfStatus = null }: Props) {
   const iso = isotherm ?? DEFAULT_ISOTHERM;
   const upd = (patch: Partial<Isotherm>) => setIsotherm?.({ ...iso, ...patch });
   const isoRow = setIsotherm && (
@@ -82,6 +84,12 @@ export function DisplayControls({ palette, setPalette, scaleMode, setScaleMode, 
               <option value="off">no filter</option><option value="blur3">blur 3×3</option><option value="blur5">blur 5×5</option><option value="median3">median 3×3</option>
             </select>
           )}
+          {setRfNotch && (
+            <label title="Removes the diagonal stripes the 13.56 MHz RF puts on the image (pre-riser runs). Display and image exports only: ROI readouts, stats and CSVs keep the raw data.">
+              <input type="checkbox" checked={rfNotch} onChange={(e) => setRfNotch(e.target.checked)} /> remove RF banding
+            </label>
+          )}
+          {setRfNotch && rfStatus && <span className="muted" aria-live="polite">{rfStatus}</span>}
           {setFlip && <button className="secondary" aria-pressed={flipH} onClick={() => setFlip(!flipH, flipV)} title="Mirror the image left–right (display only)">⇋ H</button>}
           {setFlip && <button className="secondary" aria-pressed={flipV} onClick={() => setFlip(flipH, !flipV)} title="Mirror the image top–bottom (display only)">⇅ V</button>}
         </div>

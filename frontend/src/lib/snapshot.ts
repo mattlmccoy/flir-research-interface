@@ -4,15 +4,16 @@
  */
 import type { Range } from "./scale.ts";
 
-export function snapshotFilename(name: string, index: number | null, tS: number | null): string {
+export function snapshotFilename(name: string, index: number | null, tS: number | null, opts: { rfFiltered?: boolean } = {}): string {
   const safe = name.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "frame";
   const parts = [safe];
   if (index !== null) parts.push(`f${String(index + 1).padStart(4, "0")}`);
   if (tS !== null) parts.push(`t${tS.toFixed(3)}s`);
+  if (opts.rfFiltered) parts.push("rf-filtered");
   return `${parts.join("_")}.png`;
 }
 
-export interface FooterInfo { name: string; tS: number | null; index: number | null; range: Range; palette: string; rois: number; reference: boolean; }
+export interface FooterInfo { name: string; tS: number | null; index: number | null; range: Range; palette: string; rois: number; reference: boolean; rfFiltered?: boolean; }
 
 export function snapshotFooter(i: FooterInfo): string {
   const parts = [i.name];
@@ -24,6 +25,7 @@ export function snapshotFooter(i: FooterInfo): string {
   if (i.tS !== null) parts.push(`${i.tS.toFixed(3)} s`);
   parts.push(`${i.palette} ${i.range.min.toFixed(1)}–${i.range.max.toFixed(1)} °C`);
   if (i.rois > 0) parts.push(`${i.rois} ROI${i.rois === 1 ? "" : "s"}`);
+  if (i.rfFiltered) parts.push("RF banding removed (display only)");
   return parts.join(" · ");
 }
 

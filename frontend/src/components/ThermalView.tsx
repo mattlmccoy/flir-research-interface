@@ -89,6 +89,9 @@ interface Props {
   /** ROIs whose readouts are computed (default: ``rois``). In mask mode ``rois`` holds the mask
    *  regions for editing while the real ROIs keep being measured. */
   statsRois?: Roi[];
+  /** Colour the image from the frame's display copy (RF banding removed) when it has one.
+   *  Numbers (hover, ROI stats, the field handed to the rail) always use the raw counts. */
+  useDisplay?: boolean;
 }
 
 const NO_MASKS: readonly MaskShape[] = [];
@@ -116,7 +119,7 @@ export function dragShape(tool: Tool, a: Pt, b: Pt, w: number, h: number): RoiIn
 /** Renders raw counts -> °C -> palette on a canvas, with an ROI overlay layer. Data arrays are never mutated. */
 const divergingLut = buildLut("diverging");
 
-export function ThermalView({ frame, palette, scaleMode, manual, onScale, setManual, setScaleMode, rois = NO_ROIS, selected = null, selectedIds = NO_IDS, tool = "select", roisHidden = false, labelScope, zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null, hold = "off", flipH = false, flipV = false, agc = LINEAR_AGC, valid = null, filter = "off", units = "C", mask = null, maskShapes = NO_MASKS, maskMode = false, onMask, statsRois }: Props) {
+export function ThermalView({ frame, palette, scaleMode, manual, onScale, setManual, setScaleMode, rois = NO_ROIS, selected = null, selectedIds = NO_IDS, tool = "select", roisHidden = false, labelScope, zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null, hold = "off", flipH = false, flipV = false, agc = LINEAR_AGC, valid = null, filter = "off", units = "C", mask = null, maskShapes = NO_MASKS, maskMode = false, onMask, statsRois, useDisplay = false }: Props) {
   const viewRef = useRef<HTMLDivElement>(null);
   const holdRef = useRef<HoldBuffer | null>(null);
   const freehand = useRef<[number, number][] | null>(null);
@@ -184,7 +187,12 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
     if (over) for (let i = 0; i < c.length; i++) if (over.mask[i]) c[i] = NaN;
     celsiusRef.current = c;
     onField?.({ c, w: header.width, h: header.height, conv: header.kelvin_per_count != null ? { kelvin_per_count: header.kelvin_per_count, kelvin_offset: header.kelvin_offset } : undefined });
-    const filtered = filter === "off" ? c : applyFilter(filter, c, header.width, header.height);
+    let shownC = c;  // what gets coloured; the raw `c` stays the source of every number
+    if (useDisplay && frame.display) {
+      shownC = countsToCelsius(frame.display, header.kelvin_per_count, header.kelvin_offset);
+      if (over) for (let i = 0; i < shownC.length; i++) if (over.mask[i]) shownC[i] = NaN;
+    }
+    const filtered = filter === "off" ? shownC : applyFilter(filter, shownC, header.width, header.height);
     if (hold === "off") holdRef.current = null;
     else if (!holdRef.current || holdRef.current.mode !== hold) holdRef.current = new HoldBuffer(hold);
     const held = holdRef.current ? holdRef.current.push(filtered) : filtered;
@@ -213,7 +221,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
     }
     ctx.putImageData(img, 0, 0);
     drawMinimap();
-  }, [frame, palette, scaleMode, manual.min, manual.max, isotherm, reference, hold, agc.mode, agc.plateau, filter, mask]);
+  }, [frame, palette, scaleMode, manual.min, manual.max, isotherm, reference, hold, agc.mode, agc.plateau, filter, mask, useDisplay]);
 
   useEffect(() => {
     const c = celsiusRef.current;

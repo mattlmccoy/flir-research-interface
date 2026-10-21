@@ -1,7 +1,10 @@
 """Wire format for live frames over WebSocket.
 
 Message = 4-byte big-endian header length | UTF-8 JSON header | raw counts (uint16, little
-endian, row-major). The header carries the FLIR conversion rule (``kelvin_per_count``,
+endian, row-major). On request (``rf_notch``) the header carries ``display: {rf_notch: info,
+counts: true}`` and a second uint16 array follows: the same frame with the RF banding removed, for
+display only (ROI readouts and stats keep using the raw counts, which always come first).
+The header carries the FLIR conversion rule (``kelvin_per_count``,
 ``kelvin_offset``) so the client derives °C itself; the server never sends colorized pixels.
 Statistics in the header are computed server-side from the same counts.
 """
@@ -78,21 +81,43 @@ def frame_header(frame: Frame, stats: dict[str, Any] | None = None) -> dict[str,
 
 
 def encode_frame_message(
-    frame: Frame, stats: dict[str, Any] | None = None, extra: dict[str, Any] | None = None
+    frame: Frame,
+    stats: dict[str, Any] | None = None,
+    extra: dict[str, Any] | None = None,
+    *,
+    rf_notch: bool = False,
 ) -> bytes:
     hdr = frame_header(frame, stats)
     if extra:
         hdr.update(extra)
-    header = json.dumps(hdr).encode("utf-8")
     payload = np.ascontiguousarray(frame.counts, dtype="<u2").tobytes()
+    if rf_notch:
+        from flir_research_interface.analysis.rf_notch import rf_notch as remove_banding
+
+        display, info = remove_banding(frame.counts, hdr.get("kelvin_per_count"))
+        hdr["display"] = {"rf_notch": info, "counts": True}
+        payload += np.ascontiguousarray(display, dtype="<u2").tobytes()
+    header = json.dumps(hdr).encode("utf-8")
     return struct.pack(">I", len(header)) + header + payload
 
 
 def decode_frame_message(msg: bytes) -> tuple[dict[str, Any], npt.NDArray[np.uint16]]:
     (n,) = struct.unpack(">I", msg[:4])
     header = json.loads(msg[4 : 4 + n].decode("utf-8"))
-    data = np.frombuffer(msg[4 + n :], dtype="<u2").reshape(header["height"], header["width"])
-    return header, data.astype(np.uint16, copy=False)
+    size = header["height"] * header["width"]
+    flat = np.frombuffer(msg[4 + n :], dtype="<u2", count=size)
+    return header, flat.reshape(header["height"], header["width"]).astype(np.uint16, copy=False)
 
 
-__all__ = ["decode_frame_message", "encode_frame_message", "frame_header"]
+def decode_display_counts(msg: bytes) -> npt.NDArray[np.uint16] | None:
+    """The display copy (RF banding removed) when the message carries one, else None."""
+    (n,) = struct.unpack(">I", msg[:4])
+    header = json.loads(msg[4 : 4 + n].decode("utf-8"))
+    if not (header.get("display") or {}).get("counts"):
+        return None
+    h, w = header["height"], header["width"]
+    raw = np.frombuffer(msg[4 + n :], dtype="<u2")
+    return raw[h * w : 2 * h * w].reshape(h, w).astype(np.uint16, copy=False)
+
+
+__all__ = ["decode_display_counts", "decode_frame_message", "encode_frame_message", "frame_header"]

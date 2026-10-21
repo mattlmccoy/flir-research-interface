@@ -16,6 +16,7 @@ interface Props {
   rois: RoiPick[]; // stored ROIs, for the ROI picker
   hasVisible?: boolean; // the run has an aligned visible-camera recording
   onClose: () => void;
+  rfNotch?: boolean; // Display → "remove RF banding" is on: the clip follows it
 }
 
 // Matches the backend overlay palette (annotate.DEFAULT_COLORS), so a picker dot shows the color
@@ -66,7 +67,7 @@ function TrimBar({ n, start, stop, scrub, marks, onStart, onStop, onScrub }: {
 }
 
 /** Full-screen editor: scrub a live preview and set an in/out window, then export MP4 or GIF. */
-export function MediaExportEditor({ name, nFrames, index, tS, markers, rois, hasVisible, onClose }: Props) {
+export function MediaExportEditor({ name, nFrames, index, tS, markers, rois, hasVisible, onClose, rfNotch = false }: Props) {
   const [start, setStart] = useState(0);
   const [stop, setStop] = useState(nFrames);
   const [scrub, setScrub] = useState(Math.min(index, nFrames - 1));
@@ -140,10 +141,10 @@ export function MediaExportEditor({ name, nFrames, index, tS, markers, rois, has
     if (!rangeReady) return;
     setPreviewLoading(true);
     const id = window.setTimeout(() => {
-      setPreviewUrl(api.mediaPreviewUrl(name, scrub, { with_rois: showRois, frame_stats: frameStats, timestamp, colorbar, title: title.trim() || null, plot_series: plotSeries, overlay_rois: selIds, visible_opacity: visibleOpacity, palette, start, stop }));
+      setPreviewUrl(api.mediaPreviewUrl(name, scrub, { with_rois: showRois, frame_stats: frameStats, timestamp, colorbar, title: title.trim() || null, plot_series: plotSeries, overlay_rois: selIds, visible_opacity: visibleOpacity, palette, start, stop, rf_notch: rfNotch }));
     }, 120);
     return () => window.clearTimeout(id);
-  }, [rangeReady, name, scrub, showRois, frameStats, timestamp, colorbar, title, plotSeries.join(","), selIds.join(","), visibleOpacity, palette, start, stop]);
+  }, [rangeReady, name, scrub, showRois, frameStats, timestamp, colorbar, title, plotSeries.join(","), selIds.join(","), visibleOpacity, palette, start, stop, rfNotch]);
 
   const windowSecs = tS.length ? (tS[Math.min(stop, tS.length) - 1] ?? 0) - (tS[start] ?? 0) : 0;
   // Event ticks (RF on/off, NUC, gap) placed at each marker's fraction of the whole run, matching
@@ -156,7 +157,7 @@ export function MediaExportEditor({ name, nFrames, index, tS, markers, rois, has
   async function run() {
     setErr(null); setJob({ state: "running", step: "starting", done: 0, total: 0 });
     try {
-      await api.exportMedia(name, { start, stop, step, scale, speed, fmt, with_rois: showRois, frame_stats: frameStats, timestamp, colorbar, title: title.trim() || null, plot_series: plotSeries, overlay_rois: selIds, visible_opacity: visibleOpacity, palette, max_mb: maxMb });
+      await api.exportMedia(name, { start, stop, step, scale, speed, fmt, with_rois: showRois, frame_stats: frameStats, timestamp, colorbar, title: title.trim() || null, plot_series: plotSeries, overlay_rois: selIds, visible_opacity: visibleOpacity, palette, max_mb: maxMb, rf_notch: rfNotch });
       for (;;) {
         await new Promise((r) => setTimeout(r, 700));
         const jb = await api.mediaStatus(name);
@@ -171,6 +172,7 @@ export function MediaExportEditor({ name, nFrames, index, tS, markers, rois, has
     <div className="media-editor" role="dialog" aria-label="Media export">
       <div className="media-editor-head">
         <b>Media export</b><span className="muted">{name}</span>
+        {rfNotch && <span className="muted" title="Display → remove RF banding is on, so the clip shows the cleaned frames and its file name ends in _rf-filtered. ROI values in it stay raw.">· RF-banding filter on</span>}
         <button className="secondary" style={{ marginLeft: "auto" }} onClick={onClose}>close</button>
       </div>
       <div className="media-editor-body">

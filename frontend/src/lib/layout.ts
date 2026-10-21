@@ -68,6 +68,8 @@ export interface LayoutState {
   segment: { on: boolean; min: number; max: number };
   /** Display-only image filter (blur / median). */
   filter: FilterName;
+  /** Display-only removal of the 13.56 MHz RF banding (done on the operator; numbers stay raw). */
+  rfNotch: boolean;
   /** Display units for every temperature readout (°C, K, °F, raw counts). */
   units: Units;
   /** Overlay registration: opacity 0–1, scale 0.5–2 and offsets in % of the image (visible lens ≠ IR lens). */
@@ -132,6 +134,7 @@ export const DEFAULT_LAYOUT: LayoutState = {
   agc: { mode: "linear", plateau: 0.5 },
   segment: { on: false, min: 0, max: 100 },
   filter: "off",
+  rfNotch: false,
   units: "C",
   overlay: DEFAULT_OVERLAY,
   sections: { measurements: true, profile: false, camera: true, experiment: true, recording: true, display: true, export: true, visible: true },
@@ -159,6 +162,7 @@ export type LayoutAction =
   | { type: "setAgc"; agc: Agc }
   | { type: "setSegment"; segment: { on: boolean; min: number; max: number } }
   | { type: "setFilter"; filter: FilterName }
+  | { type: "setRfNotch"; on: boolean }
   | { type: "setUnits"; units: Units }
   | { type: "setVisibleMode"; mode: VisibleMode }
   | { type: "setOverlay"; patch: Partial<Overlay> }
@@ -190,6 +194,7 @@ export function layoutReducer(s: LayoutState, a: LayoutAction): LayoutState {
     case "setAgc": return { ...s, agc: parseAgc(a.agc) };
     case "setUnits": return { ...s, units: (UNITS as readonly string[]).includes(a.units) ? a.units : "C" };
     case "setFilter": return { ...s, filter: (FILTER_NAMES as readonly string[]).includes(a.filter) ? a.filter : "off" };
+    case "setRfNotch": return { ...s, rfNotch: a.on };
     case "setSegment": return { ...s, segment: { on: !!a.segment.on, min: Math.min(a.segment.min, a.segment.max), max: Math.max(a.segment.min, a.segment.max) } };
     case "dockBack": { const { [a.section]: _gone, ...rest } = s.floating; return { ...s, floating: rest }; }
     case "setOverlay": return { ...s, overlay: clampOverlay({ ...s.overlay, ...a.patch }) };
@@ -246,6 +251,7 @@ export function loadLayout(storage: Storage | null): LayoutState {
       agc: parseAgc(parsed.agc),
       segment: parseSegment(parsed.segment),
       filter: (FILTER_NAMES as readonly string[]).includes(parsed.filter as string) ? (parsed.filter as FilterName) : "off",
+      rfNotch: parsed.rfNotch === true,
       units: (UNITS as readonly string[]).includes(parsed.units as string) ? (parsed.units as Units) : "C",
       overlay: clampOverlay({
         opacity: num(ov.opacity, DEFAULT_OVERLAY.opacity),
