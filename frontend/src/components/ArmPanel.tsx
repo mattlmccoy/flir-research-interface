@@ -1,6 +1,6 @@
 import { NumberField } from "./NumberField.tsx";
 import { useState } from "react";
-import { DEFAULT_TRIGGER_FORM, rfLinkWarning, triggerFromForm, triggerSummary, type TriggerForm } from "../lib/trigger.ts";
+import { DEFAULT_TRIGGER_FORM, reconcileTriggerForm, rfLinkWarning, triggerRois, triggerFromForm, triggerSummary, type TriggerForm } from "../lib/trigger.ts";
 import { roiLabel, type Roi } from "../lib/roi.ts";
 import { useControlStatus } from "../lib/useControlStatus.ts";
 import type { ArmedStatus } from "../lib/api.ts";
@@ -13,12 +13,13 @@ interface Props {
 /** The "armed trigger" recording mode: pick a start and an end condition, arm, and let the trigger
  *  run the recording. When armed it shows the live armed/triggered status instead of the form. */
 export function ArmPanel({ rois, armed, recording, disabled, busy, onArm, onDisarm, onStartNow }: Props) {
-  const [f, setF] = useState<TriggerForm>({ ...DEFAULT_TRIGGER_FORM, roi: rois[0]?.id ?? null });
+  const area = triggerRois(rois);  // lines and smart ROIs can not trigger (the operator answers 400)
+  const [form, setF] = useState<TriggerForm>(DEFAULT_TRIGGER_FORM);
+  const f = reconcileTriggerForm(form, area);  // a stale or ineligible ROI id never reaches the operator
   const [adv, setAdv] = useState(false);
   const rfEngaged = !!useControlStatus()?.engaged;  // is an RF generator actually linked right now?
   const upd = (patch: Partial<TriggerForm>) => setF({ ...f, ...patch });
   const spec = triggerFromForm(f);
-  const area = rois.filter((r) => r.kind !== "line" && r.kind !== "smart")  // the operator rejects a smart ROI as a trigger (400);
   const roiSel = (value: number | null, onChange: (id: number | null) => void, label: string) => (
     <select value={value ?? ""} aria-label={label} onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}>
       {area.length === 0 && <option value="">(draw an ROI first)</option>}
