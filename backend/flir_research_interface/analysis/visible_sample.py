@@ -326,16 +326,31 @@ def coverage(t_s: np.ndarray) -> dict[str, Any]:
     """How much of the run the analysed frames cover.
 
     ``t_s`` holds the thermal-axis time of each analysed frame in frame order. Returns
-    ``{"frames_analysed", "t_first_s", "t_last_s", "gaps_over_300ms"}``: the frame count, the first
-    and last time (``None`` for no frames) and the number of spacings between consecutive frames
-    longer than 300 ms, where the camera throttled the stream.
+    ``{"frames_analysed", "t_first_s", "t_last_s", "gaps_over_300ms", "uncovered_s",
+    "longest_gap_s"}``: the frame count; the first and last time; the number of spacings between
+    consecutive frames longer than 300 ms (where the camera throttled the stream, or a segment
+    ended and the next began); ``uncovered_s``, the total length of those spacings; and
+    ``longest_gap_s``, the longest spacing of any size. Segments are joined in time order, so the
+    time between one segment's last frame and the next one's first counts as a gap. With no frame
+    the times and both lengths are ``None``: nothing was covered, which 0.0 would not say.
     """
     times = np.asarray(t_s, dtype=float)
     if times.size == 0:
-        return {"frames_analysed": 0, "t_first_s": None, "t_last_s": None, "gaps_over_300ms": 0}
+        return {
+            "frames_analysed": 0,
+            "t_first_s": None,
+            "t_last_s": None,
+            "gaps_over_300ms": 0,
+            "uncovered_s": None,
+            "longest_gap_s": None,
+        }
+    spacing = np.diff(times)
+    gaps = spacing[spacing > _GAP_S]
     return {
         "frames_analysed": int(times.size),
         "t_first_s": float(times[0]),
         "t_last_s": float(times[-1]),
-        "gaps_over_300ms": int(np.count_nonzero(np.diff(times) > _GAP_S)),
+        "gaps_over_300ms": int(gaps.size),
+        "uncovered_s": round(float(gaps.sum()), 6),
+        "longest_gap_s": round(float(spacing.max()), 6) if spacing.size else 0.0,
     }

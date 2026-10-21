@@ -251,7 +251,7 @@ max(MAD, 1))` over the run's non-keyframe values; flagged frames within 1.0 s fo
 |---|---|
 | Status, threshold | `ok`, 178; `flash_threshold` 15 (median 1.0 and MAD 1.48 leave the floor binding) |
 | Start-of-run dark area | 1,095 px (mean of the first 5 s, 24 frames; 1,100 in the first frame) |
-| Coverage | 6,189 frames analysed (the first 3 are skipped), 26.48-632.57 s, 61 gaps over 0.3 s (longest 0.84 s) |
+| Coverage | 6,189 frames analysed (the first 3 are skipped), 26.48-632.57 s, 61 gaps over 0.3 s adding up to 21.51 s uncovered (`uncovered_s`; the longest gap is 0.84 s, `longest_gap_s`) |
 | Event 1 | 553.95-554.06 s, 2 frames, peak +20 at frame 5303 |
 | Event 2 | 615.66-615.85 s, 2 frames, peak +19 at frame 6005 |
 | Event 3 | 627.77-629.41 s, 7 frames, peak +97 at frame 6142 |
@@ -273,8 +273,9 @@ that reason.
   A flash that lands on a keyframe is not flagged.
 * **The visible stream is about 10 fps with gaps.** `visible.json` records 10.2 fps for the
   reference run (the camera throttles the stream while the radiometric stream runs, see the
-  2026-09-02 verification at the top of this file), and 61 gaps exceed 0.3 s. A flash shorter than the gap before or after one frame can be
-  missed; two of the three reference events are only two frames long.
+  2026-09-02 verification at the top of this file), and 61 gaps exceed 0.3 s, 21.5 s of the 606 s
+  the frames span. A flash shorter than the gap before or after one frame can be missed; two of the
+  three reference events are only two frames long.
 * **A "flash" is not proof of an arc or a spark.** It is a brightening in the sample region seen in
   one or a few frames; the cause needs the thermal and RF record. "0 flashes" is only meaningful
   with the coverage next to it: a run that could not be analysed says `skipped` or `failed` and

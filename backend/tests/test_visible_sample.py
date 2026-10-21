@@ -414,17 +414,37 @@ def test_coverage_real_run(series: tuple[np.ndarray, np.ndarray, np.ndarray]) ->
     assert result["t_first_s"] == pytest.approx(t_s[3])
     assert result["t_last_s"] == pytest.approx(t_s[-1])
     assert result["gaps_over_300ms"] == 61
-    assert coverage(t_s)["gaps_over_300ms"] == 62  # the run's 62nd gap lies in the skipped 0.25 s
+    # Measured from the packet table above (sum and max of the spacings over 0.3 s): 61 gaps add up
+    # to 21.51 s, 3.5 % of the 606.09 s the frames span, and the longest is 0.837 s.
+    assert result["uncovered_s"] == pytest.approx(21.509569, abs=1e-6)
+    assert result["longest_gap_s"] == pytest.approx(0.836811, abs=1e-6)
+    whole = coverage(t_s)  # the run's 62nd gap lies in the skipped 0.25 s
+    assert whole["gaps_over_300ms"] == 62
+    assert whole["uncovered_s"] == pytest.approx(21.957103, abs=1e-6)
 
 
 def test_coverage_counts_gaps_over_300ms_and_handles_short_inputs() -> None:
     result = coverage(np.array([0.0, 0.125, 0.5, 0.75, 1.25]))  # gaps 0.125, 0.375, 0.25, 0.5
     assert result == {
-        "frames_analysed": 5, "t_first_s": 0.0, "t_last_s": 1.25, "gaps_over_300ms": 2
-    }
+        "frames_analysed": 5, "t_first_s": 0.0, "t_last_s": 1.25, "gaps_over_300ms": 2,
+        "uncovered_s": 0.875,  # 0.375 + 0.5: only the gaps over 0.3 s, not 0.125 or 0.25
+        "longest_gap_s": 0.5,
+    }  # fmt: skip
     assert coverage(np.array([3.5])) == {
-        "frames_analysed": 1, "t_first_s": 3.5, "t_last_s": 3.5, "gaps_over_300ms": 0
-    }
+        "frames_analysed": 1, "t_first_s": 3.5, "t_last_s": 3.5, "gaps_over_300ms": 0,
+        "uncovered_s": 0.0, "longest_gap_s": 0.0,
+    }  # fmt: skip
+    # no frame: nothing was covered, so no figure for what is missing (not a reassuring 0.0)
     assert coverage(np.array([])) == {
-        "frames_analysed": 0, "t_first_s": None, "t_last_s": None, "gaps_over_300ms": 0
-    }
+        "frames_analysed": 0, "t_first_s": None, "t_last_s": None, "gaps_over_300ms": 0,
+        "uncovered_s": None, "longest_gap_s": None,
+    }  # fmt: skip
+
+
+def test_coverage_with_no_gap_over_300ms_still_reports_the_longest_spacing() -> None:
+    result = coverage(np.array([0.0, 0.125, 0.25, 0.375]))  # a steady 8 fps: no gap over 0.3 s
+    assert result["gaps_over_300ms"] == 0
+    assert result["uncovered_s"] == 0.0
+    assert result["longest_gap_s"] == 0.125
+    assert coverage(np.array([0.0, 0.3]))["gaps_over_300ms"] == 0  # exactly 0.3 s is not a gap
+    assert coverage(np.array([0.0, 0.3]))["uncovered_s"] == 0.0

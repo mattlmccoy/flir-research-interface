@@ -35,8 +35,13 @@ export interface VisibleSampleSegment {
 export interface VisibleSampleSummary {
   status: "ok" | "skipped" | "failed";
   reason: string | null;
-  /** `t_first_s` / `t_last_s` are null when no frame was analysed (`coverage()` in visible_sample.py). */
-  coverage?: { frames_analysed: number; t_first_s: number | null; t_last_s: number | null; gaps_over_300ms: number };
+  /** `t_first_s` / `t_last_s` / `uncovered_s` / `longest_gap_s` are null when no frame was analysed
+   *  (`coverage()` in visible_sample.py). `uncovered_s` is the total of the spacings over 0.3 s between
+   *  analysed frames, `longest_gap_s` the longest spacing; results written before they existed lack both. */
+  coverage?: {
+    frames_analysed: number; t_first_s: number | null; t_last_s: number | null; gaps_over_300ms: number;
+    uncovered_s?: number | null; longest_gap_s?: number | null;
+  };
   events?: VisibleSampleEvent[];
   segments?: VisibleSampleSegment[];
   /** Segment files visible.json lists that are not on disk. */
@@ -87,8 +92,11 @@ function describe(vs: VisibleSampleSummary): StatusLine {
     text = "Visible sample: 0 frames analysed, nothing to measure";
   } else {
     const n = vs.events.length;
+    const lost = c && c.uncovered_s != null && c.longest_gap_s != null
+      ? `, ${c.uncovered_s.toFixed(1)} s uncovered, longest ${c.longest_gap_s.toFixed(2)} s`
+      : "";
     const span = c
-      ? `${c.t_first_s!.toFixed(1)}–${c.t_last_s!.toFixed(1)} s analysed (${c.gaps_over_300ms} gaps > 0.3 s)`
+      ? `${c.t_first_s!.toFixed(1)}–${c.t_last_s!.toFixed(1)} s analysed (${c.gaps_over_300ms} gaps > 0.3 s${lost})`
       : "coverage unknown";
     text = `Visible sample: ${n} ${n === 1 ? "flash" : "flashes"} at the sample, ${span}`;
   }

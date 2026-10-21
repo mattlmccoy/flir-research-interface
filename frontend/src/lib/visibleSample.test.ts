@@ -5,12 +5,14 @@ import { markersWithFlashes, visibleFlashMarkers, visibleSampleIsError, visibleS
 
 // Event times, peaks, coverage and the segment's start are the values measured on the real run
 // 20261020_144402_Run (task-3 report, `merge_s=1.0`; its exports/visible_sample.json). That file was
-// written before `anchor` existed; "first_frame" is what thermal_segments gives that run (its segment
-// has first_frame_host_ns). The surrounding keys follow `_summary` in visible_sample_run.py.
+// written before `anchor`, `uncovered_s` and `longest_gap_s` existed; "first_frame" is what
+// thermal_segments gives that run (its segment has first_frame_host_ns), and the two lengths are
+// the sum and the maximum of the 61 spacings over 0.3 s in its packet table (the backend's
+// test_coverage_real_run). The surrounding keys follow `_summary` in visible_sample_run.py.
 const OK: VisibleSampleSummary = {
   status: "ok",
   reason: null,
-  coverage: { frames_analysed: 6189, t_first_s: 26.483, t_last_s: 632.572, gaps_over_300ms: 61 },
+  coverage: { frames_analysed: 6189, t_first_s: 26.483, t_last_s: 632.572, gaps_over_300ms: 61, uncovered_s: 21.509569, longest_gap_s: 0.836811 },
   events: [
     { t_start_s: 553.951, t_peak_s: 554.057, t_end_s: 554.057, peak_brightening: 20.0, n_frames: 2, peak_frame: 5303, segment: 0 },
     { t_start_s: 615.664, t_peak_s: 615.664, t_end_s: 615.846, peak_brightening: 19.0, n_frames: 2, peak_frame: 6005, segment: 0 },
@@ -61,7 +63,23 @@ test("visible flash marks are coloured --trace-5 and get their own legend entry"
 test("status text for an ok run with three flashes", () => {
   assert.equal(
     visibleSampleStatusText(OK),
+    "Visible sample: 3 flashes at the sample, 26.5–632.6 s analysed (61 gaps > 0.3 s, 21.5 s uncovered, longest 0.84 s)",
+  );
+});
+
+test("a result written before the coverage lengths existed shows the gap count without inventing them", () => {
+  const { uncovered_s: _u, longest_gap_s: _l, ...older } = OK.coverage!;
+  assert.equal(
+    visibleSampleStatusText({ ...OK, coverage: older }),
     "Visible sample: 3 flashes at the sample, 26.5–632.6 s analysed (61 gaps > 0.3 s)",
+  );
+});
+
+test("a run with no gap over 0.3 s still says how long its longest spacing is", () => {
+  const coverage = { frames_analysed: 600, t_first_s: 26.5, t_last_s: 86.5, gaps_over_300ms: 0, uncovered_s: 0, longest_gap_s: 0.2 };
+  assert.equal(
+    visibleSampleStatusText({ ...OK, coverage, events: [] }),
+    "Visible sample: 0 flashes at the sample, 26.5–86.5 s analysed (0 gaps > 0.3 s, 0.0 s uncovered, longest 0.20 s)",
   );
 });
 
@@ -74,7 +92,7 @@ test("status text for an ok run with zero events reads 0 flashes, not a bare 'no
   const vs: VisibleSampleSummary = { ...OK, events: [] };
   assert.equal(
     visibleSampleStatusText(vs),
-    "Visible sample: 0 flashes at the sample, 26.5–632.6 s analysed (61 gaps > 0.3 s)",
+    "Visible sample: 0 flashes at the sample, 26.5–632.6 s analysed (61 gaps > 0.3 s, 21.5 s uncovered, longest 0.84 s)",
   );
 });
 
@@ -90,7 +108,7 @@ test("a segment timed from the ffmpeg launch says the visible times run about a 
   const text = visibleSampleStatusText({ ...OK, segments })!;
   assert.equal(
     text,
-    "Visible sample: 3 flashes at the sample, 26.5–632.6 s analysed (61 gaps > 0.3 s); visible times from ffmpeg launch (~1 s early)",
+    "Visible sample: 3 flashes at the sample, 26.5–632.6 s analysed (61 gaps > 0.3 s, 21.5 s uncovered, longest 0.84 s); visible times from ffmpeg launch (~1 s early)",
   );
 });
 
@@ -156,8 +174,9 @@ test("an ok summary without coverage is reported as incomplete rather than as a 
 // -- unreadable and empty summaries must never read as healthy -------------------------------------
 
 // coverage() in analysis/visible_sample.py returns exactly this for no analysed frames (checked by
-// running it: {"frames_analysed": 0, "t_first_s": null, "t_last_s": null, "gaps_over_300ms": 0}).
-const NO_FRAMES = { frames_analysed: 0, t_first_s: null, t_last_s: null, gaps_over_300ms: 0 };
+// running it: {"frames_analysed": 0, "t_first_s": null, "t_last_s": null, "gaps_over_300ms": 0,
+// "uncovered_s": null, "longest_gap_s": null}).
+const NO_FRAMES = { frames_analysed: 0, t_first_s: null, t_last_s: null, gaps_over_300ms: 0, uncovered_s: null, longest_gap_s: null };
 const NOTHING_TO_MEASURE = "Visible sample: 0 frames analysed, nothing to measure";
 
 test("an ok run with no analysed frames (null bounds, as coverage() returns) does not throw", () => {

@@ -150,6 +150,9 @@ def test_runner_multi_segment_times_use_each_segment_start(
     assert first[1]["brightening"] == ""  # no previous analysed frame in its own segment
     assert out["coverage"]["t_first_s"] == pytest.approx(T_START_S + 0.3)
     assert out["coverage"]["gaps_over_300ms"] == 1  # the 50 s between the segments
+    # frames 3-14 of segment 0 end 1.4 s in; segment 1 starts 50 s later and its rows 0.3 s in
+    assert out["coverage"]["uncovered_s"] == pytest.approx(50.0 + 0.3 - 1.4, abs=1e-5)
+    assert out["coverage"]["longest_gap_s"] == pytest.approx(50.0 + 0.3 - 1.4, abs=1e-5)
     assert out["missing"] == []
     assert [(g["index"], g["file"]) for g in out["segments"]] == [
         (0, "visible.mp4"),

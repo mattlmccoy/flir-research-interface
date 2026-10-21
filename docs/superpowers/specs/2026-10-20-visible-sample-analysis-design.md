@@ -152,8 +152,11 @@ the effective threshold is recorded with every result.
 
 - `status`: `ok` | `skipped` | `failed`, plus `reason` when not ok. Reasons include: no visible
   video, no alignment, no sample ROI, sample ROI maps outside the visible frame, ffmpeg missing.
-- `frames_analysed`, the thermal time range covered, and `gaps_over_300ms` (62 on this run, from
-  the camera throttling the stream while the radiometric stream runs).
+- `frames_analysed`, the thermal time range covered, `gaps_over_300ms` (61 over the analysed frames
+  on this run; the 62nd gap lies in the skipped first 0.25 s), `uncovered_s` (the total length of
+  those gaps: 21.51 s on this run, 3.5 % of the 606 s the frames span) and `longest_gap_s` (0.84 s).
+  A count of gaps does not say how much time is missing. The gaps come from the camera throttling
+  the stream while the radiometric stream runs, and from the time between segments.
 - The inputs used: ROI id and name, `H` source, threshold, margin, z and luma limits, software
   version.
 
