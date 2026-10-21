@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 FULL = "full"
 RAW_UNTAGGED = "raw-untagged"
+FULL_RANGE_BSF = "h264_metadata=video_full_range_flag=1"  # tags an H.264 stream color_range=pc
 BUILD_TIMEOUT_S = 600
 
 _locks: dict[Path, threading.Lock] = {}
@@ -62,7 +63,7 @@ def _remux(ffmpeg: str, source: Path, part: Path) -> None:
     cmd = [
         ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
         "-i", str(source), "-map", "0:v:0", "-an", "-dn", "-sn",
-        "-c", "copy", "-bsf:v", "h264_metadata=video_full_range_flag=1",
+        "-c", "copy", "-bsf:v", FULL_RANGE_BSF,
         "-movflags", "+faststart", "-f", "mp4", str(part),
     ]  # fmt: skip
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=BUILD_TIMEOUT_S, check=False)
@@ -119,6 +120,6 @@ def visible_range(run_dir: Path, ffmpeg: str | None) -> str | None:
 
 
 __all__ = [
-    "FULL", "RAW_UNTAGGED", "copy_path", "full_range_copy", "resolve_ffmpeg", "served_range",
-    "visible_range",
+    "FULL", "FULL_RANGE_BSF", "RAW_UNTAGGED", "copy_path", "full_range_copy", "resolve_ffmpeg",
+    "served_range", "visible_range",
 ]

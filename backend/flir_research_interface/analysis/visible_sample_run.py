@@ -54,6 +54,7 @@ from flir_research_interface.analysis.visible_sample import (
 from flir_research_interface.analysis.visible_sample_plot import visible_sample_plot_png
 from flir_research_interface.playback.reader import ExperimentReader
 from flir_research_interface.playback.visible_timing import FRAME0_SKIP_S, thermal_segments
+from flir_research_interface.visible.full_range import FULL_RANGE_BSF
 from flir_research_interface.visible.recorder import FFMPEG_CANDIDATES
 from flir_research_interface.visible.rtsp import find_ffprobe
 
@@ -173,7 +174,8 @@ def _closeup_command(
     neither drops nor duplicates; ``-enc_time_base -1`` keeps the encoder on the source's own time
     base (the default is 1 / the average frame rate, about 98 ms, and frames that land on the same
     tick are merged and the rest shift); and ``-bf 0`` stores frames in display order, so a seek to
-    a frame's time lands on that frame.
+    a frame's time lands on that frame. The stretch writes 0..255, so the stream is tagged full
+    range (``FULL_RANGE_BSF``, as the playback copy); untagged, players clip >= 235 and <= 16.
     """
     x, y, side = crop
     val = "val"
@@ -188,9 +190,8 @@ def _closeup_command(
     )
     cmd = [ffmpeg, "-v", "error", "-nostdin", "-y", "-i", str(src), "-vf", vf]
     cmd += ["-fps_mode", "passthrough", "-enc_time_base", "-1"]
-    return cmd + ["-c:v", "libx264", "-bf", "0", "-crf", "20", "-pix_fmt", "yuv420p"] + [
-        "-an", "-f", "mp4", str(out)
-    ]  # fmt: skip
+    cmd += ["-c:v", "libx264", "-bf", "0", "-crf", "20", "-pix_fmt", "yuv420p"]
+    return cmd + ["-bsf:v", FULL_RANGE_BSF, "-an", "-f", "mp4", str(out)]
 
 
 def _closeup_timeout(duration_s: float) -> float:

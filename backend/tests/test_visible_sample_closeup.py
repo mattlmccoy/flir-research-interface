@@ -90,6 +90,7 @@ def _irregular_clip(path: Path) -> Path:
 class _Encoded:
     source: _Timing
     closeup: _Timing
+    closeup_path: Path
 
 
 @pytest.fixture(scope="module")
@@ -100,7 +101,7 @@ def encoded(tmp_path_factory: pytest.TempPathFactory) -> _Encoded:
     out = folder / "closeup.mp4"
     assert FFMPEG is not None
     vsr._encode_closeup(FFMPEG, src, out, CROP, STRETCH_LO)
-    return _Encoded(_timing(src), _timing(out))
+    return _Encoded(_timing(src), _timing(out), out)
 
 
 @needs_ffmpeg
@@ -140,3 +141,30 @@ def test_closeup_is_stored_in_display_order_without_b_frames(encoded: _Encoded) 
     assert np.all(np.diff(closeup.packet_pts) > 0)
     assert np.array_equal(closeup.packet_pts, closeup.packet_dts)
     assert "B" not in closeup.pict_types
+
+
+def test_closeup_command_tags_the_stream_full_range() -> None:
+    """The luma stretch writes 0..255, so the stream must say so (same bsf as the playback copy);
+    untagged, players read it as limited range and clip >= 235 to white and <= 16 to black."""
+    argv = vsr._closeup_command("ffmpeg", Path("in.mp4"), Path("out.mp4"), CROP, STRETCH_LO)
+    i = argv.index("-bsf:v")
+    assert argv[i + 1] == "h264_metadata=video_full_range_flag=1"
+    assert argv.index("-c:v") < i < argv.index(str(Path("out.mp4")))
+
+
+@needs_ffmpeg
+def test_closeup_probes_full_range_with_frames_unchanged(encoded: _Encoded) -> None:
+    """synthetic: range-tag plumbing only. The produced close-up probes ``color_range=pc`` and the
+    tag changed neither the frame count nor the frame times."""
+    assert FFPROBE is not None
+    src = encoded.source.packet_pts
+    kept = src[src >= src[0] + FRAME0_SKIP_S]
+    assert len(encoded.closeup.frame_pts) == len(kept)
+    assert np.abs(encoded.closeup.frame_pts - kept).max() <= TOLERANCE_S
+    out = encoded.closeup_path
+    stream = subprocess.run(
+        [FFPROBE, "-v", "error", "-select_streams", "v:0", "-of", "json"]
+        + ["-show_entries", "stream=color_range", str(out)],
+        capture_output=True, text=True, check=True,
+    ).stdout  # fmt: skip
+    assert json.loads(stream)["streams"][0].get("color_range", "unknown") == "pc"
