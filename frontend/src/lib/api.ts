@@ -1,6 +1,7 @@
 import { apiUrl, loadOperatorBase, saveOperatorBase } from "./operator.ts";
 import { mediaPreviewQuery, type MediaPreviewOptions } from "./mediaQuery.ts";
 import type { VisibleGap, VisibleSegment } from "./visibleSegments.ts";
+import type { SmartOverlay } from "./smartLabels.ts";
 
 /** Site mode: the UI is served from GitHub Pages and talks to a local operator (spec §6.3). */
 export const SITE_MODE = import.meta.env.VITE_SITE_MODE === "1";
@@ -238,6 +239,11 @@ export const api = {
   rfLinkSettings: () => j<RfLinkStatus>(req("/api/rf-link/settings")),
   putLiveRois: (rois: unknown[]) =>
     j<{ count: number }>(req("/api/live/rois", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ rois }) })),
+  /** The operator's per-ROI live feed (smart ROI numbers come only from here; see lib/smartReadout.ts). */
+  liveRoiTemps: () => j<unknown>(req("/api/live/roi-temps")),
+  /** Stored smart ROI outlines for frame indices [start, start + count) of a recorded run (404 until computed). */
+  smartOverlay: (name: string, roiId: number, start: number, count: number) =>
+    j<SmartOverlay[]>(req(`/api/experiments/${encodeURIComponent(name)}/smart-roi/${roiId}/overlay?start=${start}&count=${count}`)),
   controlStatus: () => j<ControlStatus>(req("/api/control/status")),
   controlSeries: (name: string) =>
     j<ControlSeries>(req(`/api/experiments/${encodeURIComponent(name)}/control`)),

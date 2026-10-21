@@ -28,6 +28,7 @@ import { roiColor } from "../lib/overlay.ts";
 import { eventsToMarkers, markColor, nearestIndex, nextMarkerTime } from "../lib/events.ts";
 import { fmtAny, fmtCelsius } from "../lib/format.ts";
 import { ThermalView, type StatsMap } from "./ThermalView.tsx";
+import { useSmartPlaybackOverlays } from "../lib/useSmartPlaybackOverlays.ts";
 import { DisplayControls } from "./DisplayControls.tsx";
 import { RoiRows } from "./RoiRows.tsx";
 import { ExportSection } from "./ExportSection.tsx";
@@ -234,6 +235,9 @@ export function PlaybackPage(p: Props) {
   }, [n]);
 
   const t = tl ? tl.t_s[index] : 0;
+  // stored smart ROI outlines for this frame (none until the run's smart series is computed)
+  const smartIds = useMemo(() => p.rois.rois.filter((r) => r.kind === "smart").map((r) => r.id), [p.rois.rois]);
+  const smartOverlays = useSmartPlaybackOverlays(p.name, smartIds, index);
   const hdr = frame?.header;
   const exp = (info?.experiment ?? {}) as Record<string, unknown>;
   const cam = (info?.camera ?? {}) as Record<string, unknown>;
@@ -358,7 +362,7 @@ export function PlaybackPage(p: Props) {
           ) : null}
           <ThermalView frame={frame} palette={p.palette} scaleMode={p.scaleMode} manual={p.manual} onScale={setShown} setManual={p.setManual} setScaleMode={p.setScaleMode}
             rois={p.maskMode ? maskRois : p.rois.rois} statsRois={p.rois.rois} selected={p.maskMode ? p.masks.selected : p.rois.selected} selectedIds={p.maskMode ? p.masks.selectedIds : p.rois.selectedIds} tool={p.layout.tool} roisHidden={!p.maskMode && p.layout.roisHidden} labelScope={p.maskMode ? `exp.${p.name}.mask` : `exp.${p.name}`} zoom={p.layout.zoom} onRoi={p.maskMode ? maskEdit : p.roiDispatch} onStats={onStats} rad={rad} extremes={p.layout.extremes} isotherm={p.layout.isotherm} onField={setField} reference={reference} hold={p.layout.hold} flipH={p.layout.flipH} flipV={p.layout.flipV} agc={p.layout.agc} filter={p.layout.filter} units={p.layout.units} useDisplay={p.layout.rfNotch} valid={p.layout.segment.on ? { min: p.layout.segment.min, max: p.layout.segment.max } : null} mask={maskPx} maskShapes={p.masks.enabled || p.maskMode ? p.masks.shapes : []} maskMode={p.maskMode} onMask={p.maskDispatch}
-            overlay={p.layout.visibleMode === "overlay" && hasVideo ? <VisibleVideo plain name={p.name} t={t} playing={playing} speed={speed} vis={playVis} /> : undefined} overlayStyle={p.layout.overlay} overlayH={overlayH} />
+            overlay={p.layout.visibleMode === "overlay" && hasVideo ? <VisibleVideo plain name={p.name} t={t} playing={playing} speed={speed} vis={playVis} /> : undefined} overlayStyle={p.layout.overlay} overlayH={overlayH} smartOverlays={smartOverlays} />
           {p.layout.visibleMode === "side" && hasVideo && <VisibleVideo big flipH={p.layout.flipH} flipV={p.layout.flipV} name={p.name} t={t} playing={playing} speed={speed} vis={playVis} measuredFps={info?.visible?.measured_fps} />}
         </div>
       }

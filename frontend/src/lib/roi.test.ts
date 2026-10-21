@@ -526,3 +526,42 @@ test("newSmart makes a smart ROI with the v1 defaults and adds through the reduc
   const s = roiReducer(EMPTY, { type: "add", roi: draft });
   assert.equal(s.rois[0].kind, "smart"); assert.equal(s.rois[0].id, 1);
 });
+
+test("setSmart edits a smart ROI's tracking settings, ignoring values the operator would reject", () => {
+  let s = roiReducer(EMPTY, { type: "add", roi: newSmart([[0, 0], [9, 0], [9, 9]]) });
+  s = roiReducer(s, { type: "setSmart", id: 1, rings_px: [3, 8], sensitivity: 0.6, ring_emissivity: 0.9 });
+  let r = s.rois[0] as Extract<Roi, { kind: "smart" }>;
+  assert.deepEqual(r.rings_px, [3, 8]);
+  assert.equal(r.sensitivity, 0.6);
+  assert.equal(r.ring_emissivity, 0.9);
+  s = roiReducer(s, { type: "setSmart", id: 1, rings_px: [8, 3], sensitivity: 0.9, ring_emissivity: 2 });
+  r = s.rois[0] as Extract<Roi, { kind: "smart" }>;
+  assert.deepEqual(r.rings_px, [3, 8], "non-increasing rings ignored");
+  assert.equal(r.sensitivity, 0.6, "sensitivity outside 0.3–0.7 ignored");
+  assert.equal(r.ring_emissivity, 0.9, "ring emissivity outside 0.01–1 ignored");
+  s = roiReducer(s, { type: "setSmart", id: 1, ring_emissivity: null });
+  assert.equal((s.rois[0] as Extract<Roi, { kind: "smart" }>).ring_emissivity, undefined, "null clears to the sample's");
+});
+
+test("setSmart: the fixed rule needs a temperature; going back to relative drops it", () => {
+  let s = roiReducer(EMPTY, { type: "add", roi: newSmart([[0, 0], [9, 0], [9, 9]]) });
+  s = roiReducer(s, { type: "setSmart", id: 1, rule: "fixed" });
+  assert.equal((s.rois[0] as Extract<Roi, { kind: "smart" }>).rule, "relative", "fixed without °C is ignored");
+  s = roiReducer(s, { type: "setSmart", id: 1, rule: "fixed", fixed_c: 350 });
+  let r = s.rois[0] as Extract<Roi, { kind: "smart" }>;
+  assert.equal(r.rule, "fixed");
+  assert.equal(r.fixed_c, 350);
+  s = roiReducer(s, { type: "setSmart", id: 1, fixed_c: 360 });
+  assert.equal((s.rois[0] as Extract<Roi, { kind: "smart" }>).fixed_c, 360);
+  s = roiReducer(s, { type: "setSmart", id: 1, rule: "relative" });
+  r = s.rois[0] as Extract<Roi, { kind: "smart" }>;
+  assert.equal(r.rule, "relative");
+  assert.equal(r.fixed_c, undefined);
+});
+
+test("setSmart leaves non-smart ROIs untouched", () => {
+  let s = roiReducer(EMPTY, { type: "add", roi: { kind: "rect", x0: 0, y0: 0, x1: 2, y1: 2 } });
+  const before = s.rois[0];
+  s = roiReducer(s, { type: "setSmart", id: 1, sensitivity: 0.4 });
+  assert.deepEqual(s.rois[0], before);
+});

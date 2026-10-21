@@ -46,6 +46,7 @@ import { rfNotchStatus } from "./lib/rfNotch.ts";
 import { EMPTY_MASKS, hasMasks, loadMasks, maskPixels, maskedStats, masksAsRois, saveMasks, toolForMaskMode } from "./lib/mask.ts";
 import { initMaskHistory, maskHistoryReducer, type MaskHistoryAction } from "./lib/maskHistory.ts";
 import type { RoiAction } from "./lib/roi.ts";
+import { useSmartFeed } from "./lib/useSmartFeed.ts";
 
 type Page = "live" | "setup" | "experiments" | "playback";
 const storage = (() => {
@@ -121,6 +122,8 @@ export function App() {
     const t = setTimeout(() => { api.putLiveRois(rois.rois).catch(() => {}); }, 400);
     return () => clearTimeout(t);
   }, [rois.rois, roiScope]);
+  // Smart ROI numbers come only from the operator: poll its live feed while a smart ROI is on screen.
+  const smartFeed = useSmartFeed(page === "live" && rois.rois.some((r) => r.kind === "smart"));
   // Region masks follow the ROI scopes (live / exp.<name>); they only pick the pixels behind the
   // colour auto-range and the frame stats. A run's stored masks are seeded by PlaybackPage.
   const [maskHist, maskDispatch] = useReducer(maskHistoryReducer, EMPTY_MASKS, () => initMaskHistory(loadMasks(storage, roiScope)));
@@ -298,7 +301,7 @@ export function App() {
 
   const nowT = hdr && t0Ref.current !== null ? (hdr.device_timestamp_ns - t0Ref.current) / 1e9 : 0;
   const traces: Trace[] = rois.rois.flatMap((r, i) => {
-    if (r.hidden || r.kind === "smart") return []; // hidden on the image = hidden on the plot (still measured + recorded); smart ROIs have no client-side series (Task 8 plots the operator values)
+    if (r.hidden || r.kind === "smart") return []; // hidden on the image = hidden on the plot (still measured + recorded); smart ROIs have no client-side series (their values come from the operator)
     const b = buffers.current.get(r.id);
     return [{ id: r.id, label: roiLabel(r), color: roiColor(r, i), t: b?.t ?? [], v: b?.v ?? [] }];
   });
@@ -380,7 +383,7 @@ export function App() {
         <div className={`center-split ${(layout.visibleMode === "side" || calibrating) && visibleAvailable ? "on" : ""}`}>
           <ThermalView frame={frame} palette={palette} scaleMode={scaleMode} manual={manual} onScale={setShown} setManual={setManual} setScaleMode={setScaleMode}
             rois={maskMode ? maskRois : rois.rois} statsRois={rois.rois} selected={maskMode ? masks.selected : rois.selected} selectedIds={maskMode ? masks.selectedIds : rois.selectedIds} tool={layout.tool} roisHidden={!maskMode && layout.roisHidden} labelScope={maskMode ? `${roiScope}.mask` : roiScope} zoom={layout.zoom} onRoi={maskMode ? maskEdit : roiDispatch} onStats={onStats} rad={rad} extremes={layout.extremes} isotherm={layout.isotherm} onField={setField} reference={reference} hold={layout.hold} flipH={layout.flipH} flipV={layout.flipV} agc={layout.agc} filter={layout.filter} units={layout.units} useDisplay={layout.rfNotch} valid={layout.segment.on ? { min: layout.segment.min, max: layout.segment.max } : null} mask={maskPx} maskShapes={masks.enabled || maskMode ? masks.shapes : []} maskMode={maskMode} onMask={maskDispatch}
-            overlay={layout.visibleMode === "overlay" && !calibrating && visibleAvailable ? <VisibleLive plain /> : undefined} overlayStyle={layout.overlay} overlayH={align.H}
+            overlay={layout.visibleMode === "overlay" && !calibrating && visibleAvailable ? <VisibleLive plain /> : undefined} overlayStyle={layout.overlay} overlayH={align.H} smartFeed={smartFeed?.entries}
             topLayer={calibrating ? <PickLayer label="IR" flipH={layout.flipH} flipV={layout.flipV} color="var(--live)" points={align.pairs.map((p) => p.ir)} pending={align.pending?.ir} onPick={(p) => alignDispatch({ type: "pick", side: "ir", p })} /> : undefined} />
           {(layout.visibleMode === "side" || calibrating) && visibleAvailable && (
             <VisibleLive big flipH={layout.flipH} flipV={layout.flipV} topLayer={calibrating ? <PickLayer label="visible" flipH={layout.flipH} flipV={layout.flipV} color="var(--accent)" points={align.pairs.map((p) => p.visible)} pending={align.pending?.visible} onPick={(p) => alignDispatch({ type: "pick", side: "visible", p })} /> : undefined} />
@@ -414,7 +417,7 @@ export function App() {
             {hdr && hdr.kelvin_per_count === null && <div className="errbox">Stream is not temperature-linear; raw counts only.</div>}
             {nearLimit && <div className="warnbox">Max within 10 °C of the range limit ({active?.high_c} °C).</div>}
             <RoiRows rois={rois.rois} units={layout.units} conv={field?.conv ?? null} stats={liveStats} selected={rois.selected} selectedIds={rois.selectedIds} extremes={layout.extremes} onExtremes={(on) => dispatch({ type: "setExtremes", on })}
-              dispatch={roiDispatch} />
+              dispatch={roiDispatch} smartFeed={smartFeed} />
             <MaskPanel state={masks} dispatch={maskDispatch} maskMode={maskMode} onMaskMode={toggleMaskMode} usedPx={maskUsed} frame={field ? { w: field.w, h: field.h } : null} />
             <DeltaPicker rois={rois.rois} delta={layout.delta} onChange={(delta) => dispatch({ type: "setDelta", delta })} />
             <RatePanel rois={rois.rois} rates={rates} cfg={rateCfg} onCfg={setRateCfg} latched={alarmLatched} onAck={() => setAlarmLatched(null)} />

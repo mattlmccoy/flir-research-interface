@@ -4,6 +4,9 @@ import { useState } from "react";
 import { roiId, roiLabel, type Roi, type RoiAction, type RoiStats, loadRois } from "../lib/roi.ts";
 import { COLOR_PRESETS, roiColor } from "../lib/overlay.ts";
 import { Disclosure } from "./Disclosure.tsx";
+import { smartReadoutLines } from "../lib/smartReadout.ts";
+import { parseRingOffsets } from "../lib/smartSettings.ts";
+import type { SmartFeed } from "../lib/useSmartFeed.ts";
 
 interface Props {
   units?: Units; conv?: Conversion | null;
@@ -13,6 +16,89 @@ interface Props {
   stats: Map<number, RoiStats>;
   selected: number | null; selectedIds?: number[];
   dispatch: (a: RoiAction) => void;
+  /** Live: the operator's smart ROI readouts (null = feed not running). Playback: omitted (its
+   *  smart values come from the stored series, not this panel). */
+  smartFeed?: SmartFeed | null;
+}
+
+type SmartRoi = Extract<Roi, { kind: "smart" }>;
+
+/** Value column of a smart row: the operator's mean (never a client-side number), else its state. */
+function SmartValue({ id, feed, units, conv }: { id: number; feed: SmartFeed | null | undefined; units: Units; conv: Conversion | null }) {
+  if (!feed) return <span className="vals">…</span>;
+  const e = feed.entries.get(id);
+  if (!feed.ok || !e) return <span className="vals">n/a</span>;
+  if (!e.valid || e.sample.mean_c === null) return <span className="vals">{e.state === "searching" ? "searching" : "not valid"}</span>;
+  return <span className="vals">{fmtTemp(e.sample.mean_c, units, conv)}</span>;
+}
+
+/** Second line of a smart row: the operator's readout (state, sample, rings, thermal-edge size). */
+function SmartLines({ id, feed }: { id: number; feed: SmartFeed | null | undefined }) {
+  if (feed === undefined) return null;  // playback: the stored series carries the values
+  const e = feed?.entries.get(id);
+  const lines = !feed ? ["waiting for the operator…"]
+    : !feed.ok ? ["no reading: the operator's live feed is unreachable"]
+    : !e ? ["no reading from the operator yet"]
+    : smartReadoutLines(e);
+  const state = feed?.ok && e ? (e.valid ? e.state : "invalid") : "none";
+  return (
+    <div className={`roi-stats smart-readout state-${state}`} title="Smart ROI values from the operator. Size is measured from the thermal edge, which also moves when heat spreading blurs the boundary: read it with the edge sharpness.">
+      {lines.map((l, i) => <div key={i} className={i === 0 ? "smart-head" : undefined}>{l}</div>)}
+    </div>
+  );
+}
+
+function SmartEditor({ r, dispatch }: { r: SmartRoi; dispatch: (a: RoiAction) => void }) {
+  const [rings, setRings] = useState<string | null>(null);  // draft while typing
+  const [ringErr, setRingErr] = useState<string | null>(null);
+  const [wantFixed, setWantFixed] = useState(r.rule === "fixed");
+  const set = (patch: Omit<Extract<RoiAction, { type: "setSmart" }>, "type" | "id">) => dispatch({ type: "setSmart", id: r.id, ...patch });
+  const commitRings = () => {
+    if (rings === null) return;
+    const got = parseRingOffsets(rings);
+    if (got.ok) { set({ rings_px: got.rings }); setRings(null); setRingErr(null); } else setRingErr(got.error);
+  };
+  const fixed = wantFixed || r.rule === "fixed";
+  return (
+    <div className="optics smart-settings">
+      <div className="optics-title">Smart ROI · {roiLabel(r)}</div>
+      <div className="optics-grid">
+        <label htmlFor={`rings-${r.id}`}>rings</label>
+        <input id={`rings-${r.id}`} type="text" value={rings ?? r.rings_px.join(", ")} aria-label={`ring offsets of ${roiLabel(r)} in px`} aria-invalid={!!ringErr}
+          onChange={(e) => { setRings(e.target.value); setRingErr(null); }} onBlur={commitRings}
+          onKeyDown={(e) => { if (e.key === "Enter") commitRings(); if (e.key === "Escape") { setRings(null); setRingErr(null); } }} />
+        <span className="optics-unit" title="Band boundaries outside the sample edge, comma separated: 5, 10, 25 measures bands 0–5, 5–10 and 10–25 px.">px</span>
+
+        <label htmlFor={`rule-${r.id}`}>edge rule</label>
+        <select id={`rule-${r.id}`} value={fixed ? "fixed" : "relative"} aria-label={`edge rule of ${roiLabel(r)}`}
+          onChange={(e) => { const f = e.target.value === "fixed"; setWantFixed(f); if (!f) set({ rule: "relative" }); }}>
+          <option value="relative">relative</option>
+          <option value="fixed">fixed °C</option>
+        </select>
+        <span className="optics-unit" title="Relative: the edge sits between the surroundings and the sample core, re-estimated each frame. Fixed: the edge is one isotherm (recommended for comparing size with CAD).">?</span>
+
+        {fixed && <>
+          <label htmlFor={`fixed-${r.id}`}>edge at</label>
+          <NumberField id={`fixed-${r.id}`} step={1} value={r.rule === "fixed" ? r.fixed_c ?? null : null} placeholder="°C" aria-label={`fixed edge temperature of ${roiLabel(r)} in °C`} onChange={(n) => set({ rule: "fixed", fixed_c: n })} />
+          <span className="optics-unit" title="The isotherm that defines the edge, in the sample's corrected °C. Until a value is entered the relative rule stays in use.">°C</span>
+        </>}
+
+        <label htmlFor={`sens-${r.id}`}>sensitivity</label>
+        <input id={`sens-${r.id}`} type="range" min={0.3} max={0.7} step={0.05} value={r.sensitivity} disabled={r.rule === "fixed"} aria-label={`sensitivity of ${roiLabel(r)}`}
+          onChange={(e) => set({ sensitivity: Number(e.target.value) })} />
+        <span className="optics-unit" title="Relative rule: where the edge sits between the surroundings (0.3, a wider outline) and the sample core (0.7, a tighter one).">{r.sensitivity.toFixed(2)}</span>
+
+        <label htmlFor={`reps-${r.id}`}>ring ε</label>
+        <NumberField id={`reps-${r.id}`} min={0.01} max={1} step={0.01} value={r.ring_emissivity ?? null} placeholder="sample's" aria-label={`ring emissivity of ${roiLabel(r)}`} onChange={(n) => set({ ring_emissivity: n })} />
+        <span className="optics-unit" title="Emissivity for the rings (they measure the powder). Blank: the same as the sample. Applies to recorded runs; live readings use the camera setting, like every live ROI.">ε</span>
+      </div>
+      {ringErr && <div className="smart-error" role="alert">{ringErr}</div>}
+      <div className="optics-foot">
+        Changing these restarts tracking (the % change baseline resets).{" "}
+        {r.ring_emissivity !== undefined && <button type="button" className="secondary" onClick={() => set({ ring_emissivity: null })} title="Rings use the sample's emissivity again">Reset ring ε</button>}
+      </div>
+    </div>
+  );
 }
 
 function Values({ s, units, conv }: { s: RoiStats | undefined; units: Units; conv: Conversion | null }) {
@@ -94,7 +180,7 @@ function OpticsEditor({ r, dispatch }: { r: Roi; dispatch: (a: RoiAction) => voi
 }
 
 /** One row per ROI: color swatch (click to change), editable name, current values, remove. */
-export function RoiRows({ rois, stats, selected, selectedIds, dispatch, extremes, onExtremes, units = "C", conv = null }: Props) {
+export function RoiRows({ rois, stats, selected, selectedIds, dispatch, extremes, onExtremes, units = "C", conv = null, smartFeed }: Props) {
   const isSel = (id: number) => (selectedIds ? selectedIds.includes(id) : selected === id);
   const [editing, setEditing] = useState<number | null>(null);
   const [picking, setPicking] = useState<number | null>(null);
@@ -108,6 +194,7 @@ export function RoiRows({ rois, stats, selected, selectedIds, dispatch, extremes
         <li>╱ Line: drag from one end to the other; the pixels along it are measured.</li>
         <li>⬠ Polygon: click each vertex; double-click places the last one and closes the shape (Enter closes, Esc cancels, Backspace undoes a vertex). ⌇ Spline: the same, but open. ✎ Freehand: hold the mouse and draw; releasing closes the shape.</li>
         <li>↖ Select: click an ROI, then drag to move it; Delete removes it. Shift-click to select several and drag them together. ROIs stacked on top of each other: press 1–9 to select that row's ROI (or Alt/Option-click to step down through the stack), then drag anywhere inside it, even where others cover it. When a polygon, spline or line is selected, drag its square handles to edit individual vertices. Cmd/Ctrl+Z undoes an ROI change; Cmd/Ctrl+Y or Cmd/Ctrl+Shift+Z redoes it.</li>
+        <li>Smart tool: draw a loose outline around the sample (like freehand). The operator finds the sample's thermal edge inside it every frame and draws it solid, with the ring bands dashed; ⚙ sets the rings, edge rule, sensitivity and ring emissivity. Its size is measured from the thermal edge.</li>
         <li>Click the color square to recolor, set a per-ROI emissivity and reflected temperature (values are re-corrected from the camera's setting); double-click the name to rename; ◉ hides an ROI on the image and plot without removing it.</li>
       </ul>
     </Disclosure>
@@ -132,15 +219,16 @@ export function RoiRows({ rois, stats, selected, selectedIds, dispatch, extremes
                 </button>
               )}
             </span>,
-            <Values key={`v${r.id}`} s={stats.get(r.id)} units={units} conv={conv} />,
+            r.kind === "smart" ? <SmartValue key={`v${r.id}`} id={r.id} feed={smartFeed} units={units} conv={conv} /> : <Values key={`v${r.id}`} s={stats.get(r.id)} units={units} conv={conv} />,
             <span key={`x${r.id}`} style={{ display: "flex", gap: 4 }}>
               <button className="secondary" type="button" onClick={() => dispatch({ type: "toggleHidden", id: r.id })} aria-pressed={!!r.hidden} aria-label={`${r.hidden ? "Show" : "Hide"} ${roiLabel(r)}`} title={r.hidden ? "Hidden on the image (still measured and recorded) · click to show" : "Hide on the image (still measured and recorded)"} style={{ opacity: r.hidden ? 0.5 : 1 }}>{r.hidden ? "◌" : "◉"}</button>
-              <button className="secondary" type="button" onClick={() => setOptics(optics === r.id ? null : r.id)} aria-pressed={optics === r.id} aria-label={`Optics for ${roiLabel(r)}`} title="Per-ROI emissivity, reflected temperature and distance (for accuracy on this region)" style={{ fontWeight: (r.emissivity !== undefined || r.reflected_c !== undefined || r.distance_m !== undefined) ? 700 : 400, color: (r.emissivity !== undefined || r.reflected_c !== undefined || r.distance_m !== undefined) ? "var(--accent)" : undefined }}>ε</button>
+              {r.kind === "smart" ? <button className="secondary" type="button" onClick={() => setOptics(optics === r.id ? null : r.id)} aria-pressed={optics === r.id} aria-label={`Smart ROI settings for ${roiLabel(r)}`} title="Smart ROI settings: ring offsets, edge rule, sensitivity, ring emissivity">⚙</button> :
+              <button className="secondary" type="button" onClick={() => setOptics(optics === r.id ? null : r.id)} aria-pressed={optics === r.id} aria-label={`Optics for ${roiLabel(r)}`} title="Per-ROI emissivity, reflected temperature and distance (for accuracy on this region)" style={{ fontWeight: (r.emissivity !== undefined || r.reflected_c !== undefined || r.distance_m !== undefined) ? 700 : 400, color: (r.emissivity !== undefined || r.reflected_c !== undefined || r.distance_m !== undefined) ? "var(--accent)" : undefined }}>ε</button>}
               <button className="secondary" type="button" onClick={() => { dispatch({ type: "commit" }); dispatch({ type: "remove", id: r.id }); dispatch({ type: "commit" }); }} aria-label={`Remove ${roiLabel(r)}`} title="Remove">×</button>
             </span>,
-            <StatsLine key={`s${r.id}`} r={r} s={stats.get(r.id)} units={units} conv={conv} />,
+            r.kind === "smart" ? <SmartLines key={`s${r.id}`} id={r.id} feed={smartFeed} /> : <StatsLine key={`s${r.id}`} r={r} s={stats.get(r.id)} units={units} conv={conv} />,
             picking === r.id ? <div key={`c${r.id}`} style={{ gridColumn: "1 / -1" }}><ColorPicker r={r} i={i} dispatch={dispatch} onDone={() => setPicking(null)} /></div> : null,
-            optics === r.id ? <div key={`o${r.id}`} style={{ gridColumn: "1 / -1" }}><OpticsEditor r={r} dispatch={dispatch} /></div> : null,
+            optics === r.id ? <div key={`o${r.id}`} style={{ gridColumn: "1 / -1" }}>{r.kind === "smart" ? <SmartEditor r={r} dispatch={dispatch} /> : <OpticsEditor r={r} dispatch={dispatch} />}</div> : null,
           ]
         ))}
       </div>

@@ -74,6 +74,8 @@ export type RoiAction =
   | { type: "toggleHidden"; id: number }
   | { type: "setOptics"; id: number; emissivity?: number | null; reflected_c?: number | null; distance_m?: number | null }
   | { type: "setBox"; id: number; box: 1 | 3 }
+  /** Smart ROI tracking settings; values the operator would reject are ignored, null clears ring emissivity. */
+  | { type: "setSmart"; id: number; rings_px?: number[]; rule?: "relative" | "fixed"; fixed_c?: number; sensitivity?: number; ring_emissivity?: number | null }
   | { type: "setHiddenAll"; hidden: boolean }
   | { type: "replace"; rois: Roi[] }
   | { type: "clear" }
@@ -205,6 +207,21 @@ export function roiReducer(s: RoiState, a: RoiAction): RoiState {
       return patch(s, a.id, (r) => { const { color: _old, ...rest } = r; return a.color ? { ...rest, color: a.color } as Roi : rest as Roi; });
     case "setBox":
       return patch(s, a.id, (r) => { if (r.kind !== "spot") return r; const { box: _b, ...rest } = r; return a.box === 3 ? { ...rest, box: 3 } as Roi : rest as Roi; });
+    case "setSmart":
+      return patch(s, a.id, (r) => {
+        if (r.kind !== "smart") return r;
+        const next: Smart = { ...r };
+        const rings = a.rings_px;
+        if (rings && rings.length > 0 && rings.every((x, i) => Number.isInteger(x) && x > 0 && (i === 0 || x > rings[i - 1]))) next.rings_px = [...rings];
+        if (typeof a.sensitivity === "number" && a.sensitivity >= 0.3 && a.sensitivity <= 0.7) next.sensitivity = a.sensitivity;
+        if (a.ring_emissivity === null) delete next.ring_emissivity;
+        else if (typeof a.ring_emissivity === "number" && a.ring_emissivity >= 0.01 && a.ring_emissivity <= 1) next.ring_emissivity = a.ring_emissivity;
+        const fixed = typeof a.fixed_c === "number" && Number.isFinite(a.fixed_c) ? a.fixed_c : next.fixed_c;
+        const rule = a.rule ?? next.rule;
+        if (rule === "fixed" && fixed !== undefined) { next.rule = "fixed"; next.fixed_c = fixed; }
+        else if (rule === "relative") { next.rule = "relative"; delete next.fixed_c; }
+        return next;
+      });
     case "setOptics":
       return patch(s, a.id, (r) => {
         const { emissivity: e0, reflected_c: t0, distance_m: d0, ...rest } = r;
