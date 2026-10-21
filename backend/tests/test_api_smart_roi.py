@@ -170,3 +170,16 @@ def test_regenerate_recomputes_stale_smart_series(tmp_path: Path) -> None:
         assert (tmp_path / name / "smart_roi" / "7.npz").stat().st_mtime_ns != mtime
         text = (tmp_path / name / "exports" / "roi_series.csv").read_text()
         assert "sensitivity=0.4" in text
+
+
+def test_playback_series_route_skips_smart_roi(tmp_path: Path) -> None:
+    import json
+
+    name = make_smart_run(tmp_path, n=6).name
+    rois = json.dumps([
+        SMART, {"id": 2, "kind": "rect", "x0": 10, "y0": 10, "x1": 30, "y1": 30},
+    ])
+    with _client(tmp_path) as c:
+        r = c.get(f"/api/experiments/{name}/series", params={"rois": rois})
+        assert r.status_code == 200, r.text
+        assert set(r.json()["series"]) == {"2"}  # smart data comes from the smart-roi routes

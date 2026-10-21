@@ -424,10 +424,12 @@ def roi_series(
     ``STRIDE_CACHE_BYTES``) so the next call, typically after the operator nudges an ROI in
     playback, skips re-reading and decompressing the store.
 
+    Smart ROIs are skipped (their per-frame data lives in the stored smart series).
     Spots return ``value``; rectangles return ``min``/``max``/``mean``. Batches of frames are
     read at once so the store is touched chunk-wise, never frame-by-frame. ``stride`` keeps every
     Nth frame (for a plot that cannot show more points than pixels); the CSV export uses stride 1.
     """
+    rois = [r for r in rois if r["kind"] != "smart"]  # tracked outline: see smart_series
     stride = max(1, int(stride))
     n = reader.n_frames
     keep = np.arange(0, n, stride)  # frames actually computed
