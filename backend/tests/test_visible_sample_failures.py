@@ -129,6 +129,35 @@ def test_runner_frame_count_mismatch_fails(
     assert exported(d) == ["visible_sample.json"]
 
 
+@needs_ffmpeg
+@pytest.mark.parametrize("why", ["skipped", "failed"])
+def test_stopped_run_whose_json_cannot_be_written_leaves_no_stale_ok_json(
+    tmp_path: Path,
+    real: dict[str, Any],
+    short_clip: Path,
+    fixed_threshold: None,
+    monkeypatch: pytest.MonkeyPatch,
+    why: str,
+) -> None:
+    """The older results are deleted before the new JSON is written. If that write fails, the older
+    ``status: ok`` JSON must not stay behind listing files that are gone."""
+    d = experiment(tmp_path, real, [short_clip])
+    assert run_analysis(d)["status"] == "ok"
+    assert (d / "exports" / "visible_sample.json").is_file()
+
+    def cannot_write(path: Path, summary: dict[str, Any]) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(vsr, "_write_json", cannot_write)
+    if why == "skipped":
+        out = run_analysis(d, ffmpeg="/nonexistent")
+    else:
+        monkeypatch.setattr(vio, "decode_luma", lambda *a, **k: iter(()))  # no frames: count fails
+        out = run_analysis(d)
+    assert out["status"] == why  # the caller still gets the result
+    assert exported(d) == []  # no ok JSON, and none of the files it listed
+
+
 # -- timeouts: a stuck ffmpeg fails the run instead of holding the render lock forever ----------
 
 

@@ -597,7 +597,11 @@ def _remove_stale(folder: Path, keep: list[str]) -> None:
 
 
 def _write_stopped(folder: Path, status: str, reason: str) -> dict[str, Any]:
-    """The JSON of a run that was not analysed; any earlier results are removed."""
+    """The JSON of a run that was not analysed; any earlier results are removed.
+
+    The earlier files go first, so if the new JSON cannot be written the earlier one is removed
+    too: it would say ``ok`` and list files that are gone.
+    """
     summary: dict[str, Any] = {
         "status": status,
         "reason": reason,
@@ -613,6 +617,10 @@ def _write_stopped(folder: Path, status: str, reason: str) -> dict[str, Any]:
     except OSError:
         staged.discard()
         logger.exception("could not write %s", folder / JSON_NAME)
+        try:
+            (folder / JSON_NAME).unlink(missing_ok=True)
+        except OSError:
+            logger.exception("could not remove the earlier %s", folder / JSON_NAME)
     return summary
 
 
