@@ -8,7 +8,7 @@ import {
   type VisibleSampleAdjustedSummary, type VisibleSampleSummary,
 } from "../lib/visibleSample.ts";
 
-interface Props { name: string; index: number; nFrames: number; rois: Roi[]; celsius: boolean; thermalPreview?: { bytes: number } | null; onThermalPreview?: () => void; files?: { name: string; bytes: number }[]; onRefresh?: () => void; storedRois?: unknown[] | null; visibleSample?: VisibleSampleSummary | null; visibleSampleAdjusted?: VisibleSampleAdjustedSummary | null; /** The run's adjustment as the sliders show it now. */ currentAdjust?: VisibleAdjust; }
+interface Props { name: string; index: number; nFrames: number; rois: Roi[]; celsius: boolean; thermalPreview?: { bytes: number } | null; onThermalPreview?: () => void; files?: { name: string; bytes: number }[]; onRefresh?: () => void; storedRois?: unknown[] | null; visibleSample?: VisibleSampleSummary | null; visibleSampleAdjusted?: VisibleSampleAdjustedSummary | null; /** The run's adjustment as the sliders show it now. */ currentAdjust?: VisibleAdjust; /** Sends a pending slider save and waits for it (useRunVisibleAdjust().flush), so the adjusted analysis reads what the sliders show. */ flushAdjust?: () => Promise<void>; }
 
 const FRAME_FORMATS = [
   { f: "csv", label: "CSV", title: "°C grid (raw counts if not temperature-linear)" },
@@ -50,7 +50,7 @@ function ProgressBar({ done, total }: { done: number; total: number }) {
   );
 }
 
-export function ExportSection({ name, index, nFrames, rois, celsius, thermalPreview, onThermalPreview, files = [], onRefresh, storedRois, visibleSample, visibleSampleAdjusted, currentAdjust = NEUTRAL_ADJUST }: Props) {
+export function ExportSection({ name, index, nFrames, rois, celsius, thermalPreview, onThermalPreview, files = [], onRefresh, storedRois, visibleSample, visibleSampleAdjusted, currentAdjust = NEUTRAL_ADJUST, flushAdjust }: Props) {
   const [busy, setBusy] = useState(false);
   // Which single-flight export (hdf5 / range / report) is running, so only its button spins.
   const [busyKind, setBusyKind] = useState<"hdf5" | "range" | "report" | null>(null);
@@ -76,6 +76,7 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
     setDerivedBusy(true); setErr(null); setDerivedOut(null); setProg({ step: "starting", done: 0, total: 0 });
     try {
       if (useOnScreen) await api.putRois(name, rois);
+      await flushAdjust?.(); // a slider move still in its debounce would otherwise miss this analysis
       await api.exportDerived(name, video, adjusted);
       for (;;) {
         await new Promise((r) => setTimeout(r, 700));

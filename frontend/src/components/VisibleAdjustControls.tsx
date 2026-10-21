@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { api, type ExperimentInfo } from "../lib/api.ts";
 import { ADJUST_LIMITS, NEUTRAL_ADJUST, clampAdjust, isNeutral, type VisibleAdjust } from "../lib/visibleAdjust.ts";
+import { canReset, createAdjustWriter, saveReducer, saveStateFor, type SaveState } from "../lib/visibleAdjustSave.ts";
 import { cachedRangeProbe, effectiveRange, filterTableValues, recordedAdjust, svgFilterId, type AdjustSource, type VisibleRange } from "../lib/visibleAdjustUi.ts";
 
 /** One labelled range slider in a `.kv` grid (shared by the overlay registration and the adjustment). */
@@ -66,66 +67,60 @@ export function VisibleAdjustControls({ value, onChange, onReset, resetLabel, re
   );
 }
 
-export type SaveState = { state: "idle" } | { state: "saving" } | { state: "error"; error: string };
-export interface RunAdjust { adjust: VisibleAdjust; source: AdjustSource; save: SaveState; set: (a: VisibleAdjust) => void; reset: () => void; }
+export type { SaveState } from "../lib/visibleAdjustSave.ts";
+/** `save`: this run's save status; `canReset`: reset can be pressed (a sidecar, or a failed reset to
+ *  retry); `flush`: send a pending save now and wait for every write (never rejects). */
+export interface RunAdjust { adjust: VisibleAdjust; source: AdjustSource; save: SaveState; canReset: boolean; set: (a: VisibleAdjust) => void; reset: () => void; flush: () => Promise<void>; }
 
 const SAVE_DEBOUNCE_MS = 500;
 
 /** A recorded run's visible adjustment: starts from the run's effective values, a slider move shows
  *  at once and saves the sidecar (debounced); reset deletes the sidecar and returns to the recorded
- *  values (or neutral). Writes go out in order; a pending save is sent when the run changes. */
+ *  values (or neutral). Writes go out in order (createAdjustWriter); a pending save is sent when the
+ *  run changes, and the save status is tagged with its run. */
 export function useRunVisibleAdjust(name: string, info: ExperimentInfo | null): RunAdjust {
   const [cur, setCur] = useState<{ name: string; adjust: VisibleAdjust; source: AdjustSource } | null>(null);
-  const [save, setSave] = useState<SaveState>({ state: "idle" });
-  const chain = useRef<Promise<unknown>>(Promise.resolve());
-  const pending = useRef<{ name: string; adjust: VisibleAdjust; timer: ReturnType<typeof setTimeout> } | null>(null);
-  const ops = useRef(0);
+  const [track, dispatch] = useReducer(saveReducer, { n: 0, save: { state: "idle" } });
+  const writer = useRef<ReturnType<typeof createAdjustWriter> | null>(null);
+  if (!writer.current) {
+    writer.current = createAdjustWriter({
+      write: (n, a) => api.setVisibleAdjust(n, a), clear: (n) => api.clearVisibleAdjust(n), onAction: dispatch,
+      setTimer: (fn, ms) => setTimeout(fn, ms), clearTimer: (id) => clearTimeout(id as ReturnType<typeof setTimeout>),
+      debounceMs: SAVE_DEBOUNCE_MS,
+    });
+  }
+  const w = writer.current;
 
   // Seed once per run (a later info refresh must not undo slider moves that are still being saved).
   useEffect(() => {
     if (!info || info.name !== name || cur?.name === name) return;
     const eff = info.visible_adjust;
     setCur({ name, adjust: clampAdjust(eff ?? NEUTRAL_ADJUST), source: eff?.source ?? "neutral" });
-    setSave({ state: "idle" });
+    dispatch({ type: "clear" });
   }, [info, name, cur?.name]);
-
-  function enqueue(op: () => Promise<unknown>): void {
-    const n = ++ops.current;
-    setSave({ state: "saving" });
-    chain.current = chain.current.catch(() => undefined).then(op).then(
-      () => { if (n === ops.current) setSave({ state: "idle" }); },
-      (e: unknown) => { if (n === ops.current) setSave({ state: "error", error: String(e) }); },
-    );
-  }
-  function flush(): void {
-    const p = pending.current;
-    if (!p) return;
-    clearTimeout(p.timer);
-    pending.current = null;
-    enqueue(() => api.setVisibleAdjust(p.name, p.adjust));
-  }
-  useEffect(() => () => flush(), [name]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => { void w.flush(); }, [name, w]);
 
   const shown = cur && cur.name === name ? cur : null;
+  const save = saveStateFor(track.save, name);
+  const source = shown?.source ?? "neutral";
   return {
     adjust: shown?.adjust ?? NEUTRAL_ADJUST,
-    source: shown?.source ?? "neutral",
+    source,
     save,
+    canReset: !!shown && canReset(source, save),
     set: (a) => {
       if (!shown) return;
       const adjust = clampAdjust(a);
       setCur({ name, adjust, source: "sidecar" });
-      if (pending.current) clearTimeout(pending.current.timer);
-      setSave({ state: "saving" });
-      pending.current = { name, adjust, timer: setTimeout(flush, SAVE_DEBOUNCE_MS) };
+      w.set(name, adjust);
     },
     reset: () => {
       if (!shown) return;
-      if (pending.current) { clearTimeout(pending.current.timer); pending.current = null; }
       const recorded = recordedAdjust(info?.name === name ? info.visible_adjust_recorded : null);
       setCur({ name, adjust: recorded ?? { ...NEUTRAL_ADJUST }, source: recorded ? "recorded" : "neutral" });
-      enqueue(() => api.clearVisibleAdjust(name));
+      w.reset(name);
     },
+    flush: () => w.flush(),
   };
 }
 

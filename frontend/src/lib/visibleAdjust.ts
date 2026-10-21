@@ -11,6 +11,9 @@
 // uint8 mapping: for a byte u, x = u / 255 and the result is floor(y * 255 + 0.5), i.e. round half
 // up. Python uses the identical expression, so the two agree on every tie (Math.round and numpy's
 // round are not used).
+//
+// Inputs must be validated or clamped first (clampAdjust, or the backend's validate_adjust): NaN and
+// infinities are not handled here and would give results that differ from Python's.
 
 export interface VisibleAdjust {
   exposure_ev: number;

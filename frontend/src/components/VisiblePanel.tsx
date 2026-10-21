@@ -177,8 +177,8 @@ export function VisiblePanel(p: PanelProps) {
       {placement}
       {registration}
       <VisibleAdjustControls value={p.adjust.adjust} onChange={p.adjust.set} onReset={p.adjust.reset} resetLabel="reset to as-recorded"
-        resetDisabled={p.adjust.source !== "sidecar"}
-        notes={<span className="hint">{p.adjust.save.state === "saving" ? "saving…" : p.adjust.save.state === "error" ? <span style={{ color: "var(--err)" }}>not saved: {p.adjust.save.error}</span> : sourceNote(p.adjust.source)}</span>} />
+        resetDisabled={!p.adjust.canReset}
+        notes={<span className="hint">{p.adjust.save.state === "saving" ? "saving…" : p.adjust.save.state === "error" ? <span style={{ color: "var(--err)" }}>{p.adjust.save.op === "reset" ? "not reset (retry)" : "not saved"}: {p.adjust.save.error}</span> : sourceNote(p.adjust.source)}</span>} />
       {p.rangeNote && <div className="warnbox">{p.rangeNote}: near-white detail above level 235 {p.rangeNote === RAW_RANGE_NOTE ? "shows" : "may show"} as white.</div>}
       {mode === "rail" && <VisibleVideo name={p.name} t={p.t} playing={p.playing} speed={p.speed} vis={p.vis} measuredFps={p.measuredFps} adjust={p.adjust.adjust} rangeNote={p.rangeNote} />}
     </>

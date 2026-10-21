@@ -457,7 +457,7 @@ export function PlaybackPage(p: Props) {
           </RailSection>
           <RailSection id="export" title="export" open={p.layout.sections.export} onToggle={() => p.dispatch({ type: "toggleSection", section: "export" })} tag={derivedStale ? "update needed" : "derived files"} tagWarn={derivedStale}>
             <button className="primary" style={{ width: "100%", marginBottom: 8 }} disabled={n === 0} onClick={() => setShowMedia(true)} title="Open the media export editor: MP4/GIF of a chosen window with overlays">🎬 Media export (clip / GIF)…</button>
-            <ExportSection name={p.name} index={index} nFrames={n} rois={p.rois.rois} celsius={hdr?.kelvin_per_count != null} thermalPreview={info?.thermal_preview} files={info?.exports ?? []} storedRois={info?.rois ?? null} visibleSample={info?.visible_sample} visibleSampleAdjusted={info?.visible_sample_adjusted} currentAdjust={vAdjust.adjust} onRefresh={() => { api.experiment(p.name).then(setInfo).catch((e) => setErr(String(e))); }} />
+            <ExportSection name={p.name} index={index} nFrames={n} rois={p.rois.rois} celsius={hdr?.kelvin_per_count != null} thermalPreview={info?.thermal_preview} files={info?.exports ?? []} storedRois={info?.rois ?? null} visibleSample={info?.visible_sample} visibleSampleAdjusted={info?.visible_sample_adjusted} currentAdjust={vAdjust.adjust} flushAdjust={vAdjust.flush} onRefresh={() => { api.experiment(p.name).then(setInfo).catch((e) => setErr(String(e))); }} />
           </RailSection>
         </Rail>
       }
