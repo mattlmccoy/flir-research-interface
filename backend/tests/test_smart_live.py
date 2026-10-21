@@ -236,3 +236,63 @@ def test_failure_outside_per_roi_guard_does_not_leave_a_valid_feed(monkeypatch: 
                          now_ns=f2.host_timestamp_ns + 5_000_000, smart=live.latest())
     (roi,) = p["rois"]
     assert roi["valid"] is False and roi["mean_c"] is None
+
+
+def test_failing_tracker_logs_one_traceback_not_one_per_frame(
+    monkeypatch: Any, caplog: Any
+) -> None:
+    """A tracker that keeps failing logs its traceback once, then at most a one-line warning a
+    minute; a good update (or new ROIs) re-arms the traceback."""
+    import logging
+
+    live = SmartLive()
+    live.set_rois([SMART])
+    live.on_frame(_frame(_blob_c(), 10.0))
+    tr = live.tracker(7)
+    assert tr is not None
+    good = tr.update
+
+    def boom(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("tracker bug")
+
+    monkeypatch.setattr(tr, "update", boom)
+    frame = _frame(_blob_c(), 10.1, 2)
+    with caplog.at_level(logging.DEBUG, logger=smart_live_mod.__name__):
+        for _ in range(100):
+            live.on_frame(frame)
+    tracebacks = [r for r in caplog.records if r.exc_info]
+    assert len(tracebacks) == 1
+    assert len(caplog.records) == 1
+    assert live.latest()[7].valid is False
+
+    caplog.clear()
+    monkeypatch.setattr(tr, "update", good)
+    live.on_frame(_frame(_blob_c(), 10.2, 3))  # a good update clears the failing mark
+    monkeypatch.setattr(tr, "update", boom)
+    with caplog.at_level(logging.DEBUG, logger=smart_live_mod.__name__):
+        live.on_frame(frame)
+    assert len([r for r in caplog.records if r.exc_info]) == 1
+
+
+def test_failing_tracker_warns_one_line_a_minute(monkeypatch: Any, caplog: Any) -> None:
+    import logging
+
+    live = SmartLive()
+    live.set_rois([SMART])
+    live.on_frame(_frame(_blob_c(), 10.0))
+    tr = live.tracker(7)
+    assert tr is not None
+
+    def boom(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("tracker bug")
+
+    monkeypatch.setattr(tr, "update", boom)
+    clock = [1000.0]
+    monkeypatch.setattr(smart_live_mod.time, "monotonic", lambda: clock[0])
+    frame = _frame(_blob_c(), 10.1, 2)
+    with caplog.at_level(logging.DEBUG, logger=smart_live_mod.__name__):
+        for step in (0.0, 30.0, 61.0, 90.0, 122.0):
+            clock[0] = 1000.0 + step
+            live.on_frame(frame)
+    levels = [(r.levelname, bool(r.exc_info)) for r in caplog.records]
+    assert levels == [("ERROR", True), ("WARNING", False), ("WARNING", False)]

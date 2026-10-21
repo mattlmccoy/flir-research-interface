@@ -15,6 +15,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import threading
+import time
 from typing import Any
 
 from flir_research_interface.analysis.smart_roi import (
@@ -29,6 +30,8 @@ from flir_research_interface.radiometry.overrange import over_range_mask
 from flir_research_interface.radiometry.temperature_linear import IRFormat, counts_to_celsius
 
 logger = logging.getLogger(__name__)
+
+FAIL_LOG_INTERVAL_S = 60.0  # a tracker that keeps failing: one-line warning at most this often
 
 
 def _key(spec: SmartRoiSpec) -> SmartRoiSpec:
@@ -56,6 +59,9 @@ class SmartLive:
         self._trackers: dict[int, SmartTracker] = {}
         self._broken: set[int] = set()  # specs whose tracker could not be built (logged once)
         self._results: dict[int, SmartResult] = {}
+        # ROIs whose tracker is failing -> monotonic time of the last log line. Written by the
+        # camera thread; set_rois/clear empty it (single dict ops, so no lock is needed).
+        self._failing: dict[int, float] = {}
 
     # -- request threads -----------------------------------------------------------------------
 
@@ -82,6 +88,7 @@ class SmartLive:
                 self._results.pop(rid, None)
                 self._broken.discard(rid)
             self._specs = specs
+            self._failing.clear()
 
     def latest(self) -> dict[int, SmartResult]:
         """The latest result per smart ROI id (absent until a frame has been tracked)."""
@@ -103,6 +110,7 @@ class SmartLive:
             self._trackers.clear()
             self._results.clear()
             self._broken.clear()
+            self._failing.clear()
 
     # -- camera thread ---------------------------------------------------------------------------
 
@@ -142,10 +150,25 @@ class SmartLive:
             try:
                 out[rid] = (tr, tr.update(celsius, t_s, over))
             except Exception:  # noqa: BLE001 - the feed reports this ROI invalid instead
-                logger.exception("live smart ROI %d: tracker failed on frame %s", rid,
-                                 frame.frame_id)
+                self._log_failure(rid, frame.frame_id)
                 out[rid] = (tr, _invalid(spec))
+            else:
+                self._failing.pop(rid, None)
         self._store(out, specs, built, frame.host_timestamp_ns)
+
+    def _log_failure(self, rid: int, frame_id: int) -> None:
+        """Traceback on the first failure of a run of failures, then a one-line warning at most
+        every ``FAIL_LOG_INTERVAL_S`` (the camera thread runs this every frame). Call only from
+        inside an ``except`` block."""
+        now = time.monotonic()
+        last = self._failing.get(rid)
+        if last is None:
+            logger.exception("live smart ROI %d: tracker failed on frame %s", rid, frame_id)
+        elif now - last >= FAIL_LOG_INTERVAL_S:
+            logger.warning("live smart ROI %d: tracker still failing (frame %s)", rid, frame_id)
+        else:
+            return
+        self._failing[rid] = now
 
     def _mark_broken(self, rid: int, spec: SmartRoiSpec) -> None:
         with self._lock:
