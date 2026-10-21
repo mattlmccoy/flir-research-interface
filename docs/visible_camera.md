@@ -285,3 +285,177 @@ that reason.
   never reads as zero.
 * **Only the sample region is watched.** Flashes at the cage, electrodes or cables are not looked
   for.
+
+## 5. Software adjustments, full-range display and presets (2026-10-21)
+
+The camera's exposure cannot be set (section 4), so the app adjusts the picture itself. Everything
+here changes how the video is drawn or analysed. `visible.mp4`, `thermal.zarr` and every radiometric
+number stay as the camera sent them, and `metadata.json` is written only when a recording starts.
+Software cannot recover pixels the camera stored as 255: they stay flat. The adjustment helps with
+the near-white, mid and dark areas (sample, cage, electrodes).
+
+### The adjustment
+
+Three numbers: `exposure_ev` (-3 to +3, neutral 0), `brightness` (-0.5 to +0.5, neutral 0) and
+`contrast` (0.25 to 4, neutral 1). For a value `x` in [0, 1]:
+
+    slope = contrast * 2**exposure_ev
+    intercept = 0.5 - 0.5 * contrast + brightness
+    y = clip(slope * x + intercept, 0, 1)        (uint8 output rounded to nearest)
+
+The browser applies it with an SVG `feComponentTransfer` (`type="linear"`, R, G and B,
+`color-interpolation-filters="sRGB"`), not CSS `brightness()` / `contrast()`, which cannot express
+the offset. Python (`analysis/visible_adjust.py`) uses the same slope and intercept for the media
+export and the analysis; `frontend/src/lib/visibleAdjust.ts` is the browser twin, and a parity test
+checks both against the same table.
+
+* **Where:** exposure, brightness and contrast sliders in the visible-camera panel for the live
+  preview, and the same sliders in the visible panel in playback.
+* **Live:** the values are kept in the browser like the other view settings and are stamped into the
+  next recording's `metadata.json` as `visible_adjust` (`exposure_ev`, `brightness`, `contrast`,
+  `preset`, `based_on`). `preset` is the last applied preset's name only when the sliders still equal
+  that preset's; otherwise `preset` is null and `based_on` holds the name.
+* **Playback:** the run shows, in this order, `visible_adjust.json` in the run folder (what the
+  operator last saved for this run), else the `visible_adjust` stamp in `metadata.json`, else
+  neutral (runs recorded before 2026-10-21 have neither and show neutral). Moving a slider saves the
+  sidecar (`PUT /api/experiments/{name}/visible-adjust`); "reset to as-recorded" deletes it
+  (`DELETE`, same route). The sidecar travels with the run when it is offloaded
+  (`storage.MUTABLE_PATHS`).
+* **Media export:** a clip that includes the visible video uses the run's effective adjustment.
+
+### Full range: what the camera sends and what a browser shows
+
+The visible stream is full-range luma (Y spans 0-255) but carries no range tag. ffmpeg's default
+conversion and browsers read an untagged H.264 stream as limited range (16-235), which shows every
+value from about 235 up as the same white; that premise is the reason for the copy below.
+
+Measured on `20261020_144402_Run/visible.mp4` (2026-10-21), the Y plane of 10 frames at 60, 120, ...,
+600 s, decoded without a range conversion:
+
+| Measure | Value |
+|---|---|
+| Y range in every one of the 10 frames | 0 to 255 |
+| Pixels at 236-254 | 1.52 % of all 10 frames (per frame 1.40-1.64 %) |
+| Pixels at 255 | 0.83 % (per frame 0.69-0.98 %) |
+| Pixels at 235 or above | 2.4 % (per frame 2.32-2.46 %) |
+| Pixels below 16 | 0.02 %, none at 0 |
+| `color_range` (ffprobe, `visible.mp4`) | not reported (unknown); the stream is `yuv420p`, 1280x960 |
+
+The 1.5 % at 236-254 is the near-white detail that a limited-range reading discards before any
+adjustment. The analysis already read raw Y; the display paths now do too: the live MJPEG transcode
+(`visible/preview.py`) and the media-export frame extraction (`analysis/visible_overlay.py`) use
+`in_range=full`, and playback plays the copy below.
+
+### The full-range copy (`exports/visible_full_range.mp4`)
+
+Playback serves `exports/visible_full_range.mp4` (`visible_001_full_range.mp4`, ... per segment), made
+the first time the video is requested by `ffmpeg -c copy -bsf:v h264_metadata=video_full_range_flag=1`
+(`visible/full_range.py`, `full_range_copy`). It is a stream copy, so the picture is not re-encoded.
+The response carries `X-Visible-Range`: `full` for the copy, `raw-untagged` when ffmpeg is missing or
+the build failed; in that case the raw file is played and the panel says "visible video shown without
+range correction", never silently looking fixed. The copy is rebuilt when it is older than its
+source and can be deleted at any time.
+
+Measured on the reference run with ffmpeg 6 (2026-10-21):
+
+* `ffprobe` of the copy: `color_range=pc`, `pix_fmt=yuvj420p`, 1280x960; `visible.mp4` itself is
+  untouched (sha256 `c61f66fc...511c32` before and after).
+* Packets: 6,192 in both files. Presentation and decode timestamps and keyframe flags are identical
+  packet for packet.
+* Packet sizes: 412 packets differ, each by exactly +2 bytes, and all 412 are keyframes (413 keyframes
+  in all; the first one is unchanged). Cause: the bitstream filter rewrites the in-band SPS. The
+  sum of packet sizes rises from 77,415,228 to 77,416,052 bytes.
+* Decoded pixels: an MD5 over every decoded frame, without a pixel-format conversion, is the same
+  for both files.
+* Cost: the file is 77,494,109 bytes, against 77,493,283 for `visible.mp4`; building it took 0.9 s
+  on the SSD. Budget the same disk space as the video again, per run that is opened.
+
+Do not feed the copy to a tool that converts it to a limited-range format and expect the original
+values: `-pix_fmt yuv420p` on the copy maps 0-255 into 16-235.
+
+### Analysis on the adjusted video
+
+"also analyse the adjusted video" in the Export section (off by default; remembered in the browser;
+disabled while the run's adjustment is neutral) adds a second analysis to the derived-files
+regenerate (`/export/derived?visible_adjusted=true`). The post-stop automatic analysis stays raw.
+
+* **Files:** `exports/visible_sample_adjusted.{csv,json,png}` and
+  `visible_sample_adjusted_closeup.mp4` (`_closeup_001.mp4`, ... per segment). The raw files are
+  never touched by it, and a regenerate without the box ticked does not remove the adjusted ones.
+* **What is adjusted:** the luma is mapped before the threshold, `sample_dark_px`,
+  `sample_mean_luma`, `brightening` and the close-up. `bed_clipped_frac` always uses raw luma: it
+  reports what the camera clipped, which an exposure cut would otherwise hide.
+* **JSON:** the same fields as the raw result plus `adjust` (`exposure_ev`, `brightness`,
+  `contrast`, `source`: `sidecar` or `recorded` when the app wrote it). The status line under the
+  exports reads "Visible sample (adjusted: exposure ... EV, brightness ..., contrast ...)" and adds
+  "; sliders changed since" when the run's sliders no longer match the ones it used.
+* **Marks:** the raw result stays the default and is the one that draws the flash marks on the
+  timeline.
+* **The flash rule is not rescaled.** The 15-level floor applies to the adjusted luma, so a
+  contrast or exposure cut (slope below 1) can hide a flash that the raw analysis flags, and a boost
+  can clip one. The reference run shows it.
+
+Reference run, `{exposure_ev: -1, brightness: 0, contrast: 1.4}` (slope 0.7, intercept -0.2), run on
+2026-10-21, no sidecar written, the adjustment passed to `analyse_visible_sample(..., adjust=...)`:
+
+| Item | Raw | Adjusted |
+|---|---|---|
+| Threshold (Otsu on the first 5 s) | 178 | 74 (0.7 x 178 - 51 = 73.6) |
+| Close-up stretch | 58-250 | 0-250 |
+| Frames analysed, coverage | 6,189, 26.48-632.57 s, 61 gaps over 0.3 s | identical |
+| `sample_dark_px`, first 5 s mean / run median | 1,095.4 / 1,094 | 1,095.4 / 1,094 |
+| Median `sample_mean_luma` | 107.9 | 24.8 |
+| `bed_clipped_frac` | min 0.0018, median 0.319, max 0.391 | all 6,189 values identical to raw |
+| Events | 3: +20 at 553.95 s, +19 at 615.66 s, +97 at 627.77 s (7 frames) | 1: +64 at 627.77-628.49 s (4 frames, frame 6142) |
+| `brightening` at the two small events (frames 5303, 6005) | +20, +19 | +14, +13: under the 15 floor, so not flagged |
+| Close-up | 378 x 378, 6,189 frames | 378 x 378, 6,189 frames |
+| Run time (Apple M2 Pro) | 15.8 s | 34.8 s (close-up encode 5.2 s; the plot, which re-reads the thermal store from the SSD, 25.9 s, against 9.4 s for the raw run) |
+
+The dark count does not change because the map is monotonic and the threshold moves with it. The
+small events were two frames long and only 4-5 levels above the floor in raw luma, so a slope of 0.7
+loses them; the 627.77 s event survives. Read an adjusted result as "what the picture on screen
+shows", not as a replacement for the raw one.
+
+### Presets
+
+A preset is one named setup: the visible adjustment, the thermal camera settings and the thermal
+display settings (palette and range).
+
+* **What it holds:** `visible_adjust` (the three numbers); `thermal` (only the camera's writable
+  nodes from `camera/controls.py` `WRITABLE_NODES`, in the camera's own units: kelvin, metres,
+  fractions, `CurrentCase`, `NUCMode`, `IRFrameRate`; a node whose value was not readable is left
+  out and the dialog says which); `display` (palette, and `auto` or a locked min/max range in
+  degrees C); `saved_utc`. Recordings store the values, not a reference, so editing or deleting a
+  preset never changes how an old run is described.
+* **Where it is stored:** `presets.json` in the calibration folder beside the experiments root
+  (`<experiments_root>/../calibration/presets.json`, next to `profile.json`), on the operator, so
+  every browser sees it. Writes are atomic; a damaged file reads as no presets and is copied to
+  `presets.json.corrupt` before the next save replaces it. The file also records `last_applied`.
+  API: `GET /api/presets`, `PUT` and `DELETE /api/presets/{name}`, `POST .../rename` and
+  `POST /api/presets/last-applied`.
+* **Apply (live):** sets the sliders and the display, then writes the thermal block through
+  `POST /api/camera/parameters`, one node per request with `CurrentCase` last, and lists what was
+  written and what was not (the writes are not atomic). The confirmation warns that changing the
+  measurement case triggers a NUC and a range switch. A node the camera no longer offers or an enum
+  value outside its `enum_options` is refused with a reason and nothing is written.
+* **Never automatic:** camera settings are written only when the operator clicks apply, never at
+  start-up (a browser with nothing stored starts from the last applied preset's visible and display
+  parts only), and never while a recording runs: then only the visible and display parts are applied
+  and the message says the camera settings were skipped. A recording started during the writes stops
+  them (the operator answers 409).
+* **Apply look (playback):** writes the preset's visible part into this run's `visible_adjust.json`
+  and sets the display. It never touches the camera and playback cannot save presets.
+
+### Not tested on hardware
+
+Everything above was checked with the simulated camera, unit tests and the reference run's files. Not
+yet run against the real A70:
+
+* the live-preview sliders on the real MJPEG preview (and `in_range=full` on the live transcode);
+* the `visible_adjust` stamp in a real recording (`metadata.json` written by a real start, and
+  through an armed start);
+* applying a preset's thermal part to the real camera (the write order, the NUC warning, a
+  `CurrentCase` change, and the refusal while recording).
+
+Run these when the rig is available. The reference-run numbers above were measured on a finished
+recording only.
