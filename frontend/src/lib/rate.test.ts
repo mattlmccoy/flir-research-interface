@@ -70,3 +70,31 @@ test("rateRois: smart ROIs are not rate-watched (their rate is never computed), 
   assert.deepEqual(rateRois(rois).map((r) => r.id), [1, 3]);
   assert.deepEqual(rateRois([]), []);
 });
+
+const RATE_ROIS = [
+  { id: 1, kind: "rect", x0: 0, y0: 0, x1: 4, y1: 4 },
+  { id: 2, kind: "smart", search: [[0, 0], [9, 0], [9, 9]], rings_px: [5, 10, 25], rule: "relative", sensitivity: 0.5 },
+] as unknown as import("./roi.ts").Roi[];
+
+test("rate alarm: a persisted smart (or unknown) ROI id is normalised to any ROI, never a dead watch", async () => {
+  const { normalizeRateCfg } = await import("./rate.ts");
+  const store = new Map<string, string>();
+  const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); } } as unknown as Storage;
+  saveRateAlarm(storage, { ...DEFAULT_RATE_ALARM, on: true, roi: 2 });  // a smart id saved earlier
+  const loaded = loadRateAlarm(storage);
+  assert.equal(loaded.roi, 2);
+  assert.equal(normalizeRateCfg(loaded, RATE_ROIS).roi, "any");
+  assert.equal(normalizeRateCfg({ ...loaded, roi: 99 }, RATE_ROIS).roi, "any", "unknown id");
+  const ok = { ...loaded, roi: 1 };
+  assert.equal(normalizeRateCfg(ok, RATE_ROIS), ok, "an eligible id is kept (same object: no re-render loop)");
+});
+
+test("evalRateAlarm: watching an id that is not rate-eligible falls back to any ROI", async () => {
+  const { rateRois } = await import("./rate.ts");
+  const eligible = new Set(rateRois(RATE_ROIS).map((r) => r.id));
+  const idle = { tripped: false, roi: null, rate: null };
+  const c = { ...DEFAULT_RATE_ALARM, on: true, threshold: 5, roi: 2 as number | "any" };
+  const s = evalRateAlarm(new Map<number, number | null>([[1, 10], [2, null]]), c, idle, eligible);
+  assert.equal(s.tripped, true);
+  assert.equal(s.roi, 1);
+});

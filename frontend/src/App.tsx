@@ -39,7 +39,7 @@ import { StatusBar } from "./components/studio/StatusBar.tsx";
 import { LiveControlStrip } from "./components/LiveControlStrip.tsx";
 import { useControlStatus } from "./lib/useControlStatus.ts";
 import { LiveControl } from "./lib/liveControl.ts";
-import { evalRateAlarm, loadRateAlarm, saveRateAlarm, slopeOver, type RateAlarmState } from "./lib/rate.ts";
+import { evalRateAlarm, loadRateAlarm, normalizeRateCfg, rateRois, saveRateAlarm, slopeOver, type RateAlarmState } from "./lib/rate.ts";
 import { RatePanel } from "./components/RatePanel.tsx";
 import { MaskPanel } from "./components/MaskPanel.tsx";
 import { rfNotchStatus } from "./lib/rfNotch.ts";
@@ -199,6 +199,14 @@ export function App() {
   const maxBuffers = useRef(new Map<number, TraceBuffer>());
   const [rateCfg, setRateCfg] = useState(() => loadRateAlarm(storage));
   useEffect(() => { saveRateAlarm(storage, rateCfg); }, [rateCfg]);
+  // a watched ROI that is gone or not rate-eligible (a persisted smart id) becomes "any ROI" — on
+  // load and whenever the live ROI set changes. Only for the live scope (the alarm's ROIs): the ref
+  // is updated by the scope-switch effect before its load lands, so a run's playback ROIs never
+  // drop the live watch.
+  useEffect(() => {
+    if (roiScopeRef.current === "live") setRateCfg((c) => normalizeRateCfg(c, rois.rois));
+  }, [rois.rois]);
+  const rateEligible = useMemo(() => new Set(rateRois(rois.rois).map((r) => r.id)), [rois.rois]);
   const rateCfgRef = useRef(rateCfg);
   rateCfgRef.current = rateCfg;
   const [rates, setRates] = useState<Map<number, number | null>>(new Map());
@@ -241,7 +249,7 @@ export function App() {
   const recordingRef = useRef(false);
   useEffect(() => {
     const prev = alarmRef.current;
-    const next = evalRateAlarm(rates, rateCfg, prev);
+    const next = evalRateAlarm(rates, rateCfg, prev, rateEligible);
     alarmRef.current = next;
     if (next.tripped && !prev.tripped) {
       setAlarmLatched(next);
