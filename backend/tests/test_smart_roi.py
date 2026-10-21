@@ -325,3 +325,20 @@ def test_failed_refinement_keeps_previous_pass(monkeypatch: pytest.MonkeyPatch) 
     r2 = t.update(_blob(1.09), 1 / 30)  # the area-jump check still runs against that lock
     assert r2.state == "locked" and r2.dims is not None
     assert abs(r2.dims["area_change_pct"] - 18.8) <= 2
+
+
+@pytest.mark.parametrize("spot_c", [700.0, 900.0])
+def test_hot_neighbour_does_not_move_gaussian_edge(spot_c: float) -> None:
+    """A hotter spot ~26 px off a smooth sample's edge must not change the sample's edge level:
+    ``hot`` comes from the chosen region, not from everything in the search area."""
+    t = SmartTracker(_spec(), W, H)
+    first = t.update(_gauss_blob(), 0.0)
+    assert first.state == "locked" and first.dims is not None
+    frame = _gauss_blob()
+    frame[_rho(CX + 51, CY, 4.0, 4.0) <= 1.0] = spot_c  # sample edge is at ~CX+25
+    res = [t.update(frame, (i + 1) / 30) for i in range(5)]
+    assert all(r.state == "locked" for r in res), [r.state for r in res]
+    for r in res:
+        assert r.dims is not None
+        assert abs(r.dims["area_px"] - first.dims["area_px"]) <= 0.03 * first.dims["area_px"]
+        assert abs(r.dims["centroid_x"] - first.dims["centroid_x"]) < 1

@@ -310,37 +310,47 @@ class SmartTracker:
         ring_roi = {**self._optics, "emissivity": self.spec.ring_emissivity}
         return sample, roi_field(crop, ring_roi, self._cam, True)
 
-    def _detect(
-        self, field_c: FloatArr, search: BoolArr, bad: BoolArr, cold: float | None
-    ) -> tuple[BoolArr | None, float | None]:
-        """(sample mask or None if this frame fails the checks, edge level). ``hot`` is the p99 of
-        the pixels above a provisional level (the sample core), so it does not depend on how much
-        background the search area holds."""
-        usable = search & ~bad
-        vals = field_c[usable]
-        if vals.size == 0 or cold is None:
-            return None, None
-        top = float(np.percentile(vals, _HOT_PCT))
-        core = vals[vals >= cold + self.spec.sensitivity * (top - cold)]
-        hot = float(np.percentile(core, _HOT_PCT)) if core.size else top
-        if self.spec.rule == "fixed" and self.spec.fixed_c is not None:
-            level = float(self.spec.fixed_c)
-        else:
-            level = cold + self.spec.sensitivity * (hot - cold)
-        if hot - cold < MIN_CONTRAST_C:
-            return None, level
-        labels, n = ndimage.label(usable & (field_c >= level))
+    def _choose(self, candidates: BoolArr) -> BoolArr | None:
+        """The connected region of ``candidates`` with the largest overlap with the previous
+        outline (the largest region on a first lock, or when none overlaps)."""
+        labels, n = ndimage.label(candidates)
         if n == 0:
-            return None, level
+            return None
         k = 0
         if self._outline is not None and self._outline_box is not None:
             prev = _place(self._outline, self._outline_box, self._work)
             overlap = np.bincount(labels[prev], minlength=n + 1)[1:]
             if overlap.max() > 0:
                 k = int(overlap.argmax()) + 1
-        if k == 0:  # first lock (or the old outline is gone): the largest region
+        if k == 0:
             k = int(np.bincount(labels.ravel(), minlength=n + 1)[1:].argmax()) + 1
-        comp = labels == k
+        return np.asarray(labels == k, dtype=bool)
+
+    def _detect(
+        self, field_c: FloatArr, search: BoolArr, bad: BoolArr, cold: float | None
+    ) -> tuple[BoolArr | None, float | None]:
+        """(sample mask or None if this frame fails the checks, edge level). ``hot`` is the p99 of
+        the chosen region itself, so neither the background share of the search area nor a hotter
+        neighbour inside it moves the sample's edge."""
+        usable = search & ~bad
+        vals = field_c[usable]
+        if vals.size == 0 or cold is None:
+            return None, None
+        s = self.spec.sensitivity
+        fixed = self.spec.fixed_c if self.spec.rule == "fixed" else None
+        top = float(np.percentile(vals, _HOT_PCT))
+        level = float(fixed) if fixed is not None else cold + s * (top - cold)
+        comp = self._choose(usable & (field_c >= level))  # provisional region
+        if comp is None:
+            return None, level
+        hot = float(np.percentile(field_c[comp], _HOT_PCT))
+        if hot - cold < MIN_CONTRAST_C:
+            return None, level
+        if fixed is None:
+            level = cold + s * (hot - cold)
+            comp = self._choose(usable & (field_c >= level))
+            if comp is None:
+                return None, level
         area = int(comp.sum())
         if area < MIN_AREA_PX or bool((comp & _edge(search, crop_border_inside=True)).any()):
             return None, level
