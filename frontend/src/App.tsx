@@ -442,7 +442,7 @@ export function App() {
             {hdr && hdr.kelvin_per_count === null && <div className="errbox">Stream is not temperature-linear; raw counts only.</div>}
             {nearLimit && <div className="warnbox">Max within 10 °C of the range limit ({active?.high_c} °C).</div>}
             <RoiRows rois={rois.rois} units={layout.units} conv={field?.conv ?? null} stats={liveStats} selected={rois.selected} selectedIds={rois.selectedIds} extremes={layout.extremes} onExtremes={(on) => dispatch({ type: "setExtremes", on })}
-              dispatch={roiDispatch} smartFeed={smartFeed} smartView={layout.smartView} onSmartView={dispatch} />
+              dispatch={roiDispatch} smartFeed={smartFeed} smartView={layout.smartView} onSmartView={dispatch} scope={roiScope} />
             <MaskPanel state={masks} dispatch={maskDispatch} maskMode={maskMode} onMaskMode={toggleMaskMode} usedPx={maskUsed} frame={field ? { w: field.w, h: field.h } : null} />
             <DeltaPicker rois={rois.rois} delta={layout.delta} onChange={(delta) => dispatch({ type: "setDelta", delta })} />
             <RatePanel rois={rois.rois} rates={rates} cfg={rateCfg} onCfg={setRateCfg} latched={alarmLatched} onAck={() => setAlarmLatched(null)} />

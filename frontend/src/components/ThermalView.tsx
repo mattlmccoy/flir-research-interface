@@ -165,13 +165,13 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
     const m = new Map<number, SmartDraw>();
     for (const [id, d] of smartDecoded) {
       const r = rois.find((x) => x.id === id);
-      const hidden = smartPrefs(smartView, id).hiddenRings;
+      const hidden = smartPrefs(smartView, labelScope ?? "live", id).hiddenRings;
       m.set(id, d.outline && r?.kind === "smart" && hidden.length
         ? { ...d, outline: { ...d.outline, rings: visibleOutlineRings(d.outline.rings, r.rings_px, hidden) } }
         : d);
     }
     return m;
-  }, [smartDecoded, smartView, rois]);
+  }, [smartDecoded, smartView, rois, labelScope]);
 
   useEffect(() => { lutRef.current = buildLut(palette); }, [palette]);
   useEffect(() => { setVertices([]); setDraft(null); dragStart.current = null; }, [tool]);

@@ -27,6 +27,8 @@ interface Props {
   /** Per smart ROI: row expanded, ring bands hidden (browser layout state, display only). */
   smartView?: SmartViewPrefs;
   onSmartView?: (a: SmartViewAction) => void;
+  /** Scope of these ROIs, as labelScope: "live" or "exp.<run name>" (keys `smartView`). */
+  scope?: string;
 }
 export type SmartViewAction = Extract<LayoutAction, { type: "toggleSmartExpanded" | "toggleSmartRing" }>;
 export interface SmartPlaybackRow { view: SmartRowView; action: ReactNode; }
@@ -70,7 +72,7 @@ function RingChips({ r, hidden, onToggle }: { r: SmartRoi; hidden: readonly numb
 
 /** Second line of a smart row: one summary line (state, mean, max, area); the chevron expands a
  *  compact table (sample, shown rings, size, sharpness, change, centroid) and the ring toggles. */
-function SmartLines({ r, feed, played, prefs, onView }: { r: SmartRoi; feed: SmartFeed | null | undefined; played?: SmartPlaybackRow; prefs: SmartRowPrefs; onView?: (a: SmartViewAction) => void }) {
+function SmartLines({ r, scope, feed, played, prefs, onView }: { r: SmartRoi; scope: string; feed: SmartFeed | null | undefined; played?: SmartPlaybackRow; prefs: SmartRowPrefs; onView?: (a: SmartViewAction) => void }) {
   if (feed === undefined && !played) return null;
   const v = played ? played.view : smartRowView(feed ?? null, r.id, Date.now(), SMART_FEED_INTERVAL_MS);
   const open = prefs.expanded && !!onView;
@@ -79,11 +81,11 @@ function SmartLines({ r, feed, played, prefs, onView }: { r: SmartRoi; feed: Sma
     <div className={`roi-stats smart-readout state-${v.tone}`} title={played ? "Smart ROI values at the frame on screen, from the series the operator computed and stored with this run. Size is measured from the thermal edge: read it with the edge sharpness." : "Smart ROI values from the operator. Size is measured from the thermal edge, which also moves when heat spreading blurs the boundary: read it with the edge sharpness."}>
       <div className="smart-head">
         {onView && <button type="button" className="smart-chevron" aria-expanded={open} aria-label={`${open ? "Hide" : "Show"} the details of ${roiLabel(r)}`}
-          onClick={() => onView({ type: "toggleSmartExpanded", id: r.id })}>{open ? "▾" : "▸"}</button>}
+          onClick={() => onView({ type: "toggleSmartExpanded", scope, id: r.id })}>{open ? "▾" : "▸"}</button>}
         <span className="smart-summary">{v.summary}</span>
       </div>
       {open && <>
-        <RingChips r={r} hidden={prefs.hiddenRings} onToggle={(px) => onView({ type: "toggleSmartRing", id: r.id, px })} />
+        <RingChips r={r} hidden={prefs.hiddenRings} onToggle={(px) => onView({ type: "toggleSmartRing", scope, id: r.id, px })} />
         {details.length > 0 && (
           <table className="smart-details"><tbody>
             {details.map((d) => <tr key={d.label}><th scope="row">{d.label}</th><td>{d.value}</td></tr>)}
@@ -230,7 +232,7 @@ function OpticsEditor({ r, dispatch }: { r: Roi; dispatch: (a: RoiAction) => voi
 }
 
 /** One row per ROI: color swatch (click to change), editable name, current values, remove. */
-export function RoiRows({ rois, stats, selected, selectedIds, dispatch, extremes, onExtremes, units = "C", conv = null, smartFeed, smartPlayback, smartView = {}, onSmartView }: Props) {
+export function RoiRows({ rois, stats, selected, selectedIds, dispatch, extremes, onExtremes, units = "C", conv = null, smartFeed, smartPlayback, smartView = {}, onSmartView, scope = "live" }: Props) {
   const isSel = (id: number) => (selectedIds ? selectedIds.includes(id) : selected === id);
   const [editing, setEditing] = useState<number | null>(null);
   const [picking, setPicking] = useState<number | null>(null);
@@ -276,7 +278,7 @@ export function RoiRows({ rois, stats, selected, selectedIds, dispatch, extremes
               <button className="secondary" type="button" onClick={() => setOptics(optics === r.id ? null : r.id)} aria-pressed={optics === r.id} aria-label={`Optics for ${roiLabel(r)}`} title="Per-ROI emissivity, reflected temperature and distance (for accuracy on this region)" style={{ fontWeight: (r.emissivity !== undefined || r.reflected_c !== undefined || r.distance_m !== undefined) ? 700 : 400, color: (r.emissivity !== undefined || r.reflected_c !== undefined || r.distance_m !== undefined) ? "var(--accent)" : undefined }}>ε</button>}
               <button className="secondary" type="button" onClick={() => { dispatch({ type: "commit" }); dispatch({ type: "remove", id: r.id }); dispatch({ type: "commit" }); }} aria-label={`Remove ${roiLabel(r)}`} title="Remove">×</button>
             </span>,
-            r.kind === "smart" ? <SmartLines key={`s${r.id}`} r={r} feed={smartFeed} played={smartPlayback?.get(r.id)} prefs={smartPrefs(smartView, r.id)} onView={onSmartView} /> : <StatsLine key={`s${r.id}`} r={r} s={stats.get(r.id)} units={units} conv={conv} />,
+            r.kind === "smart" ? <SmartLines key={`s${r.id}`} r={r} scope={scope} feed={smartFeed} played={smartPlayback?.get(r.id)} prefs={smartPrefs(smartView, scope, r.id)} onView={onSmartView} /> : <StatsLine key={`s${r.id}`} r={r} s={stats.get(r.id)} units={units} conv={conv} />,
             picking === r.id ? <div key={`c${r.id}`} style={{ gridColumn: "1 / -1" }}><ColorPicker r={r} i={i} dispatch={dispatch} onDone={() => setPicking(null)} /></div> : null,
             optics === r.id ? <div key={`o${r.id}`} style={{ gridColumn: "1 / -1" }}>{r.kind === "smart" ? <SmartEditor r={r} dispatch={dispatch} /> : <OpticsEditor r={r} dispatch={dispatch} />}</div> : null,
           ]

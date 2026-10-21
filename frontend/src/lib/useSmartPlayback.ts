@@ -98,7 +98,7 @@ export function useSmartPlayback({ name, rois, info, setInfo, setErr, shown, ind
     const st = smart.states.get(r.id);
     if (r.kind !== "smart" || r.hidden || st?.kind !== "ready") return [];
     const isStale = st.series.stale || smartEdited(r, info?.rois);
-    return smartTraces(st.series, { ...show, dims: sizeDim, hiddenRings: smartPrefs(view, r.id).hiddenRings }, { id: r.id, label: roiLabel(r), color: roiColor(r, i), stale: isStale });
+    return smartTraces(st.series, { ...show, dims: sizeDim, hiddenRings: smartPrefs(view, `exp.${name}`, r.id).hiddenRings }, { id: r.id, label: roiLabel(r), color: roiColor(r, i), stale: isStale });
   });
   return { smartIds, smart, overlays, ensureOverlays, retainOverlays, stale, rows, plot };
 }

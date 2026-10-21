@@ -76,7 +76,7 @@ export interface LayoutState {
   /** Overlay registration: opacity 0–1, scale 0.5–2 and offsets in % of the image (visible lens ≠ IR lens). */
   overlay: Overlay;
   sections: Record<Section, boolean>;
-  /** Per smart ROI id: rail row expanded, ring bands hidden (display only, lib/smartView.ts). */
+  /** Per smart ROI (scope + id): rail row expanded, ring bands hidden (display only, lib/smartView.ts). */
   smartView: SmartViewPrefs;
 }
 /** Drag-to-resize bounds (px) for the right rail and the bottom plot dock, with a snap-back
@@ -170,8 +170,8 @@ export type LayoutAction =
   | { type: "setUnits"; units: Units }
   | { type: "setVisibleMode"; mode: VisibleMode }
   | { type: "setOverlay"; patch: Partial<Overlay> }
-  | { type: "toggleSmartExpanded"; id: number }
-  | { type: "toggleSmartRing"; id: number; px: number }
+  | { type: "toggleSmartExpanded"; scope: string; id: number }
+  | { type: "toggleSmartRing"; scope: string; id: number; px: number }
   | { type: "collapseAll" }
   | { type: "restoreAll" };
 
@@ -204,8 +204,8 @@ export function layoutReducer(s: LayoutState, a: LayoutAction): LayoutState {
     case "setSegment": return { ...s, segment: { on: !!a.segment.on, min: Math.min(a.segment.min, a.segment.max), max: Math.max(a.segment.min, a.segment.max) } };
     case "dockBack": { const { [a.section]: _gone, ...rest } = s.floating; return { ...s, floating: rest }; }
     case "setOverlay": return { ...s, overlay: clampOverlay({ ...s.overlay, ...a.patch }) };
-    case "toggleSmartExpanded": return { ...s, smartView: toggleSmartExpanded(s.smartView, a.id) };
-    case "toggleSmartRing": return { ...s, smartView: toggleSmartRing(s.smartView, a.id, a.px) };
+    case "toggleSmartExpanded": return { ...s, smartView: toggleSmartExpanded(s.smartView, a.scope, a.id) };
+    case "toggleSmartRing": return { ...s, smartView: toggleSmartRing(s.smartView, a.scope, a.id, a.px) };
     case "collapseAll": return { ...s, strip: true, rail: false, dock: false };
     case "restoreAll": return { ...s, strip: true, rail: true, dock: true };
   }

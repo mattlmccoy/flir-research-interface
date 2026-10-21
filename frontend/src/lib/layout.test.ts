@@ -290,11 +290,11 @@ test("the RF-banding filter switch is off by default, toggles, and is remembered
 
 test("smart ROI rows: expanded and hidden rings persist per ROI id across a reload", () => {
   const st = memStorage();
-  let s = layoutReducer(DEFAULT_LAYOUT, { type: "toggleSmartExpanded", id: 3 });
-  s = layoutReducer(s, { type: "toggleSmartRing", id: 3, px: 10 });
+  let s = layoutReducer(DEFAULT_LAYOUT, { type: "toggleSmartExpanded", scope: "exp.run", id: 3 });
+  s = layoutReducer(s, { type: "toggleSmartRing", scope: "exp.run", id: 3, px: 10 });
   assert.deepEqual(DEFAULT_LAYOUT.smartView, {}, "the default is untouched");
   saveLayout(st, s);
-  assert.deepEqual(loadLayout(st).smartView, { "3": { expanded: true, hiddenRings: [10] } });
+  assert.deepEqual(loadLayout(st).smartView, { "exp.run:3": { expanded: true, hiddenRings: [10] } });
 });
 
 test("smart ROI rows: a malformed stored smartView falls back to defaults, not the whole layout", () => {
