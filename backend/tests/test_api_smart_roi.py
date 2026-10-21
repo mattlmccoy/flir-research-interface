@@ -150,8 +150,13 @@ def _wait_idle(c: TestClient, timeout_s: float = 60.0) -> None:
 
 
 def test_post_stop_computes_stored_smart_rois(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Behave the same with or without ffmpeg on the machine (CI has none): no video renders.
+    from flir_research_interface.analysis import media, thermal_video
+
+    monkeypatch.setattr(thermal_video, "find_ffprobe", lambda *_a, **_k: None)
+    monkeypatch.setattr(media, "find_ffprobe", lambda *_a, **_k: None)
     with _client(tmp_path) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
@@ -169,7 +174,10 @@ def test_post_stop_computes_stored_smart_rois(
         assert job["state"] == "done", job
         assert (tmp_path / name / "smart_roi" / "7.npz").is_file()
         _wait_idle(c)
-        failures = [r for r in caplog.records if r.levelno >= logging.ERROR]
+        failures = [
+            r for r in caplog.records
+            if r.levelno >= logging.ERROR and "ffmpeg not found" not in (r.exc_text or "")
+        ]
         assert not failures, [(r.getMessage(), r.exc_text) for r in failures]
         csv_text = (tmp_path / name / "exports" / "roi_series.csv").read_text()
         assert "smart ROI part: thermal edge" in csv_text and "part area px" in csv_text
