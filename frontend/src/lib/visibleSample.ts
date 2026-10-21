@@ -162,6 +162,22 @@ export function adjustedStatusText(vs: VisibleSampleAdjustedSummary | null | und
   return known && !adjustEqual(a, current) ? `${text}; sliders changed since` : text;
 }
 
+/** What a finished derived job says about the adjusted analysis it was `asked` to run (`job`: the
+ *  `GET .../export/derived` record). Null when it was not asked or ran ok (the generic success
+ *  stands); otherwise the reason not to read it as done: an operator that did not take the flag
+ *  (`visible_adjusted_requested` not true), a non-ok status with its reason, or no result at all. */
+export function adjustedJobNote(
+  asked: boolean,
+  job: { visible_adjusted?: { status: string; reason?: string | null } | null; visible_adjusted_requested?: boolean },
+): string | null {
+  if (!asked) return null;
+  if (job.visible_adjusted_requested !== true) return "adjusted analysis not run (operator too old?)";
+  const r = job.visible_adjusted;
+  if (!r) return "adjusted analysis gave no result";
+  if (r.status === "ok") return null;
+  return `adjusted analysis ${r.status}${r.reason ? `: ${r.reason}` : ""}`;
+}
+
 /** Whether a derived regenerate should also analyse the adjusted video: the box is ticked and the
  *  run's adjustment is not neutral (a neutral adjustment gives the raw result again, at the cost of
  *  another decode of the whole video). */

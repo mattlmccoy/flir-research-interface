@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { markColor, markerLegend, nextMarkerIndex } from "./events.ts";
 import {
-  adjustedStatusText, loadAnalyseAdjusted, markersWithFlashes, saveAnalyseAdjusted, visibleFlashMarkers, visibleSampleIsError,
+  adjustedJobNote, adjustedStatusText, loadAnalyseAdjusted, markersWithFlashes, saveAnalyseAdjusted, visibleFlashMarkers, visibleSampleIsError,
   visibleSampleStatusText, wantsAdjustedAnalysis, type VisibleSampleAdjustedSummary, type VisibleSampleSummary,
 } from "./visibleSample.ts";
 
@@ -444,4 +444,20 @@ test("the checkbox choice is remembered in storage and survives an unavailable s
   assert.doesNotThrow(() => saveAnalyseAdjusted(broken, true));
   assert.equal(loadAnalyseAdjusted(null), false);
   assert.doesNotThrow(() => saveAnalyseAdjusted(null, true));
+});
+
+test("adjustedJobNote: says when the adjusted analysis was asked but not run, or did not succeed", () => {
+  // not asked: nothing to say
+  assert.equal(adjustedJobNote(false, {}), null);
+  // asked, but the operator's job record does not say it was requested (an older operator ignores the flag)
+  assert.equal(adjustedJobNote(true, {}), "adjusted analysis not run (operator too old?)");
+  assert.equal(adjustedJobNote(true, { visible_adjusted_requested: false }), "adjusted analysis not run (operator too old?)");
+  // asked and run ok: the generic success stands
+  assert.equal(adjustedJobNote(true, { visible_adjusted_requested: true, visible_adjusted: { status: "ok", reason: null } }), null);
+  // asked and run, not ok: its status and reason
+  assert.equal(adjustedJobNote(true, { visible_adjusted_requested: true, visible_adjusted: { status: "failed", reason: "ValueError: bad adjust" } }), "adjusted analysis failed: ValueError: bad adjust");
+  assert.equal(adjustedJobNote(true, { visible_adjusted_requested: true, visible_adjusted: { status: "skipped", reason: "no visible video" } }), "adjusted analysis skipped: no visible video");
+  assert.equal(adjustedJobNote(true, { visible_adjusted_requested: true, visible_adjusted: { status: "skipped" } }), "adjusted analysis skipped");
+  // asked and requested, but no result recorded: unknown, never shown as success
+  assert.equal(adjustedJobNote(true, { visible_adjusted_requested: true, visible_adjusted: null }), "adjusted analysis gave no result");
 });

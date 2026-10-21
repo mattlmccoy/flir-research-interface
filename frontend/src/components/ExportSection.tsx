@@ -4,7 +4,7 @@ import { NEUTRAL_ADJUST, isNeutral, type VisibleAdjust } from "../lib/visibleAdj
 import { api, type Hdf5Export, type ThermalVideoExport } from "../lib/api.ts";
 import { roisDifferFromStored, type Roi } from "../lib/roi.ts";
 import {
-  adjustedStatusText, loadAnalyseAdjusted, saveAnalyseAdjusted, visibleSampleIsError, visibleSampleStatusText, wantsAdjustedAnalysis,
+  adjustedJobNote, adjustedStatusText, loadAnalyseAdjusted, saveAnalyseAdjusted, visibleSampleIsError, visibleSampleStatusText, wantsAdjustedAnalysis,
   type VisibleSampleAdjustedSummary, type VisibleSampleSummary,
 } from "../lib/visibleSample.ts";
 
@@ -83,7 +83,10 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
         setProg({ step: jb.step ?? jb.state, done: jb.done ?? 0, total: jb.total ?? 0 });
         if (jb.state === "done") {
           onThermalPreview?.(); onRefresh?.();
-          setDerivedOut(useOnScreen ? `updated to match the ${rois.length} ROI${rois.length === 1 ? "" : "s"} on screen` : `regenerated from the recording's ${storedCount} stored ROI${storedCount === 1 ? "" : "s"}`);
+          // An adjusted analysis that was asked for but not run, or not ok, replaces the generic success.
+          const adjustedNote = adjustedJobNote(adjusted, jb);
+          if (adjustedNote) setErr(adjustedNote);
+          else setDerivedOut(useOnScreen ? `updated to match the ${rois.length} ROI${rois.length === 1 ? "" : "s"} on screen` : `regenerated from the recording's ${storedCount} stored ROI${storedCount === 1 ? "" : "s"}`);
           break;
         }
         if (jb.state === "error") { setErr(jb.error ?? "regenerate failed"); break; }
