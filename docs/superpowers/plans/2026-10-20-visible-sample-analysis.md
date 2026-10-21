@@ -81,7 +81,7 @@
 - Produces:
   - `otsu_threshold(values: np.ndarray) -> int`: 0–255 over a 256-bin histogram.
   - `FrameMetrics` (`@dataclass(frozen=True)`): `sample_dark_px: int` (pixels with luma < threshold), `sample_mean_luma: float | None`, `bed_clipped_frac: float | None`, `brightening: float | None`.
-  - `frame_metrics(luma: np.ndarray, prev: np.ndarray | None, region: np.ndarray, threshold: int, bed: np.ndarray | None = None) -> FrameMetrics`: `luma`/`prev` are uint8 crops of the same bbox. `brightening` = 99.5th percentile of `int16(luma) − int16(prev)` over `region`, None when `prev` is None.
+  - `frame_metrics(luma: np.ndarray, prev: np.ndarray | None, region: np.ndarray, threshold: int, bed: np.ndarray | None = None) -> FrameMetrics`: `luma`/`prev` are uint8 crops of the same bbox. `brightening` = 99.5th percentile of `int16(luma) − int16(prev)` over `region`, None when `prev` is None. `prev` is the previous **analysed** frame of the same segment (frames inside the 0.25 s skip are never used), so each segment's first analysed frame has `brightening = None`. The Task 1 capture script computes the fixture `brightening` series by this same definition (NaN where None).
 
 - [ ] **Step 1: Write failing tests.**
   - `test_otsu_threshold_real_first_5s`: on the fixture's 24 first-5 s crops (region pixels pooled), the threshold is 178 (exact; Otsu = argmax of between-class variance over 256 bins).
@@ -112,7 +112,7 @@
   - `test_keyframes_never_flag`: set every keyframe's brightening to 200 → still the same 3 events.
   - `test_flash_threshold_mad_zero`: all-equal input → `max(15, median + 6)`, no ZeroDivision.
   - `test_find_events_none`: all-zero brightening → `[]`.
-  - `test_coverage_real_run`: gaps_over_300ms = 62, frames_analysed = number of rows passed.
+  - `test_coverage_real_run`: pass the analysed frames only (index ≥ 3, after the 0.25 s skip): gaps_over_300ms = 61 (one of the run's 62 gaps falls inside the skipped first 0.25 s), frames_analysed = number of rows passed.
 - [ ] **Step 2: Run.** Expected: FAIL (`flash_threshold` not defined).
 - [ ] **Step 3: Implement.** `find_events` groups flagged frames in time order: a flagged frame joins the open event when `t − t_last_flagged ≤ merge_s`.
 - [ ] **Step 4: Run.** Expected: PASS.
@@ -142,7 +142,7 @@
   - `test_runner_skips_without_visible`, `test_runner_skips_without_alignment`, `test_runner_skips_without_sample_roi`, `test_runner_skips_when_roi_outside_frame`: status `skipped`, exact reason, only the JSON exists.
   - `test_runner_ok_synthetic_clip`: status ok. CSV rows = packets − frames in the first 0.25 s. `t_s` of row 0 = t_start + pts offset. `sample_dark_px` rises from ≈0 to > 0 at 1.0 s ± 0.1 s. `coverage.frames_analysed` matches the CSV. The close-up MP4 exists, and ffprobe reports width = height = 3 × its crop.
   - `test_runner_multi_segment_times_use_each_segment_start`: two clips as `visible.mp4` and `visible_001.mp4` with `segments` whose `first_frame_host_ns` differ by 50 s → the second clip's rows start at its own `t_start_s`.
-  - `test_runner_writes_atomically_and_overwrites`: run twice → the files are replaced and no `.part` files remain. Make ffmpeg fail on the second run (pass `ffmpeg="/nonexistent"`) → status `failed`, older CSV removed.
+  - `test_runner_writes_atomically_and_overwrites`: run twice → the files are replaced and no `.part` files remain. Third run with `ffmpeg="/nonexistent"` → status `skipped`, reason `"ffmpeg not found"` (an explicit path that is not an executable file counts as not found), older CSV/MP4/PNG removed. Fourth run with the decode helper monkeypatched to raise mid-stream → status `failed`, no `.part` files left, older CSV removed.
   - `test_runner_frame_count_mismatch_fails`: monkeypatch the probe to return one extra packet → `failed`, with "frame count" in the reason.
 - [ ] **Step 2: Run** `uv run pytest tests/test_visible_sample_run.py -v`. Expected: FAIL (module not found).
 - [ ] **Step 3: Implement** `analyse_visible_sample` plus private helpers for probe, decode, write and close-up.
@@ -210,14 +210,14 @@
 - [ ] **Step 1: Write failing tests** in `visibleSample.test.ts`: markers from the real run's 3 events (t 554.06/615.66/627.77, labels `visible flash +20`, `+19`, `+97`); `[]` for skipped or absent input; `statusText` for ok with 3 events, ok with zero events (`0 flashes`), skipped, failed and null; `markColor("visible flash +97")` = `var(--trace-5)`.
 - [ ] **Step 2: Run** `cd frontend && npm test`. Expected: FAIL (cannot find module `./visibleSample.ts`).
 - [ ] **Step 3: Implement**, and merge the markers in `PlaybackPage` (`[...eventsToMarkers(...), ...visibleFlashMarkers(info?.visible_sample)]`, sorted by t). Show `visibleSampleStatusText` in the ExportSection's exports block when non-null.
-- [ ] **Step 4: Run** `npm test` and `npx tsc --noEmit`. Expected: PASS, no type errors. **Browser gate** (not unit-testable): open playback of `20261020_144402_Run` in the dev preview. Confirm three violet marks near 554, 616 and 628 s; ▶◆ jumps to them; the legend shows "visible flash"; the exports block shows `Visible sample: 3 flashes …`. Screenshot it.
+- [ ] **Step 4: Run** `npm test` and `npx tsc --noEmit`. Expected: PASS, no type errors. **Browser gate** (not unit-testable): open playback of `20261020_144402_Run` in the dev preview. Confirm three marks in the `--trace-5` colour near 554, 616 and 628 s; ▶◆ jumps to them; the legend shows "visible flash"; the exports block shows `Visible sample: 3 flashes …`. Screenshot it.
 - [ ] **Step 5: Commit** `feat(visible): show visible flashes as playback marks`.
 
 ### Task 8: Real-data run and docs
 
 **Files:** Modify `docs/visible_camera.md` (new section "Exposure control and post-run sample analysis (2026-10-20)")
 
-- [ ] **Step 1: Real-data integration run** (reads the run, writes only its `exports/`): `cd backend && uv run python -c "from pathlib import Path; from flir_research_interface.playback.reader import ExperimentReader; from flir_research_interface.analysis.visible_sample_run import analyse_visible_sample; import json; print(json.dumps(analyse_visible_sample(ExperimentReader(Path('/Users/mattmccoy/GaTech Dropbox/Matthew McCoy/FLIR/backend/experiments/20261020_144402_Run'))), indent=1))"`. Expected: status ok, threshold 178 ± 2, the three events of the spec table, no event at 413.65 s, coverage 62 gaps. Read `visible_sample_plot.png` and play `visible_sample_closeup.mp4`.
+- [ ] **Step 1: Real-data integration run** (reads the run, writes only its `exports/`): `cd backend && uv run python -c "from pathlib import Path; from flir_research_interface.playback.reader import ExperimentReader; from flir_research_interface.analysis.visible_sample_run import analyse_visible_sample; import json; print(json.dumps(analyse_visible_sample(ExperimentReader(Path('/Users/mattmccoy/GaTech Dropbox/Matthew McCoy/FLIR/backend/experiments/20261020_144402_Run'))), indent=1))"`. Expected: status ok, threshold 178 ± 2, the three events of the spec table, no event at 413.65 s, coverage 61 gaps over the analysed frames. Read `visible_sample_plot.png` and play `visible_sample_closeup.mp4`.
 - [ ] **Step 2: Skip-path check on real runs:** run it on one real run without `visible.mp4` and on one without a "sample" ROI (pick from the experiments folder). Expected: `status: skipped` with the exact reasons.
 - [ ] **Step 3: Write the docs section.**
   - The exposure findings: GenICam (249 nodes, none for visible exposure); ONVIF (initialised with `fliruser`; imaging offers Focus only on `video0`/`video1`); REST API and web UI (no exposure control; `/api/image/adjustment` is IR display scaling); resource tree (`/prod/res/` while httpResource is on; `.system.vcam` = OV5640 with no exposure; leave httpResource off because it allows unauthenticated reads); SSH out of scope.
