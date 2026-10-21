@@ -2,8 +2,9 @@
 
 The A70's visible video clips the powder, but the sample stays well exposed. This module holds the
 pure functions of that analysis: picking the sample (and bed) ROI, mapping its outline from IR
-pixels into visible pixels, rasterising the analysis region, choosing the dark threshold and
-measuring each frame. Nothing here touches the store or the video file.
+pixels into visible pixels, rasterising the analysis region, choosing the dark threshold,
+measuring each frame, then finding the flash events in the brightening series and summarising how
+completely the video covered the run. Nothing here touches the store or the video file.
 """
 
 from __future__ import annotations
@@ -22,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 _AREA_KINDS = ("polygon", "rect", "circle", "ellipse")
 _MAX_CANVAS_PX = 64_000_000  # largest polygon bounding box region_mask will rasterise
+_MAD_SCALE = 1.4826  # scales the median absolute deviation to a normal distribution's sigma
+_GAP_S = 0.3  # a spacing between analysed frames longer than this counts as a gap in coverage
 
 
 def _area(roi: dict[str, Any]) -> float:
@@ -249,3 +252,90 @@ def frame_metrics(
         change = in_region.astype(np.int16) - prev[region].astype(np.int16)
         brightening = float(np.percentile(change, 99.5))
     return FrameMetrics(n_dark, mean_luma, clipped, brightening)
+
+
+def flash_threshold(
+    brightening: np.ndarray,
+    keyframe: np.ndarray,
+    floor: float = 15.0,
+    k: float = 6.0,
+    mad_floor: float = 1.0,
+) -> float:
+    """The brightening level that flags a frame: ``max(floor, median + k * max(MAD, mad_floor))``.
+
+    The median and MAD (scaled by 1.4826) are taken over the non-keyframe values; NaNs and
+    keyframes (whose brightening is the encoder's refresh, not the scene) are ignored. Flooring the
+    MAD keeps a near-silent run from flagging noise. With no value left, the result is ``floor``.
+    """
+    values = np.asarray(brightening, dtype=float)
+    usable = values[~np.asarray(keyframe, dtype=bool) & ~np.isnan(values)]
+    if usable.size == 0:
+        return float(floor)
+    median = float(np.median(usable))
+    mad = _MAD_SCALE * float(np.median(np.abs(usable - median)))
+    return float(max(floor, median + k * max(mad, mad_floor)))
+
+
+def _event(t_s: np.ndarray, brightening: np.ndarray, frames: list[int]) -> dict[str, Any]:
+    """The event made of flagged ``frames`` (array indices in time order); the peak is the frame
+    with the largest brightening, the earliest of equals."""
+    peak = frames[int(np.argmax(brightening[frames]))]
+    return {
+        "t_start_s": float(t_s[frames[0]]),
+        "t_peak_s": float(t_s[peak]),
+        "t_end_s": float(t_s[frames[-1]]),
+        "peak_brightening": float(brightening[peak]),
+        "n_frames": len(frames),
+        "peak_frame": int(peak),
+    }
+
+
+def find_events(
+    t_s: np.ndarray,
+    brightening: np.ndarray,
+    keyframe: np.ndarray,
+    threshold: float,
+    merge_s: float = 1.0,
+) -> list[dict[str, Any]]:
+    """The flash events of a run: flagged frames within ``merge_s`` of each other, merged.
+
+    A frame is flagged when it is not a keyframe and its brightening is at least ``threshold``
+    (NaN never is). ``t_s``, ``brightening`` and ``keyframe`` hold one row per frame in frame
+    order, so ``t_s`` does not decrease. A flagged frame joins the open event when it comes no
+    more than ``merge_s`` after the event's last flagged frame, so a run of flashes closer than
+    that chains into one event. Each event is ``{"t_start_s", "t_peak_s", "t_end_s",
+    "peak_brightening", "n_frames", "peak_frame"}``, where ``n_frames`` counts the flagged frames
+    and ``peak_frame`` is the index into the arrays. The region of the peak is added by the caller.
+    """
+    times = np.asarray(t_s, dtype=float)
+    values = np.asarray(brightening, dtype=float)
+    flagged = np.flatnonzero((values >= threshold) & ~np.asarray(keyframe, dtype=bool))
+    events: list[dict[str, Any]] = []
+    frames: list[int] = []
+    for i in flagged.tolist():
+        if frames and times[i] - times[frames[-1]] > merge_s:
+            events.append(_event(times, values, frames))
+            frames = []
+        frames.append(i)
+    if frames:
+        events.append(_event(times, values, frames))
+    return events
+
+
+def coverage(t_s: np.ndarray) -> dict[str, Any]:
+    """How much of the run the analysed frames cover.
+
+    ``t_s`` holds the thermal-axis time of each analysed frame in frame order. Returns
+    ``{"frames_analysed", "t_first_s", "t_last_s", "gaps_over_300ms"}``: the frame count, the first
+    and last time (``None`` for no frames) and the number of spacings between consecutive frames
+    longer than 300 ms, where the camera throttled the stream.
+    """
+    times = np.asarray(t_s, dtype=float)
+    if times.size == 0:
+        return {"frames_analysed": 0, "t_first_s": None, "t_last_s": None, "gaps_over_300ms": 0}
+    return {
+        "frames_analysed": int(times.size),
+        "t_first_s": float(times[0]),
+        "t_last_s": float(times[-1]),
+        "gaps_over_300ms": int(np.count_nonzero(np.diff(times) > _GAP_S)),
+    }

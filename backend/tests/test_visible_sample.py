@@ -1,7 +1,9 @@
-"""Visible-camera sample analysis: ROI selection and geometry on the real 20261020_144402 run.
+"""Visible-camera sample analysis on the real 20261020_144402 run: ROI geometry, per-frame metrics,
+flash events and coverage.
 
 The fixture (tests/fixtures/README.md) holds that run's ``visible_alignment``, ``rois``, packet
-table and luma crops, captured from the real recording rather than authored.
+table, luma crops and per-frame ``brightening``, captured from the real recording rather than
+authored.
 """
 
 from __future__ import annotations
@@ -16,6 +18,9 @@ import pytest
 
 from flir_research_interface.analysis.visible_sample import (
     FrameMetrics,
+    coverage,
+    find_events,
+    flash_threshold,
     frame_metrics,
     ir_to_visible_points,
     otsu_threshold,
@@ -260,3 +265,166 @@ def test_bed_clipped_frac() -> None:
     half[0, :2] = 254  # 2 of the 8 bed pixels fall just short of 255
     assert frame_metrics(half, None, region, 178, bed).bed_clipped_frac == 0.75
     assert frame_metrics(white, None, region, 178, np.zeros_like(bed)).bed_clipped_frac is None
+
+
+@pytest.fixture(scope="module")
+def series(run: dict[str, Any]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """``(t_s, brightening, keyframe)`` of all 6,192 frames of the real run.
+
+    ``t_s`` is the frame time on the thermal axis, ``t_start_s + pts - pts[0]``; ``brightening`` is
+    NaN for frames 0-3. Treat the arrays as read-only: copy before changing them.
+    """
+    pts = np.asarray(run["packets"]["pts_time"], dtype=float)
+    t_s = run["t_start_s"] + pts - pts[0]
+    npz = np.load(FIXTURES / "visible_sample_20261020_144402.npz")
+    brightening, keyframe = npz["brightening"], npz["keyframe"]
+    assert len(t_s) == len(brightening) == len(keyframe) == 6192
+    return t_s, brightening, keyframe
+
+
+# The three flash events measured on the real run: (t_start_s, t_end_s, peak, peak_frame, n_frames)
+REAL_EVENTS = [
+    (553.95, 554.06, 20, 5303, 2),
+    (615.66, 615.85, 19, 6005, 2),
+    (627.77, 629.41, 97, 6142, 7),
+]
+
+
+def test_flash_threshold_real_run_floor_binds(
+    series: tuple[np.ndarray, np.ndarray, np.ndarray],
+) -> None:
+    _, brightening, keyframe = series
+    assert flash_threshold(brightening, keyframe) == 15.0
+
+
+def test_flash_threshold_mad_zero() -> None:
+    keyframe = np.zeros(50, dtype=bool)
+    # every value equal: MAD is 0, floored at 1, so the rule is median + 6
+    assert flash_threshold(np.full(50, 20.0), keyframe) == 26.0
+    assert flash_threshold(np.full(50, 5.0), keyframe) == 15.0  # median + 6 = 11: the floor binds
+
+
+def test_flash_threshold_uses_scaled_mad_and_ignores_keyframes_and_nan() -> None:
+    values = np.array([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0])  # median 16, raw MAD 4
+    expected = 16.0 + 6.0 * 1.4826 * 4.0
+    assert flash_threshold(values, np.zeros(7, dtype=bool)) == pytest.approx(expected)
+    noisy = np.append(values, [500.0, np.nan])
+    keyframe = np.array([False] * 7 + [True, False])
+    assert flash_threshold(noisy, keyframe) == pytest.approx(expected)
+    assert flash_threshold(values, np.zeros(7, dtype=bool), floor=100.0) == 100.0
+    assert flash_threshold(values, np.zeros(7, dtype=bool), k=2.0) == pytest.approx(
+        max(15.0, 16.0 + 2.0 * 1.4826 * 4.0)
+    )
+
+
+def test_flash_threshold_without_usable_values_is_the_floor() -> None:
+    empty = np.array([])
+    assert flash_threshold(empty, empty.astype(bool)) == 15.0
+    assert flash_threshold(np.full(4, np.nan), np.zeros(4, dtype=bool)) == 15.0
+    assert flash_threshold(np.full(4, 99.0), np.ones(4, dtype=bool)) == 15.0
+    assert flash_threshold(empty, empty.astype(bool), floor=7.5) == 7.5
+
+
+def test_find_events_real_run_three_events(
+    series: tuple[np.ndarray, np.ndarray, np.ndarray],
+) -> None:
+    t_s, brightening, keyframe = series
+    events = find_events(t_s, brightening, keyframe, flash_threshold(brightening, keyframe))
+    assert len(events) == 3
+    for event, (t_start, t_end, peak, frame, n_frames) in zip(events, REAL_EVENTS, strict=True):
+        assert set(event) == {
+            "t_start_s", "t_peak_s", "t_end_s", "peak_brightening", "n_frames", "peak_frame"
+        }
+        assert event["t_start_s"] == pytest.approx(t_start, abs=0.02)
+        assert event["t_end_s"] == pytest.approx(t_end, abs=0.02)
+        assert event["peak_brightening"] == pytest.approx(peak, abs=1)
+        assert event["peak_frame"] == frame
+        assert event["t_peak_s"] == pytest.approx(t_s[frame])
+        assert event["peak_brightening"] == pytest.approx(brightening[frame])
+        assert event["n_frames"] == n_frames
+        # plain Python numbers, so the summary JSON can hold them
+        assert type(event["peak_frame"]) is int and type(event["n_frames"]) is int
+        assert all(type(event[k]) is float for k in event if k not in ("peak_frame", "n_frames"))
+
+
+def test_find_events_no_event_at_glitch(
+    series: tuple[np.ndarray, np.ndarray, np.ndarray],
+) -> None:
+    # the 413.65 s decoding glitch must not produce an event
+    t_s, brightening, keyframe = series
+    events = find_events(t_s, brightening, keyframe, flash_threshold(brightening, keyframe))
+    assert not [e for e in events if e["t_start_s"] <= 414.0 and e["t_end_s"] >= 413.3]
+
+
+def test_find_events_merge_window(series: tuple[np.ndarray, np.ndarray, np.ndarray]) -> None:
+    # event 3 ends with a frame 0.517 s after the one before it (628.894 s -> 629.411 s): a 0.5 s
+    # merge window splits it in two, a 1.0 s window keeps it whole
+    t_s, brightening, keyframe = series
+    threshold = flash_threshold(brightening, keyframe)
+    events = find_events(t_s, brightening, keyframe, threshold, merge_s=0.5)
+    assert len(events) == 4
+    assert [e["peak_frame"] for e in events[:3]] == [5303, 6005, 6142]
+    third, fourth = events[2], events[3]
+    assert third["t_start_s"] == pytest.approx(627.77, abs=0.02)
+    assert third["t_end_s"] == pytest.approx(628.894, abs=0.02)
+    assert fourth["t_start_s"] == pytest.approx(629.411, abs=0.02)
+    assert fourth["t_end_s"] == fourth["t_start_s"]
+    assert third["n_frames"] + fourth["n_frames"] == 7
+    assert len(find_events(t_s, brightening, keyframe, threshold, merge_s=1.0)) == 3
+
+
+def test_keyframes_never_flag(series: tuple[np.ndarray, np.ndarray, np.ndarray]) -> None:
+    t_s, brightening, keyframe = series
+    spiked = brightening.copy()
+    spiked[keyframe] = 200.0
+    threshold = flash_threshold(spiked, keyframe)
+    assert threshold == 15.0
+    events = find_events(t_s, spiked, keyframe, threshold)
+    assert [(e["peak_frame"], e["n_frames"]) for e in events] == [(5303, 2), (6005, 2), (6142, 7)]
+
+
+def test_find_events_none(series: tuple[np.ndarray, np.ndarray, np.ndarray]) -> None:
+    t_s, _, keyframe = series
+    quiet = np.zeros(len(t_s))
+    assert find_events(t_s, quiet, keyframe, flash_threshold(quiet, keyframe)) == []
+    assert find_events(np.array([]), np.array([]), np.array([], dtype=bool), 15.0) == []
+
+
+def test_find_events_merge_chains_from_the_last_flagged_frame() -> None:
+    # gaps of 0.5, 1.0 (exactly the window: joins), 1.0 and 1.5 s; the quiet frame at 3.0 s
+    # and the unflagged keyframe at 3.5 s break nothing and flag nothing
+    t_s = np.array([0.0, 0.5, 1.5, 2.5, 3.0, 3.5, 4.0])
+    brightening = np.array([20.0, 50.0, 40.0, 30.0, 0.0, 99.0, 25.0])
+    keyframe = np.array([False, False, False, False, False, True, False])
+    first, second = find_events(t_s, brightening, keyframe, 15.0, merge_s=1.0)
+    assert (first["t_start_s"], first["t_end_s"], first["n_frames"]) == (0.0, 2.5, 4)
+    assert (first["peak_frame"], first["t_peak_s"], first["peak_brightening"]) == (1, 0.5, 50.0)
+    assert (second["t_start_s"], second["t_end_s"], second["n_frames"]) == (4.0, 4.0, 1)
+    assert second["peak_frame"] == 6
+    # the threshold itself flags (>=), and nothing below it does
+    assert [e["peak_frame"] for e in find_events(t_s, brightening, keyframe, 25.0)] == [1, 6]
+    assert [e["peak_frame"] for e in find_events(t_s, brightening, keyframe, 25.5)] == [1]
+
+
+def test_coverage_real_run(series: tuple[np.ndarray, np.ndarray, np.ndarray]) -> None:
+    t_s, _, _ = series
+    analysed = t_s[3:]  # frames 0-2 fall in the first 0.25 s and are skipped
+    result = coverage(analysed)
+    assert result["frames_analysed"] == len(analysed) == 6189
+    assert result["t_first_s"] == pytest.approx(t_s[3])
+    assert result["t_last_s"] == pytest.approx(t_s[-1])
+    assert result["gaps_over_300ms"] == 61
+    assert coverage(t_s)["gaps_over_300ms"] == 62  # the run's 62nd gap lies in the skipped 0.25 s
+
+
+def test_coverage_counts_gaps_over_300ms_and_handles_short_inputs() -> None:
+    result = coverage(np.array([0.0, 0.125, 0.5, 0.75, 1.25]))  # gaps 0.125, 0.375, 0.25, 0.5
+    assert result == {
+        "frames_analysed": 5, "t_first_s": 0.0, "t_last_s": 1.25, "gaps_over_300ms": 2
+    }
+    assert coverage(np.array([3.5])) == {
+        "frames_analysed": 1, "t_first_s": 3.5, "t_last_s": 3.5, "gaps_over_300ms": 0
+    }
+    assert coverage(np.array([])) == {
+        "frames_analysed": 0, "t_first_s": None, "t_last_s": None, "gaps_over_300ms": 0
+    }
