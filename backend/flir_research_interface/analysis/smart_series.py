@@ -78,11 +78,13 @@ def compute_smart_series(
     on_progress: Callable[[int, int], None] | None = None,
     *,
     optics: dict[str, Any] | None = None,
+    out_dir: Path | None = None,
 ) -> Path:
     """Track ``spec`` over every frame of ``reader`` and write ``<run>/smart_roi/<id>.npz``.
 
     ``optics`` defaults to the ROI's stored emissivity / reflected temperature. Raises
-    ``ValueError`` when the recording is not temperature-linear (nothing to track in °C)."""
+    ``ValueError`` when the recording is not temperature-linear (nothing to track in °C).
+    ``out_dir`` (default: the run folder) is the directory that gets the ``smart_roi/`` store."""
     try:
         fmt = IRFormat(reader.ir_format or "")
     except ValueError as exc:
@@ -138,7 +140,7 @@ def compute_smart_series(
     sizes = np.array([len(b) for b in labels], dtype=np.int64)
     cols["labels_off"] = np.concatenate(([0], np.cumsum(sizes))).astype(np.int64)
     cols["labels_blob"] = np.frombuffer(b"".join(labels), dtype=np.uint8)
-    return _write(reader.path, spec, optics, n, cols)
+    return _write(out_dir if out_dir is not None else reader.path, spec, optics, n, cols)
 
 
 def _write(
@@ -146,7 +148,7 @@ def _write(
 ) -> Path:
     """Write the npz and its spec sidecar atomically (temp file + rename)."""
     out = series_path(run_dir, spec.id)
-    out.parent.mkdir(exist_ok=True)
+    out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_name(out.name + ".tmp")
     with tmp.open("wb") as fh:
         np.savez_compressed(fh, allow_pickle=False, **cols)

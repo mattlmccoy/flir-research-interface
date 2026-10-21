@@ -72,3 +72,16 @@ def test_series_indexed_by_frame_index_with_wrapped_ids(tmp_path: Path) -> None:
 
 def test_load_missing_is_none(tmp_path: Path) -> None:
     assert load_smart_series(tmp_path, 3) is None
+
+
+def test_out_dir_redirects_store_and_leaves_run_untouched(tmp_path: Path) -> None:
+    run = make_smart_run(tmp_path / "run", n=4)
+    reader = ExperimentReader(run)
+    out = tmp_path / "out"
+    out.mkdir()
+    path = compute_smart_series(reader, parse_smart_roi(SMART), out_dir=out)
+    assert path == out / "smart_roi" / "7.npz" and path.is_file()
+    assert (out / "smart_roi" / "7.spec.json").is_file()
+    assert not (run / "smart_roi").exists()
+    s = load_smart_series(out, 7)
+    assert s is not None and len(s["state"]) == 4
