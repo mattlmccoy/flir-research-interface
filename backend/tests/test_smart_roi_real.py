@@ -13,6 +13,7 @@ import pytest
 
 from flir_research_interface.analysis.smart_roi import parse_smart_roi
 from flir_research_interface.analysis.smart_series import (
+    DIM_KEYS,
     STATE_CODES,
     compute_smart_series,
     load_smart_series,
@@ -49,3 +50,14 @@ def test_real_run_tracks_sample(tmp_path: Path) -> None:
     assert win.any()
     assert (state[win] == STATE_CODES["locked"]).mean() >= 0.90
     assert area[i604] < area[i274]
+
+    # searching rows carry no numbers: sample mean and every dims column NaN (never 0)
+    searching = state == STATE_CODES["searching"]
+    assert np.isnan(s["sample_mean"][searching]).all()
+    for key in DIM_KEYS:
+        assert np.isnan(s[key][searching]).all(), key
+    # holding stays valid (spec §7b) until the hold lapses
+    holding = state == STATE_CODES["holding"]
+    assert bool(s["valid"][holding].all())
+    print(f"searching={int(searching.sum())} holding={int(holding.sum())} "
+          f"holding_valid={int(s['valid'][holding].sum())}")
