@@ -16,6 +16,7 @@ import logging
 import os
 import shutil
 import subprocess
+from collections import Counter
 from collections.abc import Generator, Iterator
 from contextlib import closing
 from dataclasses import dataclass
@@ -103,7 +104,8 @@ class _Plan:
 
     ``box`` is the sample region in the frame (x0, y0, w, h) and ``mask`` its pixels; ``crop`` is
     what is decoded: the union of that and the bed region. ``region`` and ``bed_mask`` are the two
-    masks in the shape of the crop.
+    masks in the shape of the crop. ``missing`` names the files visible.json lists that are not on
+    disk; ``alignment`` says which saved alignment mapped the ROI.
     """
 
     ffmpeg: str
@@ -116,6 +118,8 @@ class _Plan:
     crop: tuple[int, int, int, int]
     region: np.ndarray
     bed_mask: np.ndarray | None
+    missing: list[str]
+    alignment: dict[str, Any]
 
 
 # -- ffprobe and ffmpeg -------------------------------------------------------------------------
@@ -261,9 +265,13 @@ def _plan(reader: ExperimentReader, ffmpeg: str | None, ffprobe: str | None) -> 
     """Check the inputs, probe the video, and fix the regions. Raises ``_Skip`` with the reason."""
     timeline = thermal_segments(reader.visible, reader.host_t0_ns)
     files = [s for s in timeline if (reader.path / s["file"]).is_file()]
+    missing = [str(s["file"]) for s in timeline if s not in files]
+    if missing:
+        logger.warning("visible.json lists segments that are not on disk: %s", ", ".join(missing))
     if not files:
         raise _Skip("no visible video")
-    h_matrix = (reader.metadata.get("visible_alignment") or {}).get("H")
+    saved = reader.metadata.get("visible_alignment") or {}
+    h_matrix = saved.get("H")
     if not h_matrix:
         raise _Skip("no visible alignment")
     sample, bed = pick_rois(reader.metadata.get("rois"))
@@ -322,6 +330,12 @@ def _plan(reader: ExperimentReader, ffmpeg: str | None, ffprobe: str | None) -> 
         bed_mask=_place(bed_region[0], (bed_region[1][0] - x0, bed_region[1][1] - y0), shape)
         if bed_region
         else None,
+        missing=missing,
+        alignment={
+            "saved_utc": saved.get("saved_utc"),
+            "rmsPx": saved.get("rmsPx"),
+            "n_pairs": len(saved["pairs"]) if isinstance(saved.get("pairs"), list) else None,
+        },
     )
 
 
@@ -485,6 +499,16 @@ def _summary(
     def named(roi: dict[str, Any] | None) -> dict[str, Any] | None:
         return None if roi is None else {"id": roi.get("id"), "name": roi.get("name")}
 
+    per_segment = Counter(r["segment"] for r in rows)
+    segments = [
+        {
+            "index": seg.index,
+            "file": seg.name,
+            "t_start_s": round(seg.t_start_s, 6),
+            "frames_analysed": per_segment[seg.index],
+        }
+        for seg in plan.segments
+    ]
     x0, y0, w, h = plan.box
     return {
         "status": "ok",
@@ -492,6 +516,7 @@ def _summary(
         "software": __version__,
         "sample_roi": named(plan.sample),
         "bed_roi": named(plan.bed),
+        "alignment": plan.alignment,
         "bbox": {"x0": x0, "y0": y0, "w": w, "h": h},
         "margin_px": MARGIN_PX,
         "threshold": threshold,
@@ -499,6 +524,8 @@ def _summary(
         "flash_threshold": flash,
         "rule": {"floor": FLOOR, "k": K, "mad_floor": MAD_FLOOR, "merge_s": MERGE_S},
         "coverage": coverage(t),
+        "segments": segments,
+        "missing": plan.missing,
         "events": events,
         "stretch": {"lo": lo, "hi": STRETCH_HI},
         "files": [],

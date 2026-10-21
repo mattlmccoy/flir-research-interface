@@ -241,13 +241,15 @@ def test_runner_skips_without_visible(tmp_path: Path, real: dict[str, Any]) -> N
     _assert_skipped(_run(d), d, "no visible video")
 
 
-def test_runner_skips_when_a_segment_file_is_missing(
-    tmp_path: Path, real: dict[str, Any]
+@pytest.mark.parametrize("n_listed", [1, 2])
+def test_runner_skips_when_every_listed_segment_is_missing(
+    tmp_path: Path, real: dict[str, Any], n_listed: int
 ) -> None:
     dummy = tmp_path / "dummy.mp4"
     dummy.write_bytes(b"not a video")
-    d = _experiment(tmp_path, real, [dummy])
-    (d / "visible.mp4").unlink()
+    d = _experiment(tmp_path, real, [dummy] * n_listed)
+    for path in d.glob("visible*.mp4"):
+        path.unlink()
     _assert_skipped(_run(d), d, "no visible video")
 
 
@@ -336,6 +338,62 @@ def test_runner_ok_synthetic_clip(
 
 
 @needs_ffmpeg
+def test_runner_reports_a_missing_segment_and_what_it_analysed(
+    tmp_path: Path,
+    real: dict[str, Any],
+    short_clip: Path,
+    fixed_threshold: None,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """visible.json lists two segments but the second file is not on disk: the run is analysed
+    from the first, and the JSON names what was read and what was not."""
+    d = _experiment(tmp_path, real, [short_clip, short_clip])
+    (d / "visible_001.mp4").unlink()
+    with caplog.at_level("WARNING", logger=vsr.logger.name):
+        out = _run(d, closeup=False)
+    assert out["status"] == "ok", out
+    assert out["missing"] == ["visible_001.mp4"]
+    assert out["segments"] == [
+        {
+            "index": 0,
+            "file": "visible.mp4",
+            "t_start_s": pytest.approx(T_START_S),
+            "frames_analysed": len(_rows(d)),
+        }
+    ]
+    assert out["coverage"]["frames_analysed"] == len(_rows(d)) > 0
+    assert any("visible_001.mp4" in r.getMessage() for r in caplog.records)
+    assert json.loads((d / "exports" / "visible_sample.json").read_text()) == out
+
+
+@needs_ffmpeg
+def test_runner_reports_the_alignment_used(
+    tmp_path: Path, real: dict[str, Any], short_clip: Path, fixed_threshold: None
+) -> None:
+    saved = real["visible_alignment"]
+    d = _experiment(tmp_path, real, [short_clip])
+    out = _run(d, closeup=False)
+    assert out["alignment"] == {
+        "saved_utc": saved["saved_utc"],
+        "rmsPx": saved["rmsPx"],
+        "n_pairs": len(saved["pairs"]),
+    }
+    assert out["alignment"]["n_pairs"] == 10
+    assert out["alignment"]["saved_utc"] == "2026-09-02T18:19:01.184354+00:00"
+    assert out["alignment"]["rmsPx"] == pytest.approx(2.888, abs=1e-3)
+
+
+@needs_ffmpeg
+def test_runner_alignment_fields_that_are_absent_are_none(
+    tmp_path: Path, real: dict[str, Any], short_clip: Path, fixed_threshold: None
+) -> None:
+    d = _experiment(tmp_path, real, [short_clip], alignment={"H": real["visible_alignment"]["H"]})
+    out = _run(d, closeup=False)
+    assert out["status"] == "ok"
+    assert out["alignment"] == {"saved_utc": None, "rmsPx": None, "n_pairs": None}
+
+
+@needs_ffmpeg
 def test_runner_without_closeup_or_bed(
     tmp_path: Path, real: dict[str, Any], clip: Path, fixed_threshold: None
 ) -> None:
@@ -364,6 +422,14 @@ def test_runner_multi_segment_times_use_each_segment_start(
     assert first[1]["brightening"] == ""  # no previous analysed frame in its own segment
     assert out["coverage"]["t_first_s"] == pytest.approx(T_START_S + 0.3)
     assert out["coverage"]["gaps_over_300ms"] == 1  # the 50 s between the segments
+    assert out["missing"] == []
+    assert [(g["index"], g["file"]) for g in out["segments"]] == [
+        (0, "visible.mp4"),
+        (1, "visible_001.mp4"),
+    ]
+    assert [g["t_start_s"] for g in out["segments"]] == pytest.approx([T_START_S, T_START_S + 50])
+    for g in out["segments"]:
+        assert g["frames_analysed"] == sum(int(r["segment"]) == g["index"] for r in rows) > 0
     assert out["files"] == [
         "visible_sample.csv",
         "visible_sample_closeup.mp4",
