@@ -1,7 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { markColor, markerLegend, nextMarkerIndex } from "./events.ts";
-import { markersWithFlashes, visibleFlashMarkers, visibleSampleIsError, visibleSampleStatusText, type VisibleSampleSummary } from "./visibleSample.ts";
+import {
+  adjustedStatusText, loadAnalyseAdjusted, markersWithFlashes, saveAnalyseAdjusted, visibleFlashMarkers, visibleSampleIsError,
+  visibleSampleStatusText, wantsAdjustedAnalysis, type VisibleSampleAdjustedSummary, type VisibleSampleSummary,
+} from "./visibleSample.ts";
 
 // Event times, peaks, coverage and the segment's start are the values measured on the real run
 // 20261020_144402_Run (task-3 report, `merge_s=1.0`; its exports/visible_sample.json). That file was
@@ -351,4 +354,78 @@ test("markersWithFlashes leaves the event marks alone when there is nothing to a
   assert.deepEqual(markersWithFlashes(base, null, TS), base);
   assert.deepEqual(markersWithFlashes(base, SKIPPED, TS), base);
   assert.notEqual(markersWithFlashes(base, null, TS), base, "returns a new array, never the input");
+});
+
+// --- the adjusted analysis (exports/visible_sample_adjusted.json) ---------------------------------
+// Same shape as visible_sample.json plus `adjust` (the run's adjustment the analysis was run with).
+// The values here are the shape-only stand-in for the adjusted result of 20261020_144402_Run:
+// the analysed numbers are that run's raw ones (OK above), the adjust block is an invented example.
+const ADJ = { exposure_ev: 1, brightness: -0.5, contrast: 1.25, source: "sidecar" } as const;
+const OK_ADJ: VisibleSampleAdjustedSummary = { ...OK, adjust: ADJ };
+const NOW = { exposure_ev: 1, brightness: -0.5, contrast: 1.25 };
+const ADJ_PREFIX = "Visible sample (adjusted: exposure +1 EV, brightness -0.5, contrast 1.25): ";
+
+test("adjustedStatus fresh: the adjusted prefix then the raw status body, nothing about sliders", () => {
+  const body = visibleSampleStatusText(OK)!.replace(/^Visible sample: /, "");
+  assert.equal(adjustedStatusText(OK_ADJ, NOW), ADJ_PREFIX + body);
+  assert.ok(!adjustedStatusText(OK_ADJ, NOW)!.includes("sliders changed"));
+});
+
+test("adjustedStatus stale: sliders moved since the analysis says so", () => {
+  const text = adjustedStatusText(OK_ADJ, { ...NOW, exposure_ev: 1.5 })!;
+  assert.ok(text.startsWith(ADJ_PREFIX), text);
+  assert.ok(text.endsWith("; sliders changed since"), text);
+  // a difference below the comparison tolerance is not a change
+  assert.ok(!adjustedStatusText(OK_ADJ, { ...NOW, contrast: 1.25 + 1e-9 })!.includes("sliders changed"));
+});
+
+test("adjustedStatus absent: null when no adjusted result exists", () => {
+  assert.equal(adjustedStatusText(null, NOW), null);
+  assert.equal(adjustedStatusText(undefined, NOW), null);
+});
+
+test("adjustedStatus skipped and failed show their reason", () => {
+  const skipped: VisibleSampleAdjustedSummary = { status: "skipped", reason: "no sample ROI is drawn", adjust: ADJ };
+  assert.equal(adjustedStatusText(skipped, NOW), ADJ_PREFIX + "not analysed (no sample ROI is drawn)");
+  const failed: VisibleSampleAdjustedSummary = { status: "failed", reason: "ValueError: boom", adjust: ADJ };
+  assert.equal(adjustedStatusText(failed, NOW), ADJ_PREFIX + "analysis failed (ValueError: boom)");
+  assert.equal(visibleSampleIsError(failed), true);
+  assert.equal(visibleSampleIsError(skipped), false);
+  assert.ok(adjustedStatusText(skipped, { ...NOW, brightness: 0 })!.endsWith("; sliders changed since"));
+});
+
+test("adjustedStatus formats the numbers: signed exposure and brightness, at most 2 decimals, no -0", () => {
+  const at = (a: { exposure_ev: number; brightness: number; contrast: number }) =>
+    adjustedStatusText({ ...OK_ADJ, adjust: { ...a, source: "sidecar" } }, a)!.split("): ")[0];
+  assert.equal(at({ exposure_ev: -0.5, brightness: 0.25, contrast: 2 }), "Visible sample (adjusted: exposure -0.5 EV, brightness +0.25, contrast 2");
+  assert.equal(at({ exposure_ev: 0, brightness: 0, contrast: 1 }), "Visible sample (adjusted: exposure 0 EV, brightness 0, contrast 1");
+  assert.equal(at({ exposure_ev: 0.3333333, brightness: -0.004, contrast: 0.756 }), "Visible sample (adjusted: exposure +0.33 EV, brightness 0, contrast 0.76");
+});
+
+test("adjustedStatus without an adjust block cannot name or compare the values", () => {
+  const text = adjustedStatusText({ ...OK } as VisibleSampleAdjustedSummary, NOW)!;
+  assert.ok(text.startsWith("Visible sample (adjusted): "), text);
+  assert.ok(!text.includes("sliders changed"));
+});
+
+test("the adjusted analysis is requested only when ticked and the run's adjustment is not neutral", () => {
+  assert.equal(wantsAdjustedAnalysis(true, NOW), true);
+  assert.equal(wantsAdjustedAnalysis(false, NOW), false);
+  assert.equal(wantsAdjustedAnalysis(true, { exposure_ev: 0, brightness: 0, contrast: 1 }), false);
+  assert.equal(wantsAdjustedAnalysis(true, { exposure_ev: 0, brightness: 0, contrast: 1 + 1e-9 }), false);
+});
+
+test("the checkbox choice is remembered in storage and survives an unavailable store", () => {
+  const mem = new Map<string, string>();
+  const store = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => { mem.set(k, v); } } as unknown as Storage;
+  assert.equal(loadAnalyseAdjusted(store), false);
+  saveAnalyseAdjusted(store, true);
+  assert.equal(loadAnalyseAdjusted(store), true);
+  saveAnalyseAdjusted(store, false);
+  assert.equal(loadAnalyseAdjusted(store), false);
+  const broken = { getItem: () => { throw new Error("denied"); }, setItem: () => { throw new Error("denied"); } } as unknown as Storage;
+  assert.equal(loadAnalyseAdjusted(broken), false);
+  assert.doesNotThrow(() => saveAnalyseAdjusted(broken, true));
+  assert.equal(loadAnalyseAdjusted(null), false);
+  assert.doesNotThrow(() => saveAnalyseAdjusted(null, true));
 });

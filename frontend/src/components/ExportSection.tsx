@@ -1,10 +1,14 @@
 import { NumberField } from "./NumberField.tsx";
 import { useState } from "react";
+import { NEUTRAL_ADJUST, isNeutral, type VisibleAdjust } from "../lib/visibleAdjust.ts";
 import { api, type Hdf5Export, type ThermalVideoExport } from "../lib/api.ts";
 import { roisDifferFromStored, type Roi } from "../lib/roi.ts";
-import { visibleSampleIsError, visibleSampleStatusText, type VisibleSampleSummary } from "../lib/visibleSample.ts";
+import {
+  adjustedStatusText, loadAnalyseAdjusted, saveAnalyseAdjusted, visibleSampleIsError, visibleSampleStatusText, wantsAdjustedAnalysis,
+  type VisibleSampleAdjustedSummary, type VisibleSampleSummary,
+} from "../lib/visibleSample.ts";
 
-interface Props { name: string; index: number; nFrames: number; rois: Roi[]; celsius: boolean; thermalPreview?: { bytes: number } | null; onThermalPreview?: () => void; files?: { name: string; bytes: number }[]; onRefresh?: () => void; storedRois?: unknown[] | null; visibleSample?: VisibleSampleSummary | null; }
+interface Props { name: string; index: number; nFrames: number; rois: Roi[]; celsius: boolean; thermalPreview?: { bytes: number } | null; onThermalPreview?: () => void; files?: { name: string; bytes: number }[]; onRefresh?: () => void; storedRois?: unknown[] | null; visibleSample?: VisibleSampleSummary | null; visibleSampleAdjusted?: VisibleSampleAdjustedSummary | null; /** The run's adjustment as the sliders show it now. */ currentAdjust?: VisibleAdjust; }
 
 const FRAME_FORMATS = [
   { f: "csv", label: "CSV", title: "°C grid (raw counts if not temperature-linear)" },
@@ -12,6 +16,10 @@ const FRAME_FORMATS = [
   { f: "png", label: "PNG", title: "16-bit raw counts" },
   { f: "npy", label: "NPY", title: "uint16 raw counts (NumPy)" },
 ] as const;
+
+function browserStorage(): Storage | null {
+  try { return typeof localStorage !== "undefined" ? localStorage : null; } catch { return null; }
+}
 
 function fmtBytes(n: number): string {
   return n >= 1e9 ? `${(n / 1e9).toFixed(2)} GB` : n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${(n / 1e3).toFixed(0)} kB`;
@@ -23,7 +31,7 @@ const Spinner = () => <span className="spinner" aria-hidden="true" />;
 
 const STEP_LABEL: Record<string, string> = {
   starting: "starting…", "roi series": "writing ROI series…", images: "rendering images…",
-  "visible sample": "analysing visible video…", "roi video": "encoding ROI video", done: "done", running: "working…",
+  "visible sample": "analysing visible video…", "visible sample (adjusted)": "analysing the adjusted visible video…", "roi video": "encoding ROI video", done: "done", running: "working…",
   "waiting for the current render": "waiting for the current render to finish…",
 };
 function progLabel(prog: { step: string; done: number; total: number } | null): string {
@@ -42,7 +50,7 @@ function ProgressBar({ done, total }: { done: number; total: number }) {
   );
 }
 
-export function ExportSection({ name, index, nFrames, rois, celsius, thermalPreview, onThermalPreview, files = [], onRefresh, storedRois, visibleSample }: Props) {
+export function ExportSection({ name, index, nFrames, rois, celsius, thermalPreview, onThermalPreview, files = [], onRefresh, storedRois, visibleSample, visibleSampleAdjusted, currentAdjust = NEUTRAL_ADJUST }: Props) {
   const [busy, setBusy] = useState(false);
   // Which single-flight export (hdf5 / range / report) is running, so only its button spins.
   const [busyKind, setBusyKind] = useState<"hdf5" | "range" | "report" | null>(null);
@@ -56,15 +64,19 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
   const [derivedBusy, setDerivedBusy] = useState(false);
   const [derivedOut, setDerivedOut] = useState<string | null>(null);
   const [prog, setProg] = useState<{ step: string; done: number; total: number } | null>(null);
+  // "also analyse the adjusted video": remembered across runs; a neutral adjustment would only repeat the raw result.
+  const [analyseAdjusted, setAnalyseAdjusted] = useState(() => loadAnalyseAdjusted(browserStorage()));
+  const adjustNeutral = isNeutral(currentAdjust);
   const storedCount = Array.isArray(storedRois) ? storedRois.length : 0;
   // The derived files (ROI plot, peak frames, ROI video, roi_series.csv) are built from the ROIs
   // stored with the recording. `useOnScreen` persists the current ROIs first; otherwise the
   // recording's own stored ROIs are used. The regenerate runs in the background — poll for progress.
   async function regenerateDerived(useOnScreen: boolean, video = true) {
+    const adjusted = wantsAdjustedAnalysis(analyseAdjusted, currentAdjust);
     setDerivedBusy(true); setErr(null); setDerivedOut(null); setProg({ step: "starting", done: 0, total: 0 });
     try {
       if (useOnScreen) await api.putRois(name, rois);
-      await api.exportDerived(name, video);
+      await api.exportDerived(name, video, adjusted);
       for (;;) {
         await new Promise((r) => setTimeout(r, 700));
         const jb = await api.exportDerivedStatus(name);
@@ -107,6 +119,7 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
 
   const busyElsewhere = busy || tvBusy || nFrames === 0;
   const visibleSampleText = visibleSampleStatusText(visibleSample);
+  const adjustedText = adjustedStatusText(visibleSampleAdjusted, currentAdjust);
   return (
     <>
       {derivedBusy ? (
@@ -147,7 +160,15 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
         </div>
       ) : null}
       {!derivedBusy && derivedOut && <div className="hint" style={{ color: "var(--accent)" }}>{derivedOut}</div>}
+      <label className="hint" style={{ display: "flex", alignItems: "center", gap: 6 }}
+        title="After the raw visible analysis, run it again on the video with this run's exposure, brightness and contrast applied (one more pass over the video). The raw result stays the default and keeps the flash marks.">
+        <input type="checkbox" checked={analyseAdjusted && !adjustNeutral} disabled={adjustNeutral || derivedBusy}
+          onChange={(e) => { setAnalyseAdjusted(e.target.checked); saveAnalyseAdjusted(browserStorage(), e.target.checked); }} />
+        also analyse the adjusted video
+        {adjustNeutral && <span className="muted">· no adjustment set for this run</span>}
+      </label>
       {visibleSampleText && <div className={visibleSampleIsError(visibleSample) ? "errbox" : "hint"}>{visibleSampleText}</div>}
+      {adjustedText && <div className={visibleSampleIsError(visibleSampleAdjusted) ? "errbox" : "hint"}>{adjustedText}</div>}
       <div className="kv">
         <span>ROI series</span>
         <span className="v plain" style={{ textAlign: "right" }}>

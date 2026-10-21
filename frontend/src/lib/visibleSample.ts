@@ -2,6 +2,7 @@
  *  marks on the playback scrubber and the one-line status shown in the exports block. */
 import type { Marker } from "../components/TimePlot.tsx";
 import { nearestIndex } from "./events.ts";
+import { adjustEqual, isNeutral, type VisibleAdjust } from "./visibleAdjust.ts";
 
 /** One flash at the sample: when it started, peaked and ended on the thermal clock (s). */
 export interface VisibleSampleEvent {
@@ -73,24 +74,32 @@ export function visibleFlashMarkers(vs: VisibleSampleSummary | null | undefined,
   return out;
 }
 
+/** The adjusted analysis (exports/visible_sample_adjusted.json): the same summary plus the adjustment
+ *  it was run with. `adjust` is absent only if the file does not carry it. */
+export interface VisibleSampleAdjustedSummary extends VisibleSampleSummary {
+  adjust?: VisibleAdjust & { source?: string };
+}
+
 interface StatusLine { text: string; error: boolean; }
+
+const RAW_LABEL = "Visible sample";
 
 /** The status line and whether it is an error. Only a summary that is positively an analysed run
  *  with an events list reads as a result; a missing or unknown status, or no events list, is
  *  reported as unreadable rather than as "0 flashes". */
-function describe(vs: VisibleSampleSummary): StatusLine {
+function describe(vs: VisibleSampleSummary, label: string = RAW_LABEL): StatusLine {
   const status: unknown = vs.status;
-  if (status === "skipped") return { text: `Visible sample: not analysed (${vs.reason ?? "no reason recorded"})`, error: false };
-  if (status === "failed") return { text: `Visible sample: analysis failed (${vs.reason ?? "no reason recorded"})`, error: true };
+  if (status === "skipped") return { text: `${label}: not analysed (${vs.reason ?? "no reason recorded"})`, error: false };
+  if (status === "failed") return { text: `${label}: analysis failed (${vs.reason ?? "no reason recorded"})`, error: true };
   if (status !== "ok") {
     const shown = status === undefined || status === null || status === "" ? "missing" : String(status);
-    return { text: `Visible sample: unreadable result (status ${shown})`, error: true };
+    return { text: `${label}: unreadable result (status ${shown})`, error: true };
   }
-  if (!Array.isArray(vs.events)) return { text: "Visible sample: unreadable result (no events list)", error: true };
+  if (!Array.isArray(vs.events)) return { text: `${label}: unreadable result (no events list)`, error: true };
   const c = vs.coverage;
   let text: string;
   if (c && (c.frames_analysed === 0 || c.t_first_s == null || c.t_last_s == null)) {
-    text = "Visible sample: 0 frames analysed, nothing to measure";
+    text = `${label}: 0 frames analysed, nothing to measure`;
   } else {
     const n = vs.events.length;
     const lost = c && c.uncovered_s != null && c.longest_gap_s != null
@@ -99,7 +108,7 @@ function describe(vs: VisibleSampleSummary): StatusLine {
     const span = c
       ? `${c.t_first_s!.toFixed(1)}–${c.t_last_s!.toFixed(1)} s analysed (${c.gaps_over_300ms} gaps > 0.3 s${lost})`
       : "coverage unknown";
-    text = `Visible sample: ${n} ${n === 1 ? "flash" : "flashes"} at the sample, ${span}`;
+    text = `${label}: ${n} ${n === 1 ? "flash" : "flashes"} at the sample, ${span}`;
   }
   // Only an anchor that is recorded and is not the first frame counts: a result written before the
   // field existed has none, and says nothing either way.
@@ -129,4 +138,46 @@ export function visibleSampleIsError(vs: VisibleSampleSummary | null | undefined
 /** `base` (the recorder's event marks) plus the visible flash marks, in time order. */
 export function markersWithFlashes(base: Marker[], vs: VisibleSampleSummary | null | undefined, tS: ArrayLike<number>): Marker[] {
   return [...base, ...visibleFlashMarkers(vs, tS)].sort((a, b) => a.t - b.t);
+}
+
+/** A number to at most 2 decimals with no trailing zeros and no "-0"; `signed` adds a "+" to positives. */
+function fmtAdjust(v: number, signed: boolean): string {
+  const r = Math.round(v * 100) / 100 + 0; // + 0 turns -0 into 0
+  const text = String(r);
+  return signed && r > 0 ? `+${text}` : text;
+}
+
+/** The one-line outcome of the adjusted analysis, or null when there is no adjusted result. It reads
+ *  like `visibleSampleStatusText` with the adjustment the analysis used in the label, and ends with
+ *  "; sliders changed since" when the run's current adjustment (`current`, what the sliders show now)
+ *  differs from that one, so the numbers are not mistaken for the picture on screen. */
+export function adjustedStatusText(vs: VisibleSampleAdjustedSummary | null | undefined, current: Readonly<VisibleAdjust>): string | null {
+  if (!vs) return null;
+  const a = vs.adjust;
+  const known = !!a && [a.exposure_ev, a.brightness, a.contrast].every((v) => typeof v === "number" && Number.isFinite(v));
+  const label = known
+    ? `${RAW_LABEL} (adjusted: exposure ${fmtAdjust(a.exposure_ev, true)} EV, brightness ${fmtAdjust(a.brightness, true)}, contrast ${fmtAdjust(a.contrast, false)})`
+    : `${RAW_LABEL} (adjusted)`;
+  const text = describe(vs, label).text;
+  return known && !adjustEqual(a, current) ? `${text}; sliders changed since` : text;
+}
+
+/** Whether a derived regenerate should also analyse the adjusted video: the box is ticked and the
+ *  run's adjustment is not neutral (a neutral adjustment gives the raw result again, at the cost of
+ *  another decode of the whole video). */
+export function wantsAdjustedAnalysis(checked: boolean, current: Readonly<VisibleAdjust>): boolean {
+  return checked && !isNeutral(current);
+}
+
+const ANALYSE_ADJUSTED_KEY = "fri.analyseAdjusted.v1";
+
+/** The remembered state of the "also analyse the adjusted video" box; unticked when nothing is
+ *  stored or the store cannot be read. */
+export function loadAnalyseAdjusted(storage: Storage | null | undefined): boolean {
+  try { return storage?.getItem(ANALYSE_ADJUSTED_KEY) === "1"; } catch { return false; }
+}
+
+/** Remember the box (a failing store is ignored: the box still works for this page). */
+export function saveAnalyseAdjusted(storage: Storage | null | undefined, on: boolean): void {
+  try { storage?.setItem(ANALYSE_ADJUSTED_KEY, on ? "1" : "0"); } catch { /* storage unavailable: ignore */ }
 }

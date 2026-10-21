@@ -1,7 +1,7 @@
 import { apiUrl, loadOperatorBase, saveOperatorBase } from "./operator.ts";
 import { mediaPreviewQuery, type MediaPreviewOptions } from "./mediaQuery.ts";
 import type { VisibleGap, VisibleSegment } from "./visibleSegments.ts";
-import type { VisibleSampleSummary } from "./visibleSample.ts";
+import type { VisibleSampleAdjustedSummary, VisibleSampleSummary } from "./visibleSample.ts";
 import type { VisibleAdjust } from "./visibleAdjust.ts";
 import type { AdjustSource, RecordStamp } from "./visibleAdjustUi.ts";
 import type { Preset, PresetsDoc, ThermalValue } from "./presets.ts";
@@ -61,7 +61,9 @@ export const DEFAULT_PROFILE: Profile = { name: "default", fields: [{ key: "oper
 export interface Hdf5Export { path: string; size_bytes: number; sha256: string; n_frames: number; }
 export interface ThermalVideoExport { path: string; frames: number; fps: number; width: number; height: number; vmin: number; vmax: number; units: string; bytes: number; }
 /** Progress of an on-demand derived regenerate (background job). */
-export interface DerivedJob { state: "running" | "done" | "error" | "idle"; step?: string; done?: number; total?: number; exports?: { name: string; bytes: number }[] | null; error?: string | null; }
+export interface DerivedJob { state: "running" | "done" | "error" | "idle"; step?: string; done?: number; total?: number; exports?: { name: string; bytes: number }[] | null; error?: string | null;
+  /** How the adjusted analysis went (`null` when it was not asked for or has not finished) and whether this job was asked to run it. */
+  visible_adjusted?: { status: string; reason?: string | null } | null; visible_adjusted_requested?: boolean; }
 /** Options for a media-export render (a window of frames to MP4/GIF with overlays). */
 export interface MediaOptions { start: number; stop: number; step?: number; scale?: number; speed?: number; fps?: number | null; fmt: "mp4" | "gif"; with_rois?: boolean; frame_stats?: boolean; timestamp?: boolean; colorbar?: boolean; title?: string | null; plot_roi?: number | null; plot_rois?: number[]; plot_stat?: string; plot_stats?: string[]; plot_series?: string[]; overlay_rois?: number[]; visible_opacity?: number; palette?: string; max_mb?: number; rois?: unknown[] | null; rf_notch?: boolean; }
 /** Progress of a media-export render (background job). */
@@ -116,7 +118,7 @@ export interface Experiment {
   last_seen_utc?: string | null;
 }
 
-export interface ExperimentInfo { name: string; path: string; n_frames: number; size_bytes?: number; width: number; height: number; duration_s: number; complete: boolean; ir_format: string | null; conversion: Record<string, unknown> | null; experiment: Record<string, unknown> | null; camera: Record<string, unknown> | null; software: Record<string, unknown> | null; started_utc: string | null; events?: Record<string, unknown>[]; manifest: Record<string, unknown> | null; visible?: { file?: string | null; measured_fps?: number | null; error?: string | null; segments?: VisibleSegment[] | null; gaps?: VisibleGap[] | null } | null; visible_timeline?: VisibleSegment[] | null; visible_alignment?: Record<string, unknown> | null; visible_sample?: VisibleSampleSummary | null; rois?: Record<string, unknown>[] | null; masks?: Record<string, unknown>[] | null; thermal_preview?: { path: string; bytes: number } | null; exports?: { name: string; bytes: number }[];
+export interface ExperimentInfo { name: string; path: string; n_frames: number; size_bytes?: number; width: number; height: number; duration_s: number; complete: boolean; ir_format: string | null; conversion: Record<string, unknown> | null; experiment: Record<string, unknown> | null; camera: Record<string, unknown> | null; software: Record<string, unknown> | null; started_utc: string | null; events?: Record<string, unknown>[]; manifest: Record<string, unknown> | null; visible?: { file?: string | null; measured_fps?: number | null; error?: string | null; segments?: VisibleSegment[] | null; gaps?: VisibleGap[] | null } | null; visible_timeline?: VisibleSegment[] | null; visible_alignment?: Record<string, unknown> | null; visible_sample?: VisibleSampleSummary | null; visible_sample_adjusted?: VisibleSampleAdjustedSummary | null; rois?: Record<string, unknown>[] | null; masks?: Record<string, unknown>[] | null; thermal_preview?: { path: string; bytes: number } | null; exports?: { name: string; bytes: number }[];
   /** Predicted range of the served visible video ("full" whenever ffmpeg exists); the route's X-Visible-Range header is authoritative. */
   visible_range?: "full" | "raw-untagged" | null;
   /** Effective visible adjustment: sidecar, else the recorded stamp, else neutral. */
@@ -157,9 +159,12 @@ export const api = {
     j<{ rois: number }>(req(`/api/experiments/${encodeURIComponent(name)}/rois`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ rois }) })),
   /** Start a background regenerate of the ROI-dependent derived files; poll exportDerivedStatus.
    * `video=false` is the quick option: it skips the slow ROI video encode but still reruns the
-   * visible-camera analysis (with its close-up video), plus the ROI plot, CSV and images. */
-  exportDerived: (name: string, video = true) =>
-    j<DerivedJob>(req(`/api/experiments/${encodeURIComponent(name)}/export/derived${video ? "" : "?video=false"}`, { method: "POST" })),
+   * visible-camera analysis (with its close-up video), plus the ROI plot, CSV and images.
+   * `visibleAdjusted` also analyses the adjusted visible video (the run's adjustment), after the raw one. */
+  exportDerived: (name: string, video = true, visibleAdjusted = false) => {
+    const q = [...(video ? [] : ["video=false"]), ...(visibleAdjusted ? ["visible_adjusted=true"] : [])].join("&");
+    return j<DerivedJob>(req(`/api/experiments/${encodeURIComponent(name)}/export/derived${q ? `?${q}` : ""}`, { method: "POST" }));
+  },
   exportDerivedStatus: (name: string) =>
     j<DerivedJob>(req(`/api/experiments/${encodeURIComponent(name)}/export/derived/status`)),
   /** Start a media-export render (windowed MP4/GIF with overlays); poll mediaStatus. */
