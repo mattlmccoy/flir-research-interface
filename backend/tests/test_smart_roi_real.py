@@ -65,6 +65,10 @@ def test_real_run_tracks_sample(tmp_path: Path) -> None:
         assert np.isnan(s[key][searching]).all(), key
     # holding stays valid (spec §7b) until the hold lapses
     holding = state == STATE_CODES["holding"]
+    if not holding.any():
+        # say so: an empty .all() is True, so the check below would pass without checking anything
+        print("\nNOTE: no holding frames on this run; the holding-is-valid check is vacuous here "
+              "(covered by test_smart_roi.test_bad_frame_holds_then_searches)")
     assert bool(s["valid"][holding].all())
     print(f"searching={int(searching.sum())} holding={int(holding.sum())} "
           f"holding_valid={int(s['valid'][holding].sum())}")
