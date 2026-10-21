@@ -7,8 +7,6 @@ import { api } from "./api.ts";
 import type { SmartOverlay } from "./smartLabels.ts";
 import { OVERLAY_BLOCK, overlayStore } from "./smartPlayback.ts";
 
-const RETRY_MS = 3000;
-
 export interface PlaybackOverlays {
   /** The stored outlines of the frame on screen (`shown`), never of the playhead. */
   overlays: SmartOverlay[];
@@ -31,7 +29,7 @@ export function useSmartPlaybackOverlays(name: string, ids: number[], shown: num
     OVERLAY_BLOCK,
     {
       onChange: () => { if (mounted.current) setTick((t) => t + 1); },
-      onRetry: () => { window.setTimeout(() => { if (mounted.current) setRetry((r) => r + 1); }, RETRY_MS); },
+      onRetry: () => { if (mounted.current) setRetry((r) => r + 1); },  // after the store's back-off
     },
   ), [key]);  // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => store.abortAll(), [store]);

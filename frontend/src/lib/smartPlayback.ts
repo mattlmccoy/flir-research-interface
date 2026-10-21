@@ -41,7 +41,8 @@ export function shownIndex(frame: { header: object } | null): number | null {
 export interface OverlayStore {
   readonly cache: OverlayCache;
   /** Resolves once every id's overlay block for frame `index` is cached, known missing, or failed
-   *  transiently (`onRetry` is called; the frame is not held back). Rejects only when aborted. */
+   *  transiently (the frame is not held back; inside the back-off window it is not refetched, and
+   *  one `onRetry` fires when the window ends). Rejects only when aborted. */
   ensure(ids: readonly number[], index: number): Promise<void>;
   /** Abort overlay fetches whose block holds none of the frames in `indexes`. */
   retain(indexes: readonly number[]): void;
@@ -49,12 +50,29 @@ export interface OverlayStore {
   pick(ids: number[], index: number): SmartOverlay[];
 }
 
+/** Back-off after a transient overlay failure (5xx, operator unreachable). */
+export const OVERLAY_BACKOFF_MS = 3000;
+
+export interface OverlayStoreOptions {
+  now?: () => number;
+  backoffMs?: number;
+  /** Runs the (single, coalesced) retry after the back-off; default setTimeout. */
+  schedule?: (fn: () => void, ms: number) => void;
+}
+
 export function overlayStore(
   fetch: (id: number, start: number, signal: AbortSignal) => Promise<SmartOverlay[]>,
   size: number,
   hooks: { onChange: () => void; onRetry: () => void },
+  opts: OverlayStoreOptions = {},
 ): OverlayStore {
+  const now = opts.now ?? Date.now;
+  const backoff = opts.backoffMs ?? OVERLAY_BACKOFF_MS;
+  const schedule = opts.schedule ?? ((fn: () => void, ms: number) => { setTimeout(fn, ms); });
   const cache: OverlayCache = new Map();
+  // a block whose fetch failed transiently: not refetched, nor waited for, until the window ends
+  const failedAt = new Map<string, number>();
+  let retryArmed = false;  // one retry timer for any number of failures
   const loaders = new Map<number, BlockLoader>();
   const loader = (id: number): BlockLoader => {
     let l = loaders.get(id);
@@ -65,13 +83,19 @@ export function overlayStore(
     return l;
   };
   const one = (id: number, start: number): Promise<void> => {
-    if (cache.has(`${id}:${start}`)) return Promise.resolve();
+    const key = `${id}:${start}`;
+    if (cache.has(key)) return Promise.resolve();
+    const failed = failedAt.get(key);
+    if (failed !== undefined && now() - failed < backoff) return Promise.resolve();  // shown without its outline
     return loader(id).ensure(start).then(
-      () => { hooks.onChange(); },
+      () => { failedAt.delete(key); hooks.onChange(); },
       (e: unknown) => {
         if (isAbort(e)) throw e;  // nothing needs it any more: not cached, not retried
-        if (overlayOnError(e) === "missing") cache.set(`${id}:${start}`, "missing");  // not computed yet
-        else hooks.onRetry();
+        if (overlayOnError(e) === "missing") cache.set(key, "missing");  // not computed yet
+        else {
+          failedAt.set(key, now());
+          if (!retryArmed) { retryArmed = true; schedule(() => { retryArmed = false; hooks.onRetry(); }, backoff); }
+        }
         hooks.onChange();
       },
     );

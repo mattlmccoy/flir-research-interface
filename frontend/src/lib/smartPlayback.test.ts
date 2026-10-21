@@ -64,7 +64,7 @@ test("ensure resolves once the block is cached, so the frame and its outline app
 test("ensure: a 404 is cached as missing (no outline), a transient failure resolves and asks for a retry", async () => {
   const f = fakeOverlayFetch();
   let retries = 0;
-  const S = overlayStore(f.fetch, 4, { onChange: () => undefined, onRetry: () => { retries++; } });
+  const S = overlayStore(f.fetch, 4, { onChange: () => undefined, onRetry: () => { retries++; } }, { schedule: (fn) => fn() });
   const p = S.ensure([1, 2], 0);
   f.pending.get("1:0")?.reject(new Error("404 no smart ROI series for ROI 1; compute it"));
   f.pending.get("2:0")?.reject(new Error("500 Internal Server Error"));
@@ -103,4 +103,26 @@ test("shownIndex is the index of the frame on screen, never the playhead", () =>
   assert.equal(shownIndex({ header: { index: 42 } }), 42);
   assert.equal(shownIndex(null), null, "nothing on screen: no outline");
   assert.equal(shownIndex({ header: {} }), null);
+});
+
+// --- review round: a persistent 5xx backs off instead of refetching on every frame ---
+test("a transient failure backs off: no refetch and no wait inside the window, one coalesced retry", async () => {
+  const f = fakeOverlayFetch();
+  let now = 1000, retries = 0;
+  const timers: (() => void)[] = [];
+  const S = overlayStore(f.fetch, 4, { onChange: () => undefined, onRetry: () => { retries++; } },
+    { now: () => now, backoffMs: 3000, schedule: (fn) => { timers.push(fn); } });
+  const p = S.ensure([1, 2], 0);
+  f.pending.get("1:0")?.reject(new Error("500 Internal Server Error"));
+  f.pending.get("2:0")?.reject(new Error("502 Bad Gateway"));
+  await p;
+  assert.equal(timers.length, 1, "two failures, one retry timer");
+  now += 1000;
+  await S.ensure([1, 2], 1);  // resolves at once: the frame shows without its outline
+  assert.deepEqual(f.calls, ["1:0", "2:0"], "no refetch inside the back-off window");
+  timers[0]();
+  assert.equal(retries, 1);
+  now += 2500;  // past the window
+  void S.ensure([1], 2).catch(() => undefined);
+  assert.deepEqual(f.calls, ["1:0", "2:0", "1:0"], "refetched once the window is over");
 });
