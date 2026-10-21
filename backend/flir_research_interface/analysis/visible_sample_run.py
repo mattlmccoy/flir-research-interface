@@ -8,6 +8,11 @@ run's ``exports/``: ``visible_sample.json`` always, and when the video could be 
 reason); a run that was not analysed never leaves results of an earlier analysis beside it. The plot
 is derived from the rest: if only it cannot be drawn the run stays ``ok``, without the plot, and
 the JSON's ``plot_error`` says why. Nothing here touches the recording itself.
+
+Given the operator's adjustment, the same analysis runs on the adjusted luma (``visible_adjust``)
+and writes the separate ``visible_sample_adjusted*`` family instead (see ``visible_sample_io.
+family``); the bed's clipping is still read from the raw luma, since it is the camera's. Each
+family's clean-up removes only its own files, so neither result deletes the other.
 """
 
 from __future__ import annotations
@@ -19,7 +24,7 @@ import os
 import shutil
 import subprocess
 from collections import Counter
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +34,11 @@ import numpy as np
 
 from flir_research_interface import __version__
 from flir_research_interface.analysis import visible_sample_io as vio
+from flir_research_interface.analysis.visible_adjust import (
+    adjust_linear,
+    apply_adjust,
+    validate_adjust,
+)
 from flir_research_interface.analysis.visible_overlay import ir_to_visible_coeffs
 from flir_research_interface.analysis.visible_sample import (
     coverage,
@@ -49,10 +59,6 @@ from flir_research_interface.visible.rtsp import find_ffprobe
 
 logger = logging.getLogger(__name__)
 
-JSON_NAME = "visible_sample.json"
-CSV_NAME = "visible_sample.csv"
-PLOT_NAME = "visible_sample_plot.png"
-CLOSEUP_STEM = "visible_sample_closeup"
 CSV_COLUMNS = (
     "t_s",
     "segment",
@@ -150,11 +156,18 @@ def _closeup_box(
 
 
 def _closeup_command(
-    ffmpeg: str, src: Path, out: Path, crop: tuple[int, int, int], lo: float
+    ffmpeg: str,
+    src: Path,
+    out: Path,
+    crop: tuple[int, int, int],
+    lo: float,
+    adjust: Mapping[str, float] | None = None,
 ) -> list[str]:
     """ffmpeg argv for the close-up: drop the start-up skip, crop, stretch luma ``lo``..250 to
     0..255, scale x3 (Lanczos), and keep every remaining frame at its source time (the video starts
-    at the first frame that was analysed, not at 0).
+    at the first frame that was analysed, not at 0). With ``adjust`` (validated), the luma is first
+    adjusted by the same linear map the analysis uses (``adjust_linear``; its intercept is on
+    [0, 1], hence x255) and ``lo`` is a level of the adjusted luma.
 
     The source's frames are irregular (1 ms to 840 ms apart on the real run), so: ``passthrough``
     neither drops nor duplicates; ``-enc_time_base -1`` keeps the encoder on the source's own time
@@ -163,7 +176,11 @@ def _closeup_command(
     a frame's time lands on that frame.
     """
     x, y, side = crop
-    ramp = f"clip((val-{lo:g})*255/({STRETCH_HI}-{lo:g}),0,255)"
+    val = "val"
+    if adjust is not None:
+        slope, intercept = adjust_linear(adjust)
+        val = f"(clip({slope:.9g}*val+({intercept * 255:.9g}),0,255))"
+    ramp = f"clip(({val}-{lo:g})*255/({STRETCH_HI}-{lo:g}),0,255)"
     size = CLOSEUP_SCALE * side
     vf = (
         f"select='gte(t,{FRAME0_SKIP_S:g})',crop={side}:{side}:{x}:{y},"
@@ -189,13 +206,14 @@ def _encode_closeup(
     crop: tuple[int, int, int],
     lo: float,
     duration_s: float = 0.0,
+    adjust: Mapping[str, float] | None = None,
 ) -> None:
     """Encode the close-up of ``src`` (``duration_s`` of video) into ``out``; ffmpeg is killed and
     ``TimeoutError`` raised when it runs longer than :func:`_closeup_timeout`."""
     timeout = _closeup_timeout(duration_s)
     try:
         run = subprocess.run(
-            _closeup_command(ffmpeg, src, out, crop, lo),
+            _closeup_command(ffmpeg, src, out, crop, lo, adjust),
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -359,9 +377,15 @@ def _analysed(plan: _Plan, seg: _Seg) -> Generator[tuple[int, float, np.ndarray]
         )
 
 
-def _threshold(plan: _Plan) -> int:
+def _adjusted(luma: np.ndarray, adjust: Mapping[str, float] | None) -> np.ndarray:
+    """``luma`` as the analysis measures it: adjusted when there is an adjustment."""
+    return luma if adjust is None else apply_adjust(luma, adjust)
+
+
+def _threshold(plan: _Plan, adjust: Mapping[str, float] | None = None) -> int:
     """The run's dark threshold: Otsu over the sample region of the analysed frames within the
-    first ``THRESHOLD_WINDOW_S`` of the first segment (the next one, if that has none)."""
+    first ``THRESHOLD_WINDOW_S`` of the first segment (the next one, if that has none), on the
+    adjusted luma when there is an adjustment."""
     for seg in plan.segments:
         pixels, first = [], None
         with closing(_analysed(plan, seg)) as frames:
@@ -369,7 +393,7 @@ def _threshold(plan: _Plan) -> int:
                 first = rel if first is None else first
                 if rel - first > THRESHOLD_WINDOW_S:
                     break
-                pixels.append(luma[plan.region])
+                pixels.append(_adjusted(luma, adjust)[plan.region])
         if pixels:
             return otsu_threshold(np.concatenate(pixels))
     raise ValueError(f"no frame to analyse: the video ends within the first {FRAME0_SKIP_S} s")
@@ -397,17 +421,19 @@ def _block_change(plan: _Plan, luma: np.ndarray, prev: np.ndarray) -> np.ndarray
 
 
 def _measure(
-    plan: _Plan, threshold: int
+    plan: _Plan, threshold: int, adjust: Mapping[str, float] | None = None
 ) -> tuple[list[dict[str, Any]], list[np.ndarray | None], np.ndarray]:
     """One row per analysed frame in time order; the block changes of each (``None`` for a
-    segment's first); and a histogram of the luma of the sample's dark pixels over the run."""
+    segment's first); and a histogram of the luma of the sample's dark pixels over the run. With
+    ``adjust`` all of it is on the adjusted luma except the bed's clipping, read from the raw."""
     rows: list[dict[str, Any]] = []
     blocks: list[np.ndarray | None] = []
     dark_hist = np.zeros(256, dtype=np.int64)
     for seg in plan.segments:
         prev = None  # the previous analysed frame of this segment, never a skipped one
-        for i, rel, luma in _analysed(plan, seg):
-            m = frame_metrics(luma, prev, plan.region, threshold, plan.bed_mask)
+        for i, rel, raw in _analysed(plan, seg):
+            luma = _adjusted(raw, adjust)
+            m = frame_metrics(luma, prev, plan.region, threshold, plan.bed_mask, bed_luma=raw)
             key = bool(seg.keyframe[i])
             rows.append(
                 {
@@ -588,16 +614,19 @@ class _Staged:
             path.unlink(missing_ok=True)
 
 
-def _remove_stale(folder: Path, keep: list[str]) -> None:
-    """Delete this feature's files (and half-written ``.part`` files) that are not in ``keep``."""
-    for pattern in (CSV_NAME, PLOT_NAME, f"{CLOSEUP_STEM}*.mp4", "visible_sample*.part"):
-        for path in folder.glob(pattern):
-            if path.name not in keep:
-                path.unlink(missing_ok=True)
+def _remove_stale(folder: Path, fam: vio.Family, keep: list[str]) -> None:
+    """Delete ``fam``'s files (and its half-written ``.part`` files) that are not in ``keep``; the
+    other family's files are never touched."""
+    for path in folder.iterdir():
+        if fam.owns(path.name) and path.name not in keep:
+            path.unlink(missing_ok=True)
 
 
-def _write_stopped(folder: Path, status: str, reason: str) -> dict[str, Any]:
-    """The JSON of a run that was not analysed; any earlier results are removed.
+def _write_stopped(
+    folder: Path, fam: vio.Family, status: str, reason: str, extra: dict[str, Any]
+) -> dict[str, Any]:
+    """The JSON of a run that was not analysed (``extra`` is added to it); any earlier results of
+    the same family are removed.
 
     The earlier files go first, so if the new JSON cannot be written the earlier one is removed
     too: it would say ``ok`` and list files that are gone.
@@ -606,28 +635,23 @@ def _write_stopped(folder: Path, status: str, reason: str) -> dict[str, Any]:
         "status": status,
         "reason": reason,
         "software": __version__,
-        "files": [JSON_NAME],
+        **extra,
+        "files": [fam.json],
     }
     staged = _Staged(folder)
     try:
         folder.mkdir(parents=True, exist_ok=True)
-        _remove_stale(folder, [JSON_NAME])
-        _write_json(staged.part(JSON_NAME), summary)
+        _remove_stale(folder, fam, [fam.json])
+        _write_json(staged.part(fam.json), summary)
         staged.commit()
     except OSError:
         staged.discard()
-        logger.exception("could not write %s", folder / JSON_NAME)
+        logger.exception("could not write %s", folder / fam.json)
         try:
-            (folder / JSON_NAME).unlink(missing_ok=True)
+            (folder / fam.json).unlink(missing_ok=True)
         except OSError:
-            logger.exception("could not remove the earlier %s", folder / JSON_NAME)
+            logger.exception("could not remove the earlier %s", folder / fam.json)
     return summary
-
-
-def _closeup_name(segment_index: int) -> str:
-    """``visible_sample_closeup.mp4`` for segment 0, then ``_001``... (like visible_001.mp4)."""
-    suffix = "" if segment_index == 0 else f"_{segment_index:03d}"
-    return f"{CLOSEUP_STEM}{suffix}.mp4"
 
 
 def analyse_visible_sample(
@@ -635,54 +659,73 @@ def analyse_visible_sample(
     ffmpeg: str | None = None,
     ffprobe: str | None = None,
     closeup: bool = True,
+    adjust: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Analyse the visible video of ``reader``'s run around the sample; write ``exports/``.
 
-    Returns the summary also written to ``exports/visible_sample.json``: ``status`` is ``ok``,
-    ``skipped`` (an input is missing: ``reason`` says which) or ``failed`` (``reason`` is
-    ``"<ExceptionType>: <message>"``). Never raises. An analysed run gets ``visible_sample.csv``
-    (one row per analysed frame), a close-up video per segment (unless ``closeup`` is false) and the
-    JSON, all moved into place together; any other run has the JSON only, and no older result.
-    A segment file that visible.json lists but that is not on disk is named in ``missing``, one
-    on disk with no frame to analyse in ``empty``; the other segments are analysed, and neither
-    kind gets a close-up. With no segment left, the run is ``skipped`` ("no visible video").
+    Returns the summary also written to ``exports/visible_sample.json`` (the raw family's names
+    are used here; see ``adjust``): ``status`` is ``ok``, ``skipped`` (an input is missing:
+    ``reason`` says which) or ``failed`` (``reason`` is ``"<ExceptionType>: <message>"``). Never
+    raises. An analysed run gets ``visible_sample.csv`` (one row per analysed frame), a close-up
+    video per segment (unless ``closeup`` is false) and the JSON, all moved into place together;
+    any other run has the JSON only, and no older result. A segment file that visible.json lists
+    but that is not on disk is named in ``missing``, one on disk with no frame to analyse in
+    ``empty``; the other segments are analysed, and neither kind gets a close-up. With no segment
+    left, the run is ``skipped`` ("no visible video").
     ``ffmpeg`` and ``ffprobe`` are executables; unset, they are looked for.
+
+    With ``adjust`` (``exposure_ev``, ``brightness``, ``contrast`` and optionally ``source``, which
+    says where the values came from), the luma goes through ``apply_adjust`` before the threshold,
+    the dark area and mean, the brightening and the close-up; the bed's clipping stays on the raw
+    luma. The result is the ``visible_sample_adjusted`` family (``.json``, ``.csv``, ``_plot.png``,
+    ``_closeup*.mp4``) and its JSON adds ``adjust``: the values and ``source`` (``None`` when the
+    values were invalid, which fails the run). The raw family is not touched, nor the other way.
     """
+    fam = vio.family(adjust)
     folder = reader.path / "exports"
     staged = _Staged(folder)
+    extra: dict[str, Any] = {}  # the adjusted result says which adjustment it measured
     try:
+        values = None
+        if adjust is not None:
+            extra["adjust"] = None
+            values = validate_adjust(adjust)
+            source = adjust.get("source")
+            extra["adjust"] = {**values, "source": source if isinstance(source, str) else None}
         folder.mkdir(parents=True, exist_ok=True)
         plan = _plan(reader, ffmpeg, ffprobe)
-        threshold = _threshold(plan)
-        rows, blocks, dark_hist = _measure(plan, threshold)
+        threshold = _threshold(plan, values)
+        rows, blocks, dark_hist = _measure(plan, threshold, values)
         lo = _stretch_lo(dark_hist)
-        summary = _summary(plan, rows, blocks, threshold, lo)
-        files = [CSV_NAME]
-        _write_csv(staged.part(CSV_NAME), rows)
+        summary = {**_summary(plan, rows, blocks, threshold, lo), **extra}
+        files = [fam.csv]
+        _write_csv(staged.part(fam.csv), rows)
         if closeup:
             crop = _closeup_box(plan.box, plan.vis_size)
             for seg in plan.segments:
-                name = _closeup_name(seg.index)
+                name = fam.closeup(seg.index)
                 span = float(seg.pts_s[-1] - seg.pts_s[0])
-                _encode_closeup(plan.ffmpeg, seg.path, staged.part(name), crop, lo, span)
+                _encode_closeup(
+                    plan.ffmpeg, seg.path, staged.part(name), crop, lo, span, adjust=values
+                )
                 files.append(name)
         if (png := _plot_png(reader, rows, summary)) is not None:
-            staged.part(PLOT_NAME).write_bytes(png)
-            files.append(PLOT_NAME)
-        summary["files"] = [*files, JSON_NAME]
-        _write_json(staged.part(JSON_NAME), summary)
+            staged.part(fam.plot).write_bytes(png)
+            files.append(fam.plot)
+        summary["files"] = [*files, fam.json]
+        _write_json(staged.part(fam.json), summary)
         staged.commit()
-        _remove_stale(folder, summary["files"])
-        logger.info("visible sample: %d frames, %d events", len(rows), len(summary["events"]))
+        _remove_stale(folder, fam, summary["files"])
+        logger.info("%s: %d frames, %d events", fam.stem, len(rows), len(summary["events"]))
         return summary
     except _Skip as skip:
         staged.discard()
-        logger.info("visible sample analysis skipped: %s", skip.reason)
-        return _write_stopped(folder, "skipped", skip.reason)
+        logger.info("%s analysis skipped: %s", fam.stem, skip.reason)
+        return _write_stopped(folder, fam, "skipped", skip.reason, extra)
     except Exception as exc:  # noqa: BLE001 - a failure is a result, never an error for the caller
         staged.discard()
-        logger.exception("visible sample analysis failed")
-        return _write_stopped(folder, "failed", f"{type(exc).__name__}: {exc}")
+        logger.exception("%s analysis failed", fam.stem)
+        return _write_stopped(folder, fam, "failed", f"{type(exc).__name__}: {exc}", extra)
 
 
 __all__ = ["analyse_visible_sample"]

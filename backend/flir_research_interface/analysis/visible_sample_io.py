@@ -1,19 +1,23 @@
-"""Reading the visible video for the sample analysis: ffprobe for the packets, ffmpeg for the luma.
+"""Reading the visible video for the sample analysis: ffprobe for the packets, ffmpeg for the luma;
+and the names of the files the analysis writes.
 
 The runner (:mod:`.visible_sample_run`) plans and measures on what these return; nothing here knows
-about ROIs, thresholds or the files that are written.
+about ROIs or thresholds. :func:`family` names the two result families: the raw analysis
+(``visible_sample*``) and the one on the operator's adjusted video (``visible_sample_adjusted*``).
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -21,6 +25,49 @@ logger = logging.getLogger(__name__)
 
 PROBE_TIMEOUT_S = 300  # ffprobe reads every packet header of a file; a long run takes seconds
 DECODE_STALL_S = 120.0  # the decode's ffmpeg is killed when it delivers nothing for this long
+
+
+RAW_STEM = "visible_sample"
+ADJUSTED_STEM = "visible_sample_adjusted"
+
+
+@dataclass(frozen=True)
+class Family:
+    """The files of one analysis result, all named from ``stem``: ``<stem>.json``, ``.csv``,
+    ``<stem>_plot.png`` and one ``<stem>_closeup[_NNN].mp4`` per segment, each written first as
+    ``<name>.part``. Each family's clean-up removes only what :meth:`owns` says is its own, so the
+    raw and the adjusted result never delete each other's files."""
+
+    stem: str
+
+    @property
+    def json(self) -> str:
+        return f"{self.stem}.json"
+
+    @property
+    def csv(self) -> str:
+        return f"{self.stem}.csv"
+
+    @property
+    def plot(self) -> str:
+        return f"{self.stem}_plot.png"
+
+    def closeup(self, segment_index: int) -> str:
+        """``<stem>_closeup.mp4`` for segment 0, then ``_001``... (like visible_001.mp4)."""
+        suffix = "" if segment_index == 0 else f"_{segment_index:03d}"
+        return f"{self.stem}_closeup{suffix}.mp4"
+
+    def owns(self, name: str) -> bool:
+        """Whether ``name`` in ``exports/`` is one of this family's files (``.part`` included)."""
+        base = name.removesuffix(".part")
+        if base in (self.json, self.csv, self.plot):
+            return True
+        return re.fullmatch(rf"{re.escape(self.stem)}_closeup(_\d+)?\.mp4", base) is not None
+
+
+def family(adjust: Mapping[str, Any] | None) -> Family:
+    """The raw family without an adjustment, the adjusted one with any (even a neutral one)."""
+    return Family(RAW_STEM if adjust is None else ADJUSTED_STEM)
 
 
 class NoPacketsError(ValueError):

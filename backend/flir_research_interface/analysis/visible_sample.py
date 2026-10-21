@@ -234,6 +234,7 @@ def frame_metrics(
     region: np.ndarray,
     threshold: int,
     bed: np.ndarray | None = None,
+    bed_luma: np.ndarray | None = None,
 ) -> FrameMetrics:
     """The :class:`FrameMetrics` of one frame.
 
@@ -241,12 +242,15 @@ def frame_metrics(
     masks of that box. A pixel is dark when its luma is strictly below ``threshold``. ``prev`` is
     the previous *analysed* frame of the same video segment (``None`` for a segment's first), so
     the frames of the start-up skip never serve as one. The luma change is taken in ``int16``.
+    ``bed_luma`` (same box, default ``luma``) is what the bed's clipping is read from: the analysis
+    of the adjusted video passes the camera's raw luma, since the clipping is the camera's.
     """
     in_region = luma[region]
     dark = in_region < threshold
     n_dark = int(np.count_nonzero(dark))
     mean_luma = float(in_region[dark].mean()) if n_dark else None
-    clipped = float(np.mean(luma[bed] == 255)) if bed is not None and bed.any() else None
+    source = luma if bed_luma is None else bed_luma
+    clipped = float(np.mean(source[bed] == 255)) if bed is not None and bed.any() else None
     brightening = None
     if prev is not None and in_region.size:
         change = in_region.astype(np.int16) - prev[region].astype(np.int16)

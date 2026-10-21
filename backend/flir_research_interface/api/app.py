@@ -438,20 +438,30 @@ def create_app(
         if reader.n_frames:
             logger.info("peak frames: %s", write_annotated_frames(reader))
 
-    def _analyse_visible_sample(exp_dir: Path) -> None:
-        """exports/visible_sample.* from the visible video around the sample (derived).
+    def _analyse_visible_sample(exp_dir: Path, adjusted: bool = False) -> dict[str, Any]:
+        """exports/visible_sample.* from the visible video around the sample (derived); with
+        ``adjusted``, exports/visible_sample_adjusted.* on the run's effective visible adjustment
+        (``visible_adjust_store.effective_adjust``). Returns the summary.
 
         ``analyse_visible_sample`` reports its problems in the summary instead of raising, so a
         ``failed`` status, or a plot that could not be drawn, is logged here by run name."""
         from flir_research_interface.analysis.visible_sample_run import analyse_visible_sample
 
-        summary = analyse_visible_sample(ExperimentReader(exp_dir))
+        reader = ExperimentReader(exp_dir)
+        what = "visible sample"
+        if adjusted:
+            values, source = vadj_store.effective_adjust(exp_dir, reader.metadata)
+            summary = analyse_visible_sample(reader, adjust={**values, "source": source})
+            what = "adjusted visible sample"
+        else:
+            summary = analyse_visible_sample(reader)
         if summary.get("status") == "failed":
-            logger.warning("visible sample analysis failed for %s: %s", exp_dir.name,
+            logger.warning("%s analysis failed for %s: %s", what, exp_dir.name,
                            summary.get("reason"))
         if summary.get("plot_error"):
-            logger.warning("visible sample plot not drawn for %s: %s", exp_dir.name,
+            logger.warning("%s plot not drawn for %s: %s", what, exp_dir.name,
                            summary["plot_error"])
+        return summary
 
     app.state.render_tasks = set()
     app.state.finalizing = set()  # recorders a _finalize_recording is stopping right now
@@ -1536,11 +1546,11 @@ def create_app(
     def reveal_experiment(name: str) -> dict[str, Any]:
         return _reveal(_exp_dir(name))
 
-    def _visible_sample_json(run: Path) -> dict[str, Any] | None:
-        """The parsed exports/visible_sample.json; None if absent, unreadable or not an object
-        (a half-written or hand-edited file must never break the info endpoint)."""
+    def _visible_sample_json(run: Path, file: str = "visible_sample.json") -> dict[str, Any] | None:
+        """The parsed exports/visible_sample.json (or ``file``); None if absent, unreadable or not
+        an object (a half-written or hand-edited file must never break the info endpoint)."""
         try:
-            data = json.loads((run / "exports" / "visible_sample.json").read_text())
+            data = json.loads((run / "exports" / file).read_text())
         except (OSError, ValueError):  # missing, unreadable, not UTF-8 or not JSON
             return None
         return data if isinstance(data, dict) else None
@@ -1567,6 +1577,9 @@ def create_app(
         )
         info["events"] = r.events
         info["visible_sample"] = _visible_sample_json(r.path)
+        info["visible_sample_adjusted"] = _visible_sample_json(
+            r.path, "visible_sample_adjusted.json"
+        )
         info["visible_range"] = full_range.visible_range(r.path, full_range.resolve_ffmpeg())
         values, source = vadj_store.effective_adjust(r.path, r.metadata)
         info["visible_adjust"] = {**values, "source": source}
@@ -1641,7 +1654,9 @@ def create_app(
         return {"masks": len(masks)}
 
     @app.post("/api/experiments/{name}/export/derived")
-    async def export_derived_route(name: str, video: bool = True) -> dict[str, Any]:
+    async def export_derived_route(
+        name: str, video: bool = True, visible_adjusted: bool = False
+    ) -> dict[str, Any]:
         """Start (or return) a background regenerate of the ROI-dependent derived files.
 
         roi_series.csv, README/roi_plot/peak-frame images, the visible sample analysis
@@ -1650,6 +1665,10 @@ def create_app(
         the slow ROI-annotated thermal video encode. It does not skip the visible analysis, which
         is rerun either way: 15.8 s on the 10-minute reference run (4 s of it the close-up
         encode). The clean thermal video never depends on the ROIs and is not re-rendered here.
+        ``visible_adjusted=true`` then also runs the same analysis on the adjusted video (the
+        run's effective visible adjustment) into ``exports/visible_sample_adjusted.*``; the job's
+        ``visible_adjusted`` says how it went (``{"status", "reason"}``, ``None`` when not asked),
+        and its failure fails neither the raw result nor the job.
         Returns a job record immediately; poll ``/export/derived/status``. Pair with
         ``PUT /rois`` after editing.
         """
@@ -1660,7 +1679,7 @@ def create_app(
         if existing is not None and existing["state"] == "running":
             return existing
         job: dict[str, Any] = {"state": "running", "step": "starting", "done": 0, "total": 0,
-                               "exports": None, "error": None}
+                               "exports": None, "error": None, "visible_adjusted": None}
         app.state.derived_jobs[name] = job
 
         def _work() -> None:
@@ -1674,6 +1693,16 @@ def create_app(
                 _analyse_visible_sample(exp_dir)
             except Exception:  # noqa: BLE001 - it reports problems itself; this is a backstop
                 logger.exception("visible sample analysis failed for %s", exp_dir)
+            if visible_adjusted:  # after the raw one, which stays the default result
+                job["step"] = "visible sample (adjusted)"
+                try:
+                    summary = _analyse_visible_sample(exp_dir, adjusted=True)
+                    job["visible_adjusted"] = {"status": summary.get("status"),
+                                               "reason": summary.get("reason")}
+                except Exception as exc:  # noqa: BLE001 - reported on the job, never fatal
+                    logger.exception("adjusted visible sample analysis failed for %s", exp_dir)
+                    job["visible_adjusted"] = {"status": "failed",
+                                               "reason": f"{type(exc).__name__}: {exc}"}
             reader = ExperimentReader(exp_dir)
             if video and reader.metadata.get("rois"):
                 job["step"] = "roi video"
