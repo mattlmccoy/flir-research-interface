@@ -22,3 +22,10 @@ RF generator at 0 W), `pre_riser_rf_on` (frame 212 of the same run, heavy diagon
 `riser_rf_on` (frame 1986 of `20261019_131145_Run`, camera on the riser) and `strap_weak_banding`
 (frame 1065 of `20261019_182233_Run` at 150 W after the coax strap: banding ~9 mK, under the
 ~28 mK camera noise). Copied from `thermal.zarr` unchanged (`ir_format` stored alongside).
+
+`smart_roi_20261020.npz` — five real A70 frames of `20261020_144402_Run` (graphite/PA12 cube in
+PA12 powder, TemperatureLinear10mK) at t = 0.0, 55.0, 274.0, 549.0 and 604.0 s (frame indices 0,
+1652, 8227, 16486, 18137), cropped to the run's `freehand_sample` polygon ROI bbox + 40 px
+(origin x=89, y=157; 128×127 px of the 640×480 frame). Stored as °C (`counts × 0.01 − 273.15`,
+float32) with `origin`, `frame_shape`, `polygon` (frame coordinates), `indices` and `t_s`; no
+over-range pixels in the crops.
