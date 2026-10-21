@@ -6,9 +6,11 @@ import { api, DEFAULT_PROFILE, type Profile, type RecordingStatus } from "../lib
 import { ArmPanel } from "./ArmPanel.tsx";
 import { streamStallWarning } from "../lib/streamStall.ts";
 import type { Roi } from "../lib/roi.ts";
+import type { VisibleAdjust } from "../lib/visibleAdjust.ts";
+import { recordStamp } from "../lib/visibleAdjustUi.ts";
 
 
-export function RecordPanel({ acquiring, rois, masks = null }: { acquiring: boolean; rois: Roi[]; masks?: MaskShape[] | null }) {
+export function RecordPanel({ acquiring, rois, masks = null, liveAdjust }: { acquiring: boolean; rois: Roi[]; masks?: MaskShape[] | null; liveAdjust: VisibleAdjust }) {
   const [name, setName] = useState("Run");
   const [meta, setMeta] = useState<Record<string, string>>({});
   const [profile, setProfile] = useState<Profile>(DEFAULT_PROFILE);
@@ -38,7 +40,7 @@ export function RecordPanel({ acquiring, rois, masks = null }: { acquiring: bool
     try {
       const m: Record<string, unknown> = {};
       for (const f of FIELDS) { const v = meta[f.key]; if (v !== undefined && v !== "") m[f.key] = f.type === "number" ? Number(v) : v; }
-      await api.recordingArm(name, m, withVisible && visibleAvailable, rois, trigger, nucHold, masks);
+      await api.recordingArm(name, m, withVisible && visibleAvailable, rois, trigger, nucHold, masks, visibleStamp());
       setStatus(await api.recordingStatus());
     } catch (e) { setErr(String(e)); } finally { setBusy(false); }
   }
@@ -52,6 +54,9 @@ export function RecordPanel({ acquiring, rois, masks = null }: { acquiring: bool
   }
   const vis = status.visible;
   const visibleAvailable = !!vis && vis.state !== "unavailable";
+  // The live slider values go into metadata.json only when the visible video is recorded.
+  // Presets (Task 8) will pass the last-applied preset instead of null.
+  const visibleStamp = () => (withVisible && visibleAvailable ? recordStamp(liveAdjust, null) : null);
 
   async function start() {
     setBusy(true); setErr(null);
@@ -61,7 +66,7 @@ export function RecordPanel({ acquiring, rois, masks = null }: { acquiring: bool
         const v = meta[f.key];
         if (v !== undefined && v !== "") m[f.key] = f.type === "number" ? Number(v) : v;
       }
-      await api.recordingStart(name, m, withVisible && visibleAvailable, rois, nucHold, everyNth, masks);
+      await api.recordingStart(name, m, withVisible && visibleAvailable, rois, nucHold, everyNth, masks, visibleStamp());
       setStatus(await api.recordingStatus());
     } catch (e) { setErr(String(e)); } finally { setBusy(false); }
   }

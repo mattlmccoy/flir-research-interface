@@ -3,6 +3,7 @@ import { FILTER_NAMES, type FilterName } from "./filters.ts";
 import { DEFAULT_ISOTHERM, parseIsotherm, type Isotherm } from "./isotherm.ts";
 /** Studio layout state (spec §3): which panels are open, which rail sections, which tool, image zoom. */
 import { isZoom, type Zoom } from "./zoom.ts";
+import { NEUTRAL_ADJUST, clampAdjust, type VisibleAdjust } from "./visibleAdjust.ts";
 export const TOOLS = ["select", "spot", "rect", "circle", "ellipse", "line", "polyline", "polygon", "freehand"] as const;
 const isDelta = (v: unknown): v is { a: number; b: number } => !!v && typeof v === "object" && Number.isInteger((v as { a: unknown }).a) && Number.isInteger((v as { b: unknown }).b);
 export interface Agc { mode: "linear" | "plateau"; plateau: number; }
@@ -74,6 +75,8 @@ export interface LayoutState {
   units: Units;
   /** Overlay registration: opacity 0–1, scale 0.5–2 and offsets in % of the image (visible lens ≠ IR lens). */
   overlay: Overlay;
+  /** Live visible-camera exposure / brightness / contrast (display only; stamped into a new recording). */
+  visibleAdjust: VisibleAdjust;
   sections: Record<Section, boolean>;
 }
 /** Drag-to-resize bounds (px) for the right rail and the bottom plot dock, with a snap-back
@@ -137,6 +140,7 @@ export const DEFAULT_LAYOUT: LayoutState = {
   rfNotch: false,
   units: "C",
   overlay: DEFAULT_OVERLAY,
+  visibleAdjust: Object.freeze({ ...NEUTRAL_ADJUST }) as VisibleAdjust,
   sections: { measurements: true, profile: false, camera: true, experiment: true, recording: true, display: true, export: true, visible: true },
 };
 Object.freeze(DEFAULT_LAYOUT.sections);
@@ -166,6 +170,7 @@ export type LayoutAction =
   | { type: "setUnits"; units: Units }
   | { type: "setVisibleMode"; mode: VisibleMode }
   | { type: "setOverlay"; patch: Partial<Overlay> }
+  | { type: "setVisibleAdjust"; adjust: VisibleAdjust }
   | { type: "collapseAll" }
   | { type: "restoreAll" };
 
@@ -198,6 +203,7 @@ export function layoutReducer(s: LayoutState, a: LayoutAction): LayoutState {
     case "setSegment": return { ...s, segment: { on: !!a.segment.on, min: Math.min(a.segment.min, a.segment.max), max: Math.max(a.segment.min, a.segment.max) } };
     case "dockBack": { const { [a.section]: _gone, ...rest } = s.floating; return { ...s, floating: rest }; }
     case "setOverlay": return { ...s, overlay: clampOverlay({ ...s.overlay, ...a.patch }) };
+    case "setVisibleAdjust": return { ...s, visibleAdjust: clampAdjust(a.adjust) };
     case "collapseAll": return { ...s, strip: true, rail: false, dock: false };
     case "restoreAll": return { ...s, strip: true, rail: true, dock: true };
   }
@@ -259,6 +265,7 @@ export function loadLayout(storage: Storage | null): LayoutState {
         dx: num(ov.dx, DEFAULT_OVERLAY.dx),
         dy: num(ov.dy, DEFAULT_OVERLAY.dy),
       }),
+      visibleAdjust: clampAdjust(asRecord(parsed.visibleAdjust)),
       sections: Object.fromEntries(
         SECTIONS.map((k) => [k, bool(sec[k], DEFAULT_LAYOUT.sections[k])]),
       ) as Record<Section, boolean>,

@@ -4,11 +4,15 @@ import { api } from "../lib/api.ts";
 import { streamMjpeg } from "../lib/mjpeg.ts";
 import { DEFAULT_OVERLAY, VISIBLE_MODES, type LayoutAction, type Overlay, type VisibleMode } from "../lib/layout.ts";
 import { visibleSegmentAt, type VisibleInfo } from "../lib/visibleSegments.ts";
+import { NEUTRAL_ADJUST, isNeutral, type VisibleAdjust } from "../lib/visibleAdjust.ts";
+import { sourceNote } from "../lib/visibleAdjustUi.ts";
+import { Slider, VisibleAdjustControls, adjustFilter, type RunAdjust } from "./VisibleAdjustControls.tsx";
 
 /** Live MJPEG view: fetches the stream itself so unmounting aborts it (the operator's transcode ends at once).
  *  `plain` renders only the image (for the overlay). */
-export function VisibleLive({ big = false, plain = false, topLayer, flipH = false, flipV = false }: { big?: boolean; plain?: boolean; topLayer?: ReactNode; flipH?: boolean; flipV?: boolean }) {
-  const flip = flipH || flipV ? { transform: `scale(${flipH ? -1 : 1}, ${flipV ? -1 : 1})` } : undefined;
+export function VisibleLive({ big = false, plain = false, topLayer, flipH = false, flipV = false, adjust }: { big?: boolean; plain?: boolean; topLayer?: ReactNode; flipH?: boolean; flipV?: boolean; adjust?: VisibleAdjust }) {
+  const f = adjustFilter(adjust);
+  const flip = { ...(flipH || flipV ? { transform: `scale(${flipH ? -1 : 1}, ${flipV ? -1 : 1})` } : {}), ...f.style };
   const img = useRef<HTMLImageElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const layerBox = useMediaBox(boxRef, img);
@@ -30,9 +34,10 @@ export function VisibleLive({ big = false, plain = false, topLayer, flipH = fals
     }, (e) => { if (e) setErr(e); });
     return () => { stop(); if (url) URL.revokeObjectURL(url); };
   }, []);
-  if (plain) return <img ref={img} alt="visible camera overlay" className="fill" style={flip} />;
+  if (plain) return <>{f.svg}<img ref={img} alt="visible camera overlay" className="fill" style={flip} /></>;
   return (
     <div className={`visible-box ${big ? "big" : ""}`} ref={boxRef}>
+      {f.svg}
       <img ref={img} alt="visible camera" style={flip} />
       <span className="tag">visible · {fps ? `${fps.toFixed(1)} fps` : "connecting…"} · ~1 s behind thermal</span>
       {topLayer && layerBox && <div className="top-layer" style={layerBox}>{topLayer}</div>}
@@ -59,13 +64,14 @@ function useMediaBox(box: React.RefObject<HTMLElement | null>, media: React.RefO
   return b;
 }
 
-interface VideoProps { name: string; t: number; playing: boolean; speed: number; vis?: VisibleInfo | null; measuredFps?: number | null; big?: boolean; plain?: boolean; topLayer?: ReactNode; flipH?: boolean; flipV?: boolean; }
+interface VideoProps { name: string; t: number; playing: boolean; speed: number; vis?: VisibleInfo | null; measuredFps?: number | null; big?: boolean; plain?: boolean; topLayer?: ReactNode; flipH?: boolean; flipV?: boolean; adjust?: VisibleAdjust; }
 
 /** Recorded visible video kept in step with the thermal cursor (host-clock alignment, not frame-exact).
  *  A stream loss splits the recording into segments (visible.mp4, visible_001.mp4, …); the cursor
  *  picks the segment and time inside a gap shows nothing. */
-export function VisibleVideo({ name, t, playing, speed, vis, measuredFps, big = false, plain = false, topLayer, flipH = false, flipV = false }: VideoProps) {
-  const flip = flipH || flipV ? { transform: `scale(${flipH ? -1 : 1}, ${flipV ? -1 : 1})` } : undefined;
+export function VisibleVideo({ name, t, playing, speed, vis, measuredFps, big = false, plain = false, topLayer, flipH = false, flipV = false, adjust }: VideoProps) {
+  const f = adjustFilter(adjust);
+  const flip = { ...(flipH || flipV ? { transform: `scale(${flipH ? -1 : 1}, ${flipV ? -1 : 1})` } : {}), ...f.style };
   const video = useRef<HTMLVideoElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const layerBox = useMediaBox(boxRef, video);
@@ -89,10 +95,11 @@ export function VisibleVideo({ name, t, playing, speed, vis, measuredFps, big = 
   }, [local, index, playing, speed]);
   const src = index === 0 ? api.visibleVideoUrl(name) : api.visibleSegmentUrl(name, index);
   const hidden = local === null ? { ...flip, visibility: "hidden" as const } : flip;
-  if (plain) return <video key={index} ref={video} src={src} muted playsInline preload="auto" className="fill" style={hidden} />;
+  if (plain) return <>{f.svg}<video key={index} ref={video} src={src} muted playsInline preload="auto" className="fill" style={hidden} /></>;
   const nSeg = vis?.segments?.length ?? 1;
   return (
     <div className={`visible-box ${big ? "big" : ""}`} ref={boxRef}>
+      {f.svg}
       <video key={index} ref={video} src={src} muted playsInline preload="auto" style={hidden} />
       <span className="tag">{local === null ? "visible stream lost here (gap)" : `recorded visible${nSeg > 1 ? ` · segment ${index + 1}/${nSeg}` : ""}${measuredFps ? ` · ${measuredFps.toFixed(1)} fps` : ""} · host-clock aligned`}</span>
       {topLayer && layerBox && <div className="top-layer" style={layerBox}>{topLayer}</div>}
@@ -102,20 +109,10 @@ export function VisibleVideo({ name, t, playing, speed, vis, measuredFps, big = 
 
 interface Placement { visibleMode: VisibleMode; overlay: Overlay; dispatch: (a: LayoutAction) => void; aligned?: boolean; }
 type PanelProps = Placement & (
-  | { mode: "live"; available: boolean; reason?: string }
-  | { mode: "playback"; name: string; hasVideo: boolean; t: number; playing: boolean; speed: number; vis?: VisibleInfo | null; measuredFps?: number | null });
-
-function Slider({ label, value, min, max, step, unit, onChange }: { label: string; value: number; min: number; max: number; step: number; unit?: string; onChange: (v: number) => void }) {
-  return (
-    <label style={{ display: "contents" }}>
-      <span>{label}</span>
-      <span className="v plain" style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "flex-end" }}>
-        <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} style={{ width: 110 }} aria-label={label} />
-        <span style={{ minWidth: 44, textAlign: "right" }}>{value.toFixed(step < 1 ? 2 : 0)}{unit ?? ""}</span>
-      </span>
-    </label>
-  );
-}
+  /** `adjust`: the live adjustment (layout); slider moves dispatch `setVisibleAdjust`. */
+  | { mode: "live"; available: boolean; reason?: string; adjust: VisibleAdjust }
+  /** `adjust`: the run's adjustment (useRunVisibleAdjust); `rangeNote`: warning when the shown video is not range-corrected. */
+  | { mode: "playback"; name: string; hasVideo: boolean; t: number; playing: boolean; speed: number; vis?: VisibleInfo | null; measuredFps?: number | null; adjust: RunAdjust; rangeNote?: string | null });
 
 /** Rail section body: placement (rail / side by side / overlay), overlay registration sliders, in-rail view. */
 export function VisiblePanel(p: PanelProps) {
@@ -155,13 +152,16 @@ export function VisiblePanel(p: PanelProps) {
       <>
         {placement}
         {registration}
+        <VisibleAdjustControls value={p.adjust} onChange={(adjust) => p.dispatch({ type: "setVisibleAdjust", adjust })}
+          onReset={() => p.dispatch({ type: "setVisibleAdjust", adjust: NEUTRAL_ADJUST })} resetLabel="reset adjustment" resetDisabled={isNeutral(p.adjust)}
+          notes={<span className="hint">display only · stamped into the next recording</span>} />
         {mode === "rail" && (
           <div className="row">
             <button className={on ? "danger" : "secondary"} onClick={() => setOn(!on)}>{on ? "stop preview" : "show visible camera"}</button>
           </div>
         )}
         <div className="hint">RTSP /avc/ch1 → MJPEG 640 px; the camera limits it to ~8 fps while the thermal stream runs, about a second of encoder delay.</div>
-        {mode === "rail" && on && <VisibleLive />}
+        {mode === "rail" && on && <VisibleLive adjust={p.adjust} />}
       </>
     );
   }
@@ -170,7 +170,11 @@ export function VisiblePanel(p: PanelProps) {
     <>
       {placement}
       {registration}
-      {mode === "rail" && <VisibleVideo name={p.name} t={p.t} playing={p.playing} speed={p.speed} vis={p.vis} measuredFps={p.measuredFps} />}
+      <VisibleAdjustControls value={p.adjust.adjust} onChange={p.adjust.set} onReset={p.adjust.reset} resetLabel="reset to as-recorded"
+        resetDisabled={p.adjust.source !== "sidecar"}
+        notes={<span className="hint">{p.adjust.save.state === "saving" ? "saving…" : p.adjust.save.state === "error" ? <span style={{ color: "var(--err)" }}>not saved: {p.adjust.save.error}</span> : sourceNote(p.adjust.source)}</span>} />
+      {p.rangeNote && <div className="warnbox">{p.rangeNote}: near-white detail above level 235 shows as white.</div>}
+      {mode === "rail" && <VisibleVideo name={p.name} t={p.t} playing={p.playing} speed={p.speed} vis={p.vis} measuredFps={p.measuredFps} adjust={p.adjust.adjust} />}
     </>
   );
 }

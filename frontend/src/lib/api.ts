@@ -2,6 +2,8 @@ import { apiUrl, loadOperatorBase, saveOperatorBase } from "./operator.ts";
 import { mediaPreviewQuery, type MediaPreviewOptions } from "./mediaQuery.ts";
 import type { VisibleGap, VisibleSegment } from "./visibleSegments.ts";
 import type { VisibleSampleSummary } from "./visibleSample.ts";
+import type { VisibleAdjust } from "./visibleAdjust.ts";
+import type { AdjustSource, RecordStamp } from "./visibleAdjustUi.ts";
 
 /** Site mode: the UI is served from GitHub Pages and talks to a local operator (spec §6.3). */
 export const SITE_MODE = import.meta.env.VITE_SITE_MODE === "1";
@@ -113,7 +115,13 @@ export interface Experiment {
   last_seen_utc?: string | null;
 }
 
-export interface ExperimentInfo { name: string; path: string; n_frames: number; size_bytes?: number; width: number; height: number; duration_s: number; complete: boolean; ir_format: string | null; conversion: Record<string, unknown> | null; experiment: Record<string, unknown> | null; camera: Record<string, unknown> | null; software: Record<string, unknown> | null; started_utc: string | null; events?: Record<string, unknown>[]; manifest: Record<string, unknown> | null; visible?: { file?: string | null; measured_fps?: number | null; error?: string | null; segments?: VisibleSegment[] | null; gaps?: VisibleGap[] | null } | null; visible_timeline?: VisibleSegment[] | null; visible_alignment?: Record<string, unknown> | null; visible_sample?: VisibleSampleSummary | null; rois?: Record<string, unknown>[] | null; masks?: Record<string, unknown>[] | null; thermal_preview?: { path: string; bytes: number } | null; exports?: { name: string; bytes: number }[]; }
+export interface ExperimentInfo { name: string; path: string; n_frames: number; size_bytes?: number; width: number; height: number; duration_s: number; complete: boolean; ir_format: string | null; conversion: Record<string, unknown> | null; experiment: Record<string, unknown> | null; camera: Record<string, unknown> | null; software: Record<string, unknown> | null; started_utc: string | null; events?: Record<string, unknown>[]; manifest: Record<string, unknown> | null; visible?: { file?: string | null; measured_fps?: number | null; error?: string | null; segments?: VisibleSegment[] | null; gaps?: VisibleGap[] | null } | null; visible_timeline?: VisibleSegment[] | null; visible_alignment?: Record<string, unknown> | null; visible_sample?: VisibleSampleSummary | null; rois?: Record<string, unknown>[] | null; masks?: Record<string, unknown>[] | null; thermal_preview?: { path: string; bytes: number } | null; exports?: { name: string; bytes: number }[];
+  /** Predicted range of the served visible video ("full" whenever ffmpeg exists); the route's X-Visible-Range header is authoritative. */
+  visible_range?: "full" | "raw-untagged" | null;
+  /** Effective visible adjustment: sidecar, else the recorded stamp, else neutral. */
+  visible_adjust?: VisibleAdjust & { source: AdjustSource };
+  /** The block stamped into metadata.json at record time (unvalidated), or null. */
+  visible_adjust_recorded?: Record<string, unknown> | null; }
 export interface Timeline { t_s: number[]; frame_id: number[]; }
 export interface ExperimentEvent { t_s?: number; type?: string; name?: string; [k: string]: unknown; }
 export interface RoiSeries {
@@ -180,11 +188,11 @@ export const api = {
     if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
     return res.arrayBuffer();
   },
-  recordingStart: (name: string, metadata: Record<string, unknown>, visible = false, rois: unknown[] | null = null, nucHold = true, everyNth = 1, masks: unknown[] | null = null) =>
-    j<{ state: string; experiment_dir: string; visible?: VisibleStatus }>(req("/api/recording/start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, metadata, visible, rois, masks, nuc_hold: nucHold, every_nth: everyNth }) })),
+  recordingStart: (name: string, metadata: Record<string, unknown>, visible = false, rois: unknown[] | null = null, nucHold = true, everyNth = 1, masks: unknown[] | null = null, visibleAdjust: RecordStamp | null = null) =>
+    j<{ state: string; experiment_dir: string; visible?: VisibleStatus }>(req("/api/recording/start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, metadata, visible, rois, masks, nuc_hold: nucHold, every_nth: everyNth, ...(visibleAdjust ? { visible_adjust: visibleAdjust } : {}) }) })),
   recordingStop: () => j<Record<string, unknown>>(req("/api/recording/stop", { method: "POST" })),
-  recordingArm: (name: string, metadata: Record<string, unknown>, visible: boolean, rois: unknown[] | null, trigger: unknown, nucHold = true, masks: unknown[] | null = null) =>
-    j<{ state: string }>(req("/api/recording/arm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, metadata, visible, rois, masks, trigger, nuc_hold: nucHold }) })),
+  recordingArm: (name: string, metadata: Record<string, unknown>, visible: boolean, rois: unknown[] | null, trigger: unknown, nucHold = true, masks: unknown[] | null = null, visibleAdjust: RecordStamp | null = null) =>
+    j<{ state: string }>(req("/api/recording/arm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, metadata, visible, rois, masks, trigger, nuc_hold: nucHold, ...(visibleAdjust ? { visible_adjust: visibleAdjust } : {}) }) })),
   recordingDisarm: () => j<Record<string, unknown>>(req("/api/recording/disarm", { method: "POST" })),
   recordingArmStart: () => j<Record<string, unknown>>(req("/api/recording/arm/start", { method: "POST" })),
   recordingStatus: () => j<RecordingStatus>(req("/api/recording/status")),
@@ -197,6 +205,19 @@ export const api = {
   visibleVideoUrl: (name: string) => u(`/api/experiments/${encodeURIComponent(name)}/visible.mp4`),
   visibleSegmentUrl: (name: string, index: number) => u(`/api/experiments/${encodeURIComponent(name)}/visible/${index}`),
   visibleLiveUrl: () => u("/api/visible/live.mjpeg"),
+  /** The run's saved visible adjustment (sidecar). `library` omitted = the folder playback reads (local first). */
+  setVisibleAdjust: (name: string, a: VisibleAdjust, library?: "local" | "drive") =>
+    j<Record<string, unknown>>(req(`/api/experiments/${encodeURIComponent(name)}/visible-adjust`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ exposure_ev: a.exposure_ev, brightness: a.brightness, contrast: a.contrast, library }) })),
+  clearVisibleAdjust: (name: string, library?: "local" | "drive") =>
+    j<{ removed: boolean }>(req(`/api/experiments/${encodeURIComponent(name)}/visible-adjust${library ? `?library=${library}` : ""}`, { method: "DELETE" })),
+  /** The X-Visible-Range header of a visible video URL (reads the headers, then drops the body). */
+  visibleRangeHeader: async (url: string): Promise<string | null> => {
+    const ctl = new AbortController();
+    try {
+      const r = await fetch(url, { signal: ctl.signal });
+      return r.ok ? r.headers.get("X-Visible-Range") : null;
+    } finally { ctl.abort(); }
+  },
   getAlignment: () => j<Record<string, unknown>>(req("/api/calibration/visible")),
   putAlignment: (doc: Record<string, unknown>) =>
     j<Record<string, unknown>>(req("/api/calibration/visible", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(doc) })),
