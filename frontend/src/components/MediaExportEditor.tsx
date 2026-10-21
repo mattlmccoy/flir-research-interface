@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { NumberField } from "./NumberField.tsx";
-import { defaultMaxMbForFormat } from "../lib/mediaDefaults.ts";
+import { defaultMaxMbForFormat, mediaRoiSupported } from "../lib/mediaDefaults.ts";
 import { api, type MediaJob, type RangeJob } from "../lib/api.ts";
 import { markColor } from "../lib/events.ts";
 import { EventLegend } from "./EventLegend.tsx";
@@ -241,12 +241,14 @@ export function MediaExportEditor({ name, nFrames, index, tS, markers, rois, has
             {rois.map((r, i) => {
               const on = r.id in sel;
               const spot = r.kind === "spot";
+              const ok = mediaRoiSupported(r.kind);
               return (
                 <div key={r.id} className={`roi-row${on ? " on" : ""}`}>
-                  <label className="roi-name">
-                    <input type="checkbox" checked={on} onChange={() => toggleRoi(r.id)} />
+                  <label className="roi-name" title={ok ? undefined : "Smart ROIs aren't drawn or plotted in media exports yet"}>
+                    <input type="checkbox" checked={on} disabled={!ok} onChange={() => toggleRoi(r.id)} />
                     <span className="roi-dot" style={{ background: dotColor(r, i) }} />
                     {r.name ?? `ROI ${r.id}`}
+                    {!ok && <span className="hint"> (smart: not supported)</span>}
                   </label>
                   {on && !spot && (
                     <span className="roi-stats">

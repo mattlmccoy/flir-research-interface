@@ -222,3 +222,79 @@ def test_downloads_are_named_with_the_display_name(tmp_path: Path) -> None:
         cd = c.get(f"/api/experiments/{d.name}/export/series.csv", params={"rois": rois}).headers[
             "content-disposition"]
         assert f'filename="{label}_series.csv"' in cd
+
+
+def _smart_run(tmp_path: Path) -> tuple[ExperimentReader, list[dict[str, object]]]:
+    from smart_recording import make_smart_run
+
+    from flir_research_interface.analysis.smart_roi import parse_smart_roi
+    from flir_research_interface.analysis.smart_series import compute_smart_series
+
+    reader = ExperimentReader(make_smart_run(tmp_path, n=6))
+    compute_smart_series(reader, parse_smart_roi(reader.metadata["rois"][0]))
+    return reader, reader.metadata["rois"]
+
+
+def test_csv_includes_smart_columns_and_blanks_when_searching(tmp_path: Path) -> None:
+    reader, rois = _smart_run(tmp_path)
+    text = series_csv(reader, rois)
+    lines = text.splitlines()
+    comments = [ln for ln in lines if ln.startswith("#")]
+    assert any(
+        c.startswith("# smart ROI part: thermal edge (rule=relative, sensitivity=0.5")
+        and c.endswith("dimensions in pixels") for c in comments
+    ), comments
+    rows = list(csv.reader(ln for ln in lines if not ln.startswith("#")))
+    head = rows[0]
+    assert head[:2] == ["t_s", "frame_id"]
+    expect = ["part mean", "part max", "part min", "part state"]
+    for a, b in ((0, 5), (5, 10), (10, 25)):
+        expect += [f"part ring {a}-{b} px {s}" for s in ("mean", "max", "min")]
+    expect += [f"part {k}" for k in (
+        "area px", "length px", "width px", "perimeter px", "centroid x px",
+        "centroid y px", "sharpness C/px", "area change %")]
+    assert head[2:] == expect
+    assert len(rows) == 1 + 6
+    col = {n: i for i, n in enumerate(head)}
+    first, last = rows[1], rows[-1]
+    assert first[col["part state"]] == "searching"  # frame 0 is cold
+    assert all(first[i] == "" for n, i in col.items() if i > 3 and n != "part state")
+    assert last[col["part state"]] == "locked"
+    assert 140.0 < float(last[col["part mean"]]) <= 150.0  # edge pixels pull it under 150
+    assert float(last[col["part area px"]]) > 0
+
+
+def test_csv_smart_without_stored_series_is_blank_and_says_so(tmp_path: Path) -> None:
+    from smart_recording import make_smart_run
+
+    reader = ExperimentReader(make_smart_run(tmp_path, n=3))
+    text = series_csv(reader, reader.metadata["rois"])
+    assert any(
+        ln.startswith("# smart ROI part:") and "no stored series" in ln
+        for ln in text.splitlines()
+    )
+    rows = list(csv.reader(ln for ln in text.splitlines() if not ln.startswith("#")))
+    assert all(v == "" for v in rows[1][2:])
+
+
+def test_csv_smart_stale_series_is_blank_and_says_recompute(tmp_path: Path) -> None:
+    """A series computed for other rings must not be labelled with the ROI's current spec."""
+    reader, rois = _smart_run(tmp_path)
+    edited = [{**rois[0], "rings_px": [6, 12, 25]}]  # edited after the compute
+    text = series_csv(reader, edited)
+    assert any(
+        ln.startswith("# smart ROI part:")
+        and "[stored series computed for a different ROI spec: recompute]" in ln
+        for ln in text.splitlines()
+    ), text.splitlines()[:6]
+    rows = list(csv.reader(ln for ln in text.splitlines() if not ln.startswith("#")))
+    assert len(rows) == 1 + 6
+    assert all(v == "" for row in rows[1:] for v in row[2:])
+
+
+def test_run_summary_trace_skips_stale_smart_series(tmp_path: Path) -> None:
+    from flir_research_interface.analysis.smart_export import smart_plot_trace
+
+    reader, rois = _smart_run(tmp_path)
+    assert smart_plot_trace(reader, rois[0]) is not None
+    assert smart_plot_trace(reader, {**rois[0], "sensitivity": 0.6}) is None

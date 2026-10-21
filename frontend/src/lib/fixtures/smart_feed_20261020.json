@@ -1,0 +1,177 @@
+{
+ "locked": {
+  "live": true,
+  "frame_id": 105,
+  "frame_ts": "1970-01-01T00:00:05.165000+00:00",
+  "age_ms": 10.0,
+  "stale": false,
+  "rois": [
+   {
+    "id": 3,
+    "name": "graphite",
+    "kind": "smart",
+    "mean_c": 111.02618369144791,
+    "max_c": 147.3599853515625,
+    "min_c": 82.3699951171875,
+    "value_c": null,
+    "over_range": false,
+    "valid": true,
+    "state": "locked",
+    "rings": [
+     {
+      "inner_px": 0,
+      "outer_px": 5,
+      "mean_c": 68.87174864073057,
+      "max_c": 82.29998779296875,
+      "min_c": 51.160003662109375
+     },
+     {
+      "inner_px": 5,
+      "outer_px": 10,
+      "mean_c": 48.70758301206582,
+      "max_c": 64.19000244140625,
+      "min_c": 38.1300048828125
+     },
+     {
+      "inner_px": 10,
+      "outer_px": 25,
+      "mean_c": 33.111010709223656,
+      "max_c": 48.410003662109375,
+      "min_c": 26.739990234375
+     }
+    ],
+    "dims": {
+     "area_px": 1172,
+     "length_px": 42.833359860565864,
+     "width_px": 35.57047853065621,
+     "perimeter_px": 119,
+     "centroid_x": 60.439419795221845,
+     "centroid_y": 59.38737201365188,
+     "sharpness_c_per_px": 6.2037051498581075,
+     "units": "px",
+     "area_change_pct": 13.34622823984526,
+     "length_change_pct": 7.594127770921988,
+     "width_change_pct": -5.942272787118197
+    }
+   }
+  ],
+  "_frame": {
+   "index": 5,
+   "t_ms": 165
+  }
+ },
+ "holding": {
+  "live": true,
+  "frame_id": 106,
+  "frame_ts": "1970-01-01T00:00:05.198000+00:00",
+  "age_ms": 10.0,
+  "stale": false,
+  "rois": [
+   {
+    "id": 3,
+    "name": "graphite",
+    "kind": "smart",
+    "mean_c": 25.0,
+    "max_c": 25.0,
+    "min_c": 25.0,
+    "value_c": null,
+    "over_range": false,
+    "valid": true,
+    "state": "holding",
+    "rings": [
+     {
+      "inner_px": 0,
+      "outer_px": 5,
+      "mean_c": 25.0,
+      "max_c": 25.0,
+      "min_c": 25.0
+     },
+     {
+      "inner_px": 5,
+      "outer_px": 10,
+      "mean_c": 25.0,
+      "max_c": 25.0,
+      "min_c": 25.0
+     },
+     {
+      "inner_px": 10,
+      "outer_px": 25,
+      "mean_c": 25.0,
+      "max_c": 25.0,
+      "min_c": 25.0
+     }
+    ],
+    "dims": {
+     "area_px": 1172,
+     "length_px": 42.833359860565864,
+     "width_px": 35.57047853065621,
+     "perimeter_px": 119,
+     "centroid_x": 60.439419795221845,
+     "centroid_y": 59.38737201365188,
+     "sharpness_c_per_px": 0.0,
+     "units": "px",
+     "area_change_pct": 13.34622823984526,
+     "length_change_pct": 7.594127770921988,
+     "width_change_pct": -5.942272787118197
+    }
+   }
+  ],
+  "_frame": {
+   "index": 6,
+   "t_ms": 198
+  }
+ },
+ "searching": {
+  "live": true,
+  "frame_id": 136,
+  "frame_ts": "1970-01-01T00:00:06.188000+00:00",
+  "age_ms": 10.0,
+  "stale": false,
+  "rois": [
+   {
+    "id": 3,
+    "name": "graphite",
+    "kind": "smart",
+    "mean_c": null,
+    "max_c": null,
+    "min_c": null,
+    "value_c": null,
+    "over_range": false,
+    "valid": false,
+    "state": "searching",
+    "rings": [
+     {
+      "inner_px": 0,
+      "outer_px": 5,
+      "mean_c": null,
+      "max_c": null,
+      "min_c": null
+     },
+     {
+      "inner_px": 5,
+      "outer_px": 10,
+      "mean_c": null,
+      "max_c": null,
+      "min_c": null
+     },
+     {
+      "inner_px": 10,
+      "outer_px": 25,
+      "mean_c": null,
+      "max_c": null,
+      "min_c": null
+     }
+    ],
+    "dims": null
+   }
+  ],
+  "_frame": {
+   "index": 36,
+   "t_ms": 1188
+  }
+ },
+ "_capture": {
+  "source": "backend/tests/fixtures/smart_roi_20261020.npz via scripts/capture_smart_series_fixture.py --only feed (SmartLive + live_roi_payload)",
+  "hold_s": 1.0
+ }
+}

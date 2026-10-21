@@ -36,3 +36,15 @@ test("rfLinkWarning flags arming on RF while no RF link is engaged", () => {
   // not using RF -> no warning even when not engaged
   assert.equal(rfLinkWarning({ startKind: "threshold", endKind: "duration" }, notEngaged), null);
 });
+
+test("triggerRois excludes lines and smart ROIs; reconcileTriggerForm defaults to the first eligible and replaces stale ids", async () => {
+  const { triggerRois, reconcileTriggerForm, DEFAULT_TRIGGER_FORM } = await import("./trigger.ts");
+  const rois = [{ id: 1, kind: "smart" }, { id: 2, kind: "line" }, { id: 3, kind: "rect" }, { id: 4, kind: "circle" }];
+  const area = triggerRois(rois);
+  assert.deepEqual(area.map((r) => r.id), [3, 4]);
+  assert.equal(reconcileTriggerForm({ ...DEFAULT_TRIGGER_FORM, roi: null }, area).roi, 3);
+  assert.equal(reconcileTriggerForm({ ...DEFAULT_TRIGGER_FORM, roi: 1 }, area).roi, 3);
+  assert.equal(reconcileTriggerForm({ ...DEFAULT_TRIGGER_FORM, roi: 4, endRoi: 1 }, area).endRoi, null);
+  assert.equal(reconcileTriggerForm({ ...DEFAULT_TRIGGER_FORM, roi: 4, endRoi: 3 }, area).endRoi, 3);
+  assert.equal(reconcileTriggerForm({ ...DEFAULT_TRIGGER_FORM, roi: 4 }, []).roi, null);
+});

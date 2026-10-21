@@ -63,3 +63,17 @@ export function triggerSummary(t: TriggerSpec): string {
   parts.push(`cap ${t.max_seconds} s`);
   return parts.join(" · ");
 }
+
+/** ROIs a trigger may watch: lines have no area stats and the operator rejects smart ROIs (400). */
+export function triggerRois<T extends { id: number; kind: string }>(rois: T[]): T[] {
+  return rois.filter((r) => r.kind !== "line" && r.kind !== "smart");
+}
+
+/** The form with its ROI picks forced onto the eligible list: start ROI defaults to the first
+ *  eligible one (or null), a stale end ROI is cleared (it then follows the start ROI). */
+export function reconcileTriggerForm(f: TriggerForm, area: { id: number }[]): TriggerForm {
+  const ok = (id: number | null) => id !== null && area.some((r) => r.id === id);
+  const roi = ok(f.roi) ? f.roi : area[0]?.id ?? null;
+  const endRoi = ok(f.endRoi) ? f.endRoi : null;
+  return roi === f.roi && endRoi === f.endRoi ? f : { ...f, roi, endRoi };
+}

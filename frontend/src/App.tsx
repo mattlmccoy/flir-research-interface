@@ -39,13 +39,15 @@ import { StatusBar } from "./components/studio/StatusBar.tsx";
 import { LiveControlStrip } from "./components/LiveControlStrip.tsx";
 import { useControlStatus } from "./lib/useControlStatus.ts";
 import { LiveControl } from "./lib/liveControl.ts";
-import { evalRateAlarm, loadRateAlarm, saveRateAlarm, slopeOver, type RateAlarmState } from "./lib/rate.ts";
+import { evalRateAlarm, loadRateAlarm, normalizeRateCfg, rateRois, saveRateAlarm, slopeOver, type RateAlarmState } from "./lib/rate.ts";
 import { RatePanel } from "./components/RatePanel.tsx";
 import { MaskPanel } from "./components/MaskPanel.tsx";
 import { rfNotchStatus } from "./lib/rfNotch.ts";
 import { EMPTY_MASKS, hasMasks, loadMasks, maskPixels, maskedStats, masksAsRois, saveMasks, toolForMaskMode } from "./lib/mask.ts";
 import { initMaskHistory, maskHistoryReducer, type MaskHistoryAction } from "./lib/maskHistory.ts";
 import type { RoiAction } from "./lib/roi.ts";
+import { SMART_FEED_INTERVAL_MS, useSmartFeed } from "./lib/useSmartFeed.ts";
+import { smartChipFeed, smartLiveValue } from "./lib/smartFeed.ts";
 
 type Page = "live" | "setup" | "experiments" | "playback";
 const storage = (() => {
@@ -121,6 +123,8 @@ export function App() {
     const t = setTimeout(() => { api.putLiveRois(rois.rois).catch(() => {}); }, 400);
     return () => clearTimeout(t);
   }, [rois.rois, roiScope]);
+  // Smart ROI numbers come only from the operator: poll its live feed while a smart ROI is on screen.
+  const smartFeed = useSmartFeed(page === "live" && rois.rois.some((r) => r.kind === "smart"));
   // Region masks follow the ROI scopes (live / exp.<name>); they only pick the pixels behind the
   // colour auto-range and the frame stats. A run's stored masks are seeded by PlaybackPage.
   const [maskHist, maskDispatch] = useReducer(maskHistoryReducer, EMPTY_MASKS, () => initMaskHistory(loadMasks(storage, roiScope)));
@@ -195,9 +199,30 @@ export function App() {
   const maxBuffers = useRef(new Map<number, TraceBuffer>());
   const [rateCfg, setRateCfg] = useState(() => loadRateAlarm(storage));
   useEffect(() => { saveRateAlarm(storage, rateCfg); }, [rateCfg]);
+  // a watched ROI that is gone or not rate-eligible (a persisted smart id) becomes "any ROI" — on
+  // load and whenever the live ROI set changes. Only for the live scope (the alarm's ROIs): the ref
+  // is updated by the scope-switch effect before its load lands, so a run's playback ROIs never
+  // drop the live watch.
+  useEffect(() => {
+    if (roiScopeRef.current === "live") setRateCfg((c) => normalizeRateCfg(c, rois.rois));
+  }, [rois.rois]);
+  const rateEligible = useMemo(() => new Set(rateRois(rois.rois).map((r) => r.id)), [rois.rois]);
   const rateCfgRef = useRef(rateCfg);
   rateCfgRef.current = rateCfg;
   const [rates, setRates] = useState<Map<number, number | null>>(new Map());
+  // Smart ROI live traces: one point per operator feed poll (2 Hz), at the latest frame time; gaps
+  // (NaN) whenever the feed is not a valid reading. Not fed to the heating-rate alarm.
+  const smartBuffers = useRef(new Map<number, TraceBuffer>());
+  useEffect(() => {
+    if (!smartFeed || t0Ref.current === null) return;
+    const ids = new Set(rois.rois.filter((r) => r.kind === "smart").map((r) => r.id));
+    for (const id of Array.from(smartBuffers.current.keys())) if (!ids.has(id)) smartBuffers.current.delete(id);
+    for (const id of ids) {
+      let b = smartBuffers.current.get(id);
+      if (!b) { b = new TraceBuffer(MAX_TRACE_POINTS); smartBuffers.current.set(id, b); }
+      if (b.lastT !== nowTRef.current) b.push(nowTRef.current, smartLiveValue(smartFeed, id, Date.now(), SMART_FEED_INTERVAL_MS));
+    }
+  }, [smartFeed]);  // eslint-disable-line react-hooks/exhaustive-deps
   const onStats = useCallback((m: StatsMap, f: FrameMessage) => {
     if (t0Ref.current === null) t0Ref.current = f.header.device_timestamp_ns;
     const t = (f.header.device_timestamp_ns - t0Ref.current) / 1e9;
@@ -224,7 +249,7 @@ export function App() {
   const recordingRef = useRef(false);
   useEffect(() => {
     const prev = alarmRef.current;
-    const next = evalRateAlarm(rates, rateCfg, prev);
+    const next = evalRateAlarm(rates, rateCfg, prev, rateEligible);
     alarmRef.current = next;
     if (next.tripped && !prev.tripped) {
       setAlarmLatched(next);
@@ -280,6 +305,7 @@ export function App() {
     setFrame(null);
     buffers.current.clear();
     maxBuffers.current.clear();
+    smartBuffers.current.clear();
     liveCtl.current.clear();
     t0Ref.current = null;
     await refresh();
@@ -299,14 +325,16 @@ export function App() {
   const nowT = hdr && t0Ref.current !== null ? (hdr.device_timestamp_ns - t0Ref.current) / 1e9 : 0;
   const traces: Trace[] = rois.rois.flatMap((r, i) => {
     if (r.hidden) return []; // hidden on the image = hidden on the plot (still measured + recorded)
-    const b = buffers.current.get(r.id);
+    // smart ROIs plot the operator's sample mean (never a client-side measurement)
+    const b = (r.kind === "smart" ? smartBuffers : buffers).current.get(r.id);
     return [{ id: r.id, label: roiLabel(r), color: roiColor(r, i), t: b?.t ?? [], v: b?.v ?? [] }];
   });
   const withDelta = (() => {
     const d = layout.delta;
     if (!d) return traces;
     const a = traces.find((x) => x.id === d.a), b = traces.find((x) => x.id === d.b);
-    return a && b ? [...traces, deltaTrace(a, b)] : traces;
+    // live: pair samples at most two smart-feed polls apart (a smart trace is 2 Hz and may start late)
+    return a && b ? [...traces, deltaTrace(a, b, (2 * SMART_FEED_INTERVAL_MS) / 1000)] : traces;
   })();
 
   // PNG snapshot of the live view (thermal + overlays), same as the display-controls camera button.
@@ -380,7 +408,7 @@ export function App() {
         <div className={`center-split ${(layout.visibleMode === "side" || calibrating) && visibleAvailable ? "on" : ""}`}>
           <ThermalView frame={frame} palette={palette} scaleMode={scaleMode} manual={manual} onScale={setShown} setManual={setManual} setScaleMode={setScaleMode}
             rois={maskMode ? maskRois : rois.rois} statsRois={rois.rois} selected={maskMode ? masks.selected : rois.selected} selectedIds={maskMode ? masks.selectedIds : rois.selectedIds} tool={layout.tool} roisHidden={!maskMode && layout.roisHidden} labelScope={maskMode ? `${roiScope}.mask` : roiScope} zoom={layout.zoom} onRoi={maskMode ? maskEdit : roiDispatch} onStats={onStats} rad={rad} extremes={layout.extremes} isotherm={layout.isotherm} onField={setField} reference={reference} hold={layout.hold} flipH={layout.flipH} flipV={layout.flipV} agc={layout.agc} filter={layout.filter} units={layout.units} useDisplay={layout.rfNotch} valid={layout.segment.on ? { min: layout.segment.min, max: layout.segment.max } : null} mask={maskPx} maskShapes={masks.enabled || maskMode ? masks.shapes : []} maskMode={maskMode} onMask={maskDispatch}
-            overlay={layout.visibleMode === "overlay" && !calibrating && visibleAvailable ? <VisibleLive plain /> : undefined} overlayStyle={layout.overlay} overlayH={align.H}
+            overlay={layout.visibleMode === "overlay" && !calibrating && visibleAvailable ? <VisibleLive plain /> : undefined} overlayStyle={layout.overlay} overlayH={align.H} smartFeed={smartChipFeed(smartFeed, Date.now(), SMART_FEED_INTERVAL_MS)}
             topLayer={calibrating ? <PickLayer label="IR" flipH={layout.flipH} flipV={layout.flipV} color="var(--live)" points={align.pairs.map((p) => p.ir)} pending={align.pending?.ir} onPick={(p) => alignDispatch({ type: "pick", side: "ir", p })} /> : undefined} />
           {(layout.visibleMode === "side" || calibrating) && visibleAvailable && (
             <VisibleLive big flipH={layout.flipH} flipV={layout.flipV} topLayer={calibrating ? <PickLayer label="visible" flipH={layout.flipH} flipV={layout.flipV} color="var(--accent)" points={align.pairs.map((p) => p.visible)} pending={align.pending?.visible} onPick={(p) => alignDispatch({ type: "pick", side: "visible", p })} /> : undefined} />
@@ -414,7 +442,7 @@ export function App() {
             {hdr && hdr.kelvin_per_count === null && <div className="errbox">Stream is not temperature-linear; raw counts only.</div>}
             {nearLimit && <div className="warnbox">Max within 10 °C of the range limit ({active?.high_c} °C).</div>}
             <RoiRows rois={rois.rois} units={layout.units} conv={field?.conv ?? null} stats={liveStats} selected={rois.selected} selectedIds={rois.selectedIds} extremes={layout.extremes} onExtremes={(on) => dispatch({ type: "setExtremes", on })}
-              dispatch={roiDispatch} />
+              dispatch={roiDispatch} smartFeed={smartFeed} />
             <MaskPanel state={masks} dispatch={maskDispatch} maskMode={maskMode} onMaskMode={toggleMaskMode} usedPx={maskUsed} frame={field ? { w: field.w, h: field.h } : null} />
             <DeltaPicker rois={rois.rois} delta={layout.delta} onChange={(delta) => dispatch({ type: "setDelta", delta })} />
             <RatePanel rois={rois.rois} rates={rates} cfg={rateCfg} onCfg={setRateCfg} latched={alarmLatched} onAck={() => setAlarmLatched(null)} />

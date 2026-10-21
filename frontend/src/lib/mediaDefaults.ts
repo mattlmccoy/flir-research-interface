@@ -11,3 +11,9 @@ export function defaultMaxMbForFormat(fmt: "mp4" | "gif", currentMb: number): nu
   if (fmt === "gif") return currentMb === 0 ? GIF_DEFAULT_MB : currentMb;
   return currentMb === GIF_DEFAULT_MB ? 0 : currentMb;
 }
+
+/** Whether a stored ROI of this kind can be drawn/plotted in a media export. The backend's media
+ *  render skips smart ROIs (no per-frame outline/series path there yet). */
+export function mediaRoiSupported(kind: string | undefined): boolean {
+  return kind !== "smart";
+}

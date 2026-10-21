@@ -24,3 +24,13 @@ test("markForKey maps profile hotkeys to mark labels and ignores everything else
   assert.equal(markForKey("x", false, marks), null);
   assert.equal(markForKey("Enter", false, marks), null);
 });
+
+test("deltaTrace with maxGapS: an A sample with no B sample that close is a gap, never a stale pairing", () => {
+  const a = { id: 1, label: "A", color: "#fff", t: [0, 0.5, 1, 1.5, 2, 5], v: [10, 11, 12, 13, 14, 15] };
+  // a 2 Hz smart trace that starts late and then stops
+  const b = { id: 2, label: "B", color: "#000", t: [1, 1.5, 2], v: [1, 2, 3] };
+  const d = deltaTrace(a, b, 0.25);
+  assert.deepEqual(Array.from(d.v, (x) => (Number.isNaN(x) ? null : x)), [null, null, 11, 11, 11, null]);
+  assert.deepEqual(deltaTrace(a, b).v[0], 9, "no max gap: nearest sample as before (playback)");
+  assert.equal(deltaTrace(a, b, 0.5).v[1], 10, "the gap limit is inclusive");
+});

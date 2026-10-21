@@ -429,3 +429,15 @@ def test_gif_size_cap_downscales_to_fit(tmp_path: Path) -> None:
     assert small["bytes"] < big["bytes"], (small["bytes"], big["bytes"])
     assert small["bytes"] <= cap_mb * 1_000_000 * 1.3, small["bytes"]  # under the cap (± tolerance)
     assert small["width"] <= big["width"] and "downscaled" in (small["note"] or "")
+
+
+def test_plot_traces_and_preview_skip_a_smart_roi(tmp_path: Path) -> None:
+    """A smart ROI has no static pixels: media export must succeed without it, not raise."""
+    from smart_recording import make_smart_run
+
+    from flir_research_interface.analysis.media import MediaOptions, _plot_traces, compose_preview
+
+    r = ExperimentReader(make_smart_run(tmp_path, n=6))
+    assert _plot_traces(r, MediaOptions(start=0, stop=6, plot_rois=(7,))) == []
+    png = compose_preview(r, MediaOptions(start=0, stop=6, plot_rois=(7,)), 3)
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"

@@ -31,8 +31,13 @@ from pydantic import BaseModel, Field
 from flir_research_interface import __version__, storage
 from flir_research_interface import labels as labels_mod
 from flir_research_interface.acquisition.service import AcquisitionService, ServiceState
+from flir_research_interface.acquisition.smart_live import SmartLive
 from flir_research_interface.api.frames import encode_frame_message
 from flir_research_interface.api.reveal import Runner, contained, reveal
+from flir_research_interface.api.smart_roi_routes import (
+    compute_stored_smart_rois,
+    register_smart_roi_routes,
+)
 from flir_research_interface.camera import CAMERA_BACKENDS, create_backend
 from flir_research_interface.camera.base import CameraBackend, CameraError, DeviceDescriptor, Frame
 from flir_research_interface.camera.simulated import HotspotRampScene
@@ -310,6 +315,10 @@ def create_app(
         app.state.rf_link_last_event = None
         app.state.rf_link_pending = None  # RF metadata for the next arm-loop rf-triggered start
         app.state.live_rois = []  # server-side copy of the on-screen ROIs, for the control feed
+        app.state.smart_live = SmartLive()  # live smart ROI trackers (attached per camera session)
+        # ONE bound method for add and remove: remove_listener compares by identity, and each
+        # ``smart_live.on_frame`` access makes a new bound-method object
+        app.state.smart_listener = app.state.smart_live.on_frame
         app.state.control_last = None  # last control-telemetry the RF controller posted
         app.state.autoconnect_paused = False  # set by a user disconnect, cleared by a user connect
         # Auto-connect the real camera on startup and keep retrying while none is connected (best
@@ -326,7 +335,9 @@ def create_app(
         await _finalize_recording()
         svc: AcquisitionService | None = app.state.service
         if svc is not None:
+            svc.remove_listener(app.state.smart_listener)
             await run_in_threadpool(svc.disconnect)
+            app.state.smart_live.clear()
 
     app = FastAPI(title="FLIR Research Interface", version=__version__, lifespan=lifespan)
     install_cross_origin_policy(app, site_origin=site_origin)
@@ -342,6 +353,10 @@ def create_app(
 
     def recorder() -> Recorder | None:
         return app.state.recorder  # type: ignore[no-any-return]
+
+    def _attach_smart(svc: AcquisitionService) -> None:
+        """Run the live smart ROI trackers on this session's frames (camera thread)."""
+        svc.add_listener(app.state.smart_listener)
 
     def _make_service(cam: CameraBackend) -> AcquisitionService:
         """Every operator-owned camera runs resiliently: it retries the first connect and, if the
@@ -364,6 +379,7 @@ def create_app(
             if app.state.service is not None or app.state.autoconnect_paused:
                 await run_in_threadpool(svc.disconnect)  # the user acted while we were connecting
                 return False
+            _attach_smart(svc)
             svc.start()
             app.state.service = svc
             app.state.backend_name = autoconnect_backend
@@ -405,6 +421,15 @@ def create_app(
         out_dir.mkdir(exist_ok=True)
         (out_dir / "roi_series.csv").write_text(series_csv(reader, rois))
         logger.info("wrote %s", out_dir / "roi_series.csv")
+
+    def _compute_smart_rois(exp_dir: Path) -> None:
+        """Full-rate smart ROI series for every smart ROI stored with the recording."""
+        compute_stored_smart_rois(app, exp_dir)
+
+    def _refresh_smart_rois(exp_dir: Path) -> list[str]:
+        """Regenerate: compute only the smart series that is missing or stale (ROI edited).
+        Returns the failed computes (one line each)."""
+        return compute_stored_smart_rois(app, exp_dir, only_missing_or_stale=True)
 
     def _write_run_summary(exp_dir: Path) -> None:
         """README.txt + exports/roi_plot.png + peak_frame(.png|_rois.png), derived, regenerable."""
@@ -459,6 +484,8 @@ def create_app(
         async def _job() -> None:
             async with app.state.render_locks.get(exp_dir.name):
                 for step, fn in (
+                    # smart series first: the ROI CSV and run summary read them (Task 6)
+                    ("smart ROI series", _compute_smart_rois),
                     ("automatic ROI series export", _export_roi_series),
                     ("run summary", _write_run_summary),
                     ("visible sample analysis", _analyse_visible_sample),
@@ -675,6 +702,7 @@ def create_app(
                 raise HTTPException(404, f"no camera with serial {req.serial!r}")
             svc = _make_service(cam)
             await run_in_threadpool(svc.connect, chosen)
+            _attach_smart(svc)
             svc.start()
         except CameraError as exc:
             cam.disconnect()
@@ -696,7 +724,11 @@ def create_app(
         await _finalize_recording()  # never lose a recording because the operator disconnected
         if svc is None or service() is not svc:
             return {"state": ServiceState.DISCONNECTED.value}
+        svc.remove_listener(app.state.smart_listener)
         await run_in_threadpool(svc.disconnect)
+        # only now is the camera thread stopped: clearing earlier could let one more frame rebuild
+        # trackers and carry this session's hold timer / baseline into the next one
+        app.state.smart_live.clear()
         if service() is svc:
             app.state.service = None
             app.state.backend_name = None
@@ -890,6 +922,7 @@ def create_app(
         them, so the browser pushes them here for GET /api/live/roi-temps to use.
         """
         app.state.live_rois = _rois_with_labels(body.rois) if body.rois else []
+        app.state.smart_live.set_rois(app.state.live_rois)
         return {"count": len(app.state.live_rois)}
 
     @app.get("/api/live/roi-temps")
@@ -909,6 +942,7 @@ def create_app(
             frame_id=frame.frame_id if frame is not None else None,
             host_ts_ns=frame.host_timestamp_ns if frame is not None else None,
             now_ns=time.time_ns(),
+            smart=app.state.smart_live.latest(),
         )
 
     @app.post("/api/control/telemetry")
@@ -1179,6 +1213,9 @@ def create_app(
             rois = parse_rois(json.dumps(req.rois)) if req.rois else []
         except ValueError as exc:
             raise HTTPException(400, f"trigger: {exc}") from exc
+        smart_ids = {r["id"] for r in rois if r["kind"] == "smart"}
+        if {spec.start.roi, spec.end.roi} & smart_ids:  # spec §7a: no smart trigger ROIs
+            raise HTTPException(400, "trigger: a smart ROI cannot be the trigger ROI")
         _recording_extra(req)  # validate the rest now, not when the trigger fires
         # Ring sizing: the measured rate is unreliable right after connect, so never assume
         # fewer than 60 fps (A70 max is 30; 2 s at 60 fps of 640x480 uint16 is ~74 MB).
@@ -1337,6 +1374,8 @@ def create_app(
                 raise HTTPException(400, "experiment path is outside the experiments root")
             return d
         raise HTTPException(404, f"experiment {name!r} not found")
+
+    register_smart_roi_routes(app, _exp_dir)
 
     # -- external-drive storage (offload) ------------------------------------------------------
 
@@ -1619,8 +1658,12 @@ def create_app(
                                "exports": None, "error": None}
         app.state.derived_jobs[name] = job
 
-        def _work() -> None:
+        def _work() -> list[str]:
+            """Regenerate; returns the smart ROI series that failed to compute (the other
+            derived files are still written, with that ROI's columns blank)."""
             exp_dir = _exp_dir(name)
+            job["step"] = "smart roi series"
+            smart_failed = _refresh_smart_rois(exp_dir)
             job["step"] = "roi series"
             _export_roi_series(exp_dir)
             job["step"] = "images"
@@ -1638,6 +1681,7 @@ def create_app(
                     job["done"], job["total"] = done, total
 
                 render_thermal_video(reader, with_rois=True, on_progress=_cb)
+            return smart_failed
 
         async def _job() -> None:
             try:
@@ -1645,9 +1689,18 @@ def create_app(
                 if lock.locked():  # a post-stop render (or another regenerate) is finishing first
                     job["step"] = "waiting for the current render"
                 async with lock:
-                    await run_in_threadpool(_work)
-                job["step"] = "done"
+                    smart_failed = await run_in_threadpool(_work)
                 job["exports"] = experiment_info(name)["exports"]
+                if smart_failed:  # never "done" with a smart series missing
+                    job["step"] = "smart roi series failed"
+                    job["error"] = (
+                        "; ".join(smart_failed)
+                        + " (the other derived files were regenerated; that ROI's columns are"
+                        " blank)"
+                    )
+                    job["state"] = "error"
+                    return
+                job["step"] = "done"
                 job["state"] = "done"
             except Exception as exc:  # noqa: BLE001 - surface the failure to the poller
                 job["state"], job["error"] = "error", str(exc)
@@ -2110,12 +2163,14 @@ def create_app(
                 if wait > 0:
                     await asyncio.sleep(wait)
                 last_sent = time.monotonic()
+                smart = app.state.smart_live.overlays()  # outlines from the camera-thread trackers
+                extra = {"smart": smart} if smart else None
                 if notch:  # ~10-20 ms of FFT work: off the event loop
                     msg = await run_in_threadpool(
-                        encode_frame_message, frame, svc.stats(), rf_notch=True
+                        encode_frame_message, frame, svc.stats(), extra, rf_notch=True
                     )
                 else:
-                    msg = encode_frame_message(frame, svc.stats())
+                    msg = encode_frame_message(frame, svc.stats(), extra)
                 await ws.send_bytes(msg)
         except WebSocketDisconnect:
             return
