@@ -5,13 +5,16 @@ Synthetic Frame objects only; never PySpin.
 
 from __future__ import annotations
 
+import contextlib
 import threading
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
+from flir_research_interface.acquisition import smart_live as smart_live_mod
 from flir_research_interface.acquisition.smart_live import SmartLive
+from flir_research_interface.analysis.live_temps import live_roi_payload
 from flir_research_interface.analysis.smart_roi import HOLD_S
 from flir_research_interface.api.frames import decode_frame_message, encode_frame_message
 from flir_research_interface.camera.base import Frame
@@ -201,5 +204,35 @@ def test_api_feed_and_ws_carry_smart(tmp_path: Path) -> None:
             else:
                 raise AssertionError("no frame message")
         assert [o["id"] for o in hdr["smart"]] == [7]
+        svc = app.state.service
+        assert app.state.smart_listener in svc._listeners
         c.post("/api/camera/disconnect")
+        assert app.state.smart_listener not in svc._listeners  # really detached, not just cleared
         assert app.state.smart_live.latest() == {}
+
+
+def test_results_are_stamped_with_their_frame() -> None:
+    live = SmartLive()
+    live.set_rois([SMART])
+    live.on_frame(_frame(_blob_c(), 10.0))
+    assert live.latest()[7].frame_ts_ns == 10_000_000_000
+
+
+def test_failure_outside_per_roi_guard_does_not_leave_a_valid_feed(monkeypatch: Any) -> None:
+    live = SmartLive()
+    live.set_rois([SMART])
+    live.on_frame(_frame(_blob_c(), 10.0))
+    assert live.latest()[7].valid is True
+
+    def boom(_counts: Any) -> Any:
+        raise RuntimeError("over-range bug")
+
+    monkeypatch.setattr(smart_live_mod, "over_range_mask", boom)
+    f2 = _frame(_blob_c(), 10.1, 2)
+    with contextlib.suppress(RuntimeError):  # the service swallows listener errors
+        live.on_frame(f2)
+    p = live_roi_payload(counts=f2.counts, ir_format=IRFMT, rois=[SMART], acquiring=True,
+                         frame_id=2, host_ts_ns=f2.host_timestamp_ns,
+                         now_ns=f2.host_timestamp_ns + 5_000_000, smart=live.latest())
+    (roi,) = p["rois"]
+    assert roi["valid"] is False and roi["mean_c"] is None

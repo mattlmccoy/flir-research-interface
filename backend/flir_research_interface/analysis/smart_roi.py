@@ -127,6 +127,9 @@ class SmartResult:
     dims: dict[str, Any] | None = None
     edge_level_c: float | None = None
     over_range: bool = False
+    # host timestamp (ns) of the frame this result measured; set by the live path so the feed can
+    # refuse a result left behind by a failed frame (None = unknown provenance)
+    frame_ts_ns: int | None = None
 
 
 def _no_stats() -> dict[str, float | None]:

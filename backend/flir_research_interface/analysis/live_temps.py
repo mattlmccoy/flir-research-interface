@@ -22,6 +22,11 @@ if TYPE_CHECKING:
     from flir_research_interface.analysis.smart_roi import SmartResult
 
 STALE_MS = 1000.0  # a frame older than this (or no frame) is untrustworthy for control
+# A smart ROI result must come from the reported frame. The tracker runs as a camera-thread listener
+# *before* the frame is published, so a healthy result is stamped with the reported frame or a newer
+# one; lagging means the tracker failed on the frames since. Allow ~1.5 frame periods at 30 fps of
+# slack, then report the ROI invalid rather than an outline the controller cannot trust.
+SMART_LAG_MS = 50.0
 
 
 def _iso(ns: int) -> str:
@@ -40,12 +45,17 @@ def _invalid_roi(roi: dict[str, Any], *, over_range: bool = False) -> dict[str, 
     return out
 
 
-def _smart_entry(roi: dict[str, Any], result: SmartResult | None) -> dict[str, Any]:
+def _smart_entry(
+    roi: dict[str, Any], result: SmartResult | None, frame_ts_ns: int
+) -> dict[str, Any]:
     """A smart ROI's feed entry: today's flat keys plus ``state``, ``rings`` and ``dims``
     (spec §7a). Valid only when the tracker says so *and* it measured a sample temperature —
     holding stays valid (spec §7b) until the tracker's hold window lapses."""
     if result is None:  # no tracker result yet (new ROI, bad spec, no frame tracked)
         return _invalid_roi(roi)
+    stamp = result.frame_ts_ns
+    if stamp is None or (frame_ts_ns - stamp) / 1e6 > SMART_LAG_MS:
+        return _invalid_roi(roi)  # unknown or left behind by a failed frame: never healthy
     sample = result.sample or {}
     temps = {k: sample.get(k) for k in ("mean_c", "max_c", "min_c")}
     valid = bool(result.valid) and all(isinstance(v, float) for v in temps.values())
@@ -120,7 +130,8 @@ def live_roi_payload(
     for roi in rois:
         if roi.get("kind") == "smart":
             try:
-                out.append(_smart_entry(roi, (smart or {}).get(roi.get("id"))))  # type: ignore[arg-type]
+                result = (smart or {}).get(roi.get("id"))  # type: ignore[arg-type]
+                out.append(_smart_entry(roi, result, host_ts_ns))  # type: ignore[arg-type]
             except (KeyError, ValueError, TypeError, AttributeError):
                 out.append(_invalid_roi(roi))  # a malformed result only invalidates itself
             continue
@@ -157,4 +168,4 @@ def live_roi_payload(
     return payload
 
 
-__all__ = ["live_roi_payload", "STALE_MS"]
+__all__ = ["live_roi_payload", "SMART_LAG_MS", "STALE_MS"]

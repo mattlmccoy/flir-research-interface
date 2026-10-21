@@ -118,14 +118,17 @@ def _smart_result(state: str = "holding", valid: bool = True):  # type: ignore[n
     rings = [{"inner_px": a, "outer_px": b, "mean_c": 90.0 - a, "max_c": 95.0 - a,
               "min_c": 85.0 - a} for a, b in ((0, 5), (5, 10), (10, 25))]
     if not valid:
-        return SmartResult("searching", False, sample={"mean_c": None, "max_c": None,
-                                                        "min_c": None},
-                           rings=[{**g, "mean_c": None, "max_c": None, "min_c": None}
-                                  for g in rings])
-    return SmartResult(state, True, bbox=(10, 10, 20, 20),  # type: ignore[arg-type]
-                       labels=np.ones((10, 10), dtype=np.uint8),
-                       sample={"mean_c": 120.0, "max_c": 130.0, "min_c": 110.0}, rings=rings,
-                       dims={"area_px": 100, "units": "px"}, edge_level_c=70.0)
+        r = SmartResult("searching", False, sample={"mean_c": None, "max_c": None,
+                                                     "min_c": None},
+                        rings=[{**g, "mean_c": None, "max_c": None, "min_c": None}
+                               for g in rings])
+    else:
+        r = SmartResult(state, True, bbox=(10, 10, 20, 20),  # type: ignore[arg-type]
+                        labels=np.ones((10, 10), dtype=np.uint8),
+                        sample={"mean_c": 120.0, "max_c": 130.0, "min_c": 110.0}, rings=rings,
+                        dims={"area_px": 100, "units": "px"}, edge_level_c=70.0)
+    r.frame_ts_ns = 1_000_000_000  # tracked on the reported frame (see _live)
+    return r
 
 
 def _live(rois, smart):  # type: ignore[no-untyped-def]
@@ -182,3 +185,23 @@ def test_bad_smart_roi_only_invalidates_itself() -> None:
     assert by_id[10]["valid"] is True and abs(by_id[10]["mean_c"] - 25.0) < 0.05
     assert by_id[8]["valid"] is False and by_id[8]["name"] == "broken"
     assert by_id[9]["valid"] is False and by_id[9]["mean_c"] is None
+
+
+def test_feed_smart_unstamped_result_is_invalid() -> None:
+    # a result that cannot say which frame it measured is unknown, never healthy
+    r = _smart_result("locked")
+    r.frame_ts_ns = None
+    (roi,) = _live([SMART], {7: r})["rois"]
+    assert roi["valid"] is False and roi["mean_c"] is None
+
+
+def test_feed_smart_result_older_than_frame_is_invalid() -> None:
+    from flir_research_interface.analysis.live_temps import SMART_LAG_MS
+
+    r = _smart_result("locked")
+    r.frame_ts_ns = 1_000_000_000 - int((SMART_LAG_MS + 1) * 1e6)  # the tracker fell behind
+    (roi,) = _live([SMART], {7: r})["rois"]
+    assert roi["valid"] is False and roi["mean_c"] is None
+    r.frame_ts_ns = 1_000_000_000 - int((SMART_LAG_MS - 1) * 1e6)  # within one frame: still ok
+    (roi,) = _live([SMART], {7: r})["rois"]
+    assert roi["valid"] is True

@@ -312,6 +312,9 @@ def create_app(
         app.state.rf_link_pending = None  # RF metadata for the next arm-loop rf-triggered start
         app.state.live_rois = []  # server-side copy of the on-screen ROIs, for the control feed
         app.state.smart_live = SmartLive()  # live smart ROI trackers (attached per camera session)
+        # ONE bound method for add and remove: remove_listener compares by identity, and each
+        # ``smart_live.on_frame`` access makes a new bound-method object
+        app.state.smart_listener = app.state.smart_live.on_frame
         app.state.control_last = None  # last control-telemetry the RF controller posted
         app.state.autoconnect_paused = False  # set by a user disconnect, cleared by a user connect
         # Auto-connect the real camera on startup and keep retrying while none is connected (best
@@ -328,8 +331,9 @@ def create_app(
         await _finalize_recording()
         svc: AcquisitionService | None = app.state.service
         if svc is not None:
-            _detach_smart(svc)
+            svc.remove_listener(app.state.smart_listener)
             await run_in_threadpool(svc.disconnect)
+            app.state.smart_live.clear()
 
     app = FastAPI(title="FLIR Research Interface", version=__version__, lifespan=lifespan)
     install_cross_origin_policy(app, site_origin=site_origin)
@@ -348,11 +352,7 @@ def create_app(
 
     def _attach_smart(svc: AcquisitionService) -> None:
         """Run the live smart ROI trackers on this session's frames (camera thread)."""
-        svc.add_listener(app.state.smart_live.on_frame)
-
-    def _detach_smart(svc: AcquisitionService) -> None:
-        svc.remove_listener(app.state.smart_live.on_frame)
-        app.state.smart_live.clear()  # a new session starts from a fresh search
+        svc.add_listener(app.state.smart_listener)
 
     def _make_service(cam: CameraBackend) -> AcquisitionService:
         """Every operator-owned camera runs resiliently: it retries the first connect and, if the
@@ -692,8 +692,11 @@ def create_app(
         await _finalize_recording()  # never lose a recording because the operator disconnected
         if svc is None or service() is not svc:
             return {"state": ServiceState.DISCONNECTED.value}
-        _detach_smart(svc)
+        svc.remove_listener(app.state.smart_listener)
         await run_in_threadpool(svc.disconnect)
+        # only now is the camera thread stopped: clearing earlier could let one more frame rebuild
+        # trackers and carry this session's hold timer / baseline into the next one
+        app.state.smart_live.clear()
         if service() is svc:
             app.state.service = None
             app.state.backend_name = None

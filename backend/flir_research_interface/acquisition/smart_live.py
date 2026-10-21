@@ -119,7 +119,7 @@ class SmartLive:
             celsius = counts_to_celsius(frame.counts, IRFormat(frame.ir_format))
         except ValueError:  # not a TemperatureLinear stream: nothing trustworthy to track
             self._store({rid: (trackers.get(rid), _invalid(s)) for rid, s in specs.items()},
-                        specs, {})
+                        specs, {}, frame.host_timestamp_ns)
             return
         over = over_range_mask(frame.counts)
         t_s = frame.host_timestamp_ns / 1e9
@@ -145,7 +145,7 @@ class SmartLive:
                 logger.exception("live smart ROI %d: tracker failed on frame %s", rid,
                                  frame.frame_id)
                 out[rid] = (tr, _invalid(spec))
-        self._store(out, specs, built)
+        self._store(out, specs, built, frame.host_timestamp_ns)
 
     def _mark_broken(self, rid: int, spec: SmartRoiSpec) -> None:
         with self._lock:
@@ -157,10 +157,12 @@ class SmartLive:
         out: dict[int, tuple[SmartTracker | None, SmartResult]],
         specs: dict[int, SmartRoiSpec],
         built: dict[int, SmartTracker],
+        ts_ns: int,
     ) -> None:
         """Publish results, skipping any ROI whose spec changed while this frame was tracked."""
         with self._lock:
             for rid, (tr, res) in out.items():
+                res.frame_ts_ns = ts_ns  # provenance: the feed refuses results older than its frame
                 if self._specs.get(rid) is not specs[rid]:
                     continue  # set_rois replaced or removed it meanwhile: drop this frame's work
                 if rid in built:
