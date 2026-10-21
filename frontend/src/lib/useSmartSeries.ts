@@ -2,7 +2,7 @@
 // a ROI that has none or a stale one (POST …/compute, poll …/status). Pure logic: smartSeries.ts.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api.ts";
-import { SMART_POLL_MS, isNotFound, parseSmartSeries, smartPollStep, type SmartJob, type SmartPollEvent, type SmartPollState, type SmartSeriesState } from "./smartSeries.ts";
+import { SMART_POLL_MS, isNotFound, parseSmartSeries, seriesRecomputed, smartPollStep, type SmartJob, type SmartPollEvent, type SmartPollState, type SmartSeriesState } from "./smartSeries.ts";
 
 /** Points per stored series fetched for the plot and the playhead readout (the API strides down). */
 export const SMART_SERIES_POINTS = 4000;
@@ -10,7 +10,8 @@ export const SMART_SERIES_POINTS = 4000;
 export interface SmartSeriesHook {
   states: Map<number, SmartSeriesState>;
   jobs: Map<number, SmartJob>;
-  /** Bumped after a compute finishes (pass to useSmartPlaybackOverlays so outlines refresh). */
+  /** Bumped after a compute finishes, or when a reload shows a different stored compute (pass to
+   *  useSmartPlaybackOverlays so outlines refresh). */
   version: number;
   compute: (id: number) => void;
   reload: (id: number) => void;
@@ -23,6 +24,7 @@ export function useSmartSeries(name: string, ids: number[], beforeCompute: (id: 
   const [version, setVersion] = useState(0);
   const gen = useRef(0);  // bumped per run (and unmount): late responses of an old run are dropped
   const polling = useRef(new Set<number>());
+  const seen = useRef(new Map<number, string | null>());  // computed_utc last loaded per ROI (null = missing)
   const idsKey = ids.join(",");
 
   const setState = (id: number, st: SmartSeriesState) => setStates((m) => new Map(m).set(id, st));
@@ -36,7 +38,16 @@ export function useSmartSeries(name: string, ids: number[], beforeCompute: (id: 
         return s ? { kind: "ready", series: s } : { kind: "error", message: "the operator returned a malformed smart ROI series" };
       })
       .catch((e: unknown): SmartSeriesState => (isNotFound(e) ? { kind: "missing" } : { kind: "error", message: String(e) }))
-      .then((st) => { if (gen.current === g) setState(id, st); return st; });
+      .then((st) => {
+        if (gen.current !== g) return st;
+        setState(id, st);
+        if (st.kind === "ready" || st.kind === "missing") {
+          const utc = st.kind === "ready" ? st.series.computed_utc : null;
+          if (seriesRecomputed(seen.current.get(id), utc)) setVersion((v) => v + 1);
+          seen.current.set(id, utc);
+        }
+        return st;
+      });
   }, [name]);
 
   const poll = useCallback(async (id: number, g: number, start: SmartJob | null): Promise<void> => {
@@ -67,6 +78,7 @@ export function useSmartSeries(name: string, ids: number[], beforeCompute: (id: 
   useEffect(() => {
     const g = ++gen.current;
     polling.current = new Set();
+    seen.current = new Map();
     setStates(new Map()); setJobs(new Map());
     for (const id of ids) {
       // a series not there yet may be computing already (post-stop job, a regenerate): show it

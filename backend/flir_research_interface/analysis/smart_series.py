@@ -185,7 +185,8 @@ def _write(
 
 def load_smart_series(run_dir: Path, roi_id: int) -> dict[str, Any] | None:
     """The stored series for ``roi_id`` (arrays as written, ``labels`` decoded, plus ``spec``,
-    ``optics``, ``n_frames`` and ``rings_px`` from the sidecar), or ``None`` if not computed."""
+    ``optics``, ``n_frames``, ``computed_utc`` and ``rings_px`` from the sidecar), or ``None`` if
+    not computed."""
     path = series_path(run_dir, roi_id)
     if not path.is_file():
         return None
@@ -202,6 +203,7 @@ def load_smart_series(run_dir: Path, roi_id: int) -> dict[str, Any] | None:
     out["spec"] = side.get("spec")
     out["optics"] = side.get("optics", {})
     out["n_frames"] = side.get("n_frames", len(labels))
+    out["computed_utc"] = side.get("computed_utc")
     out["rings_px"] = list((side.get("spec") or {}).get("rings_px") or [])
     return out
 
@@ -212,7 +214,8 @@ def _clean(a: np.ndarray) -> list[float | None]:
 
 def series_payload(data: dict[str, Any], max_points: int) -> dict[str, Any]:
     """The plot payload: every ``stride``-th stored row so at most ``max_points`` remain.
-    Missing values are ``None`` (gaps); ``index`` gives each point's frame index."""
+    Missing values are ``None`` (gaps); ``index`` gives each point's frame index;
+    ``computed_utc`` says which compute produced it (None for a series without a sidecar)."""
     n = len(data["state"])
     stride = max(1, math.ceil(n / max(1, max_points)))
     idx = np.arange(0, n, stride)
@@ -237,6 +240,7 @@ def series_payload(data: dict[str, Any], max_points: int) -> dict[str, Any]:
         "sample": {s: _clean(data[f"sample_{s}"][idx]) for s in ("mean", "max", "min")},
         "rings": rings,
         "dims": dims,
+        "computed_utc": data.get("computed_utc"),
     }
 
 

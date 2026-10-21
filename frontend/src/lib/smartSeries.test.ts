@@ -229,3 +229,17 @@ test("critical: upsertStoredRoi throws on a non-array stored list instead of PUT
   assert.throws(() => upsertStoredRoi(null, r), /stored ROI list/);
   assert.throws(() => upsertStoredRoi({ rois: [] } as unknown as unknown[], r), /stored ROI list/);
 });
+
+test("parseSmartSeries keeps computed_utc (null when the operator sends none)", () => {
+  assert.equal(series().computed_utc, FIX.computed_utc);
+  assert.match(String(FIX.computed_utc), /^\d{4}-\d\d-\d\dT/);
+  assert.equal(parseSmartSeries({ ...FIX, computed_utc: undefined })?.computed_utc, null);
+});
+
+test("seriesRecomputed: a reload that shows a different compute drops cached outlines; the first load does not", async () => {
+  const { seriesRecomputed } = await import("./smartSeries.ts");
+  assert.equal(seriesRecomputed(undefined, "2026-10-21T10:00:00+00:00"), false, "first load");
+  assert.equal(seriesRecomputed("2026-10-21T10:00:00+00:00", "2026-10-21T10:00:00+00:00"), false, "same compute");
+  assert.equal(seriesRecomputed("2026-10-21T10:00:00+00:00", "2026-10-21T11:00:00+00:00"), true, "recomputed elsewhere");
+  assert.equal(seriesRecomputed(null, "2026-10-21T11:00:00+00:00"), true, "was missing, now computed");
+});

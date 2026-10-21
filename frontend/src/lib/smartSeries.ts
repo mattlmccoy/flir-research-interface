@@ -18,6 +18,8 @@ export interface SmartSeries {
   dims: Record<"area_px" | "length_px" | "width_px" | "perimeter_px" | "centroid_x" | "centroid_y" | "sharpness_c_per_px" | "area_change_pct" | "length_change_pct" | "width_change_pct", Col>;
   /** The run's ROI or frame count changed since the series was computed. */
   stale: boolean;
+  /** When the stored series was computed (sidecar computed_utc); null when unknown. */
+  computed_utc: string | null;
 }
 const DIM_KEYS = ["area_px", "length_px", "width_px", "perimeter_px", "centroid_x", "centroid_y", "sharpness_c_per_px", "area_change_pct", "length_change_pct", "width_change_pct"] as const;
 const STATES: readonly SmartState[] = ["searching", "locked", "holding"];
@@ -63,7 +65,14 @@ export function parseSmartSeries(raw: unknown): SmartSeries | null {
   return {
     index: raw.index.map(Number), t_s: raw.t_s.map(Number), state: raw.state as SmartState[],
     valid: raw.valid.map((v) => v === true), sample: { mean, max, min }, rings, dims, stale: raw.stale === true,
+    computed_utc: typeof raw.computed_utc === "string" ? raw.computed_utc : null,
   };
+}
+
+/** True when a (re)load shows a different stored compute than the one last seen for this ROI
+ *  (`seen` undefined = nothing seen yet, null = it was missing): cached outlines must be dropped. */
+export function seriesRecomputed(seen: string | null | undefined, utc: string | null): boolean {
+  return seen !== undefined && seen !== utc;
 }
 
 /** True only for the API's 404 (lib/api.ts j() throws `${status} ${detail}`): not computed yet. */

@@ -55,6 +55,18 @@ def test_api_compute_then_get(tmp_path: Path) -> None:
         assert c.get(f"/api/experiments/{name}/smart-roi/99").status_code == 404
 
 
+def test_series_payload_carries_computed_utc(tmp_path: Path) -> None:
+    """Playback drops its cached outlines when a reload shows a new computed_utc."""
+    import json as _json
+
+    name = make_smart_run(tmp_path, n=3).name
+    with _client(tmp_path) as c:
+        _compute(c, name)
+        side = _json.loads((tmp_path / name / "smart_roi" / "7.spec.json").read_text())
+        body = c.get(f"/api/experiments/{name}/smart-roi/7").json()
+        assert body["computed_utc"] == side["computed_utc"] and body["computed_utc"]
+
+
 def test_compute_refuses_non_smart_roi(tmp_path: Path) -> None:
     rois = [SMART, {"id": 2, "kind": "spot", "x": 5, "y": 5}]
     name = make_smart_run(tmp_path, n=2, rois=rois).name
