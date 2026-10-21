@@ -329,10 +329,9 @@ def test_runner_ok_synthetic_clip(
     side = max(out["bbox"]["w"], out["bbox"]["h"])
     assert _video_size(closeup) == (3 * side, 3 * side)
     assert out["files"] == [
-        "visible_sample.csv",
-        "visible_sample_closeup.mp4",
+        "visible_sample.csv", "visible_sample_closeup.mp4", "visible_sample_plot.png",
         "visible_sample.json",
-    ]
+    ]  # fmt: skip
     assert _exports(d) == sorted(out["files"])
     assert json.loads((d / "exports" / "visible_sample.json").read_text()) == out
 
@@ -402,7 +401,7 @@ def test_runner_without_closeup_or_bed(
     out = _run(d, closeup=False)
     assert out["status"] == "ok" and out["bed_roi"] is None
     assert all(r["bed_clipped_frac"] == "" for r in _rows(d))
-    assert out["files"] == ["visible_sample.csv", "visible_sample.json"]
+    assert out["files"] == ["visible_sample.csv", "visible_sample_plot.png", "visible_sample.json"]
     assert _exports(d) == sorted(out["files"])
 
 
@@ -431,11 +430,9 @@ def test_runner_multi_segment_times_use_each_segment_start(
     for g in out["segments"]:
         assert g["frames_analysed"] == sum(int(r["segment"]) == g["index"] for r in rows) > 0
     assert out["files"] == [
-        "visible_sample.csv",
-        "visible_sample_closeup.mp4",
-        "visible_sample_closeup_001.mp4",
-        "visible_sample.json",
-    ]
+        "visible_sample.csv", "visible_sample_closeup.mp4", "visible_sample_closeup_001.mp4",
+        "visible_sample_plot.png", "visible_sample.json",
+    ]  # fmt: skip
     assert _exports(d) == sorted(out["files"])
 
 

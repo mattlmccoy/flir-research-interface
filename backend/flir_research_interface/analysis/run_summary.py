@@ -26,6 +26,13 @@ from flir_research_interface.playback.reader import ExperimentReader
 PLOT_W, PLOT_H = 2400, 1000  # 2x: crisp at slide/paper size
 MARGIN_L, MARGIN_R, MARGIN_T, MARGIN_B = 140, 40, 60, 100
 DEFAULT_COLORS = ("#ffb000", "#4cc9f0", "#ff8ad8", "#7cff6b", "#ff6b6b", "#c8a2ff", "#ffffff")
+PLOT_FONT_SIZE = 26
+PLOT_BG = (16, 17, 20)
+TICK_RGB = (200, 200, 200)  # tick numbers and axis labels
+LABEL_RGB = (230, 230, 230)  # legend and mark labels
+FRAME_RGB = (120, 120, 120)  # the plot box
+GRID_H_RGBA = (255, 255, 255, 28)  # horizontal grid
+GRID_V_RGBA = (255, 255, 255, 18)  # vertical grid
 
 
 def _fmt(v: Any) -> str:
@@ -223,8 +230,8 @@ def roi_plot_png(reader: ExperimentReader, rois: list[dict[str, Any]]) -> bytes:
     """Traces of every ROI (value, or mean with min–max band) vs time, with operator marks."""
     series = roi_series(reader, rois)
     t = np.asarray(series["t_s"], dtype=float)
-    font = ImageFont.load_default(size=26)
-    img = Image.new("RGB", (PLOT_W, PLOT_H), (16, 17, 20))
+    font = ImageFont.load_default(size=PLOT_FONT_SIZE)
+    img = Image.new("RGB", (PLOT_W, PLOT_H), PLOT_BG)
     d = ImageDraw.Draw(img, "RGBA")
     x0, x1 = MARGIN_L, PLOT_W - MARGIN_R
     y0, y1 = MARGIN_T, PLOT_H - MARGIN_B
@@ -267,16 +274,16 @@ def roi_plot_png(reader: ExperimentReader, rois: list[dict[str, Any]]) -> bytes:
 
     for v in _nice_ticks(lo, hi):
         y = py(v)
-        d.line([(x0, y), (x1, y)], fill=(255, 255, 255, 28))
-        d.text((x0 - 16, y), f"{v:g}", fill=(200, 200, 200), font=font, anchor="rm")
+        d.line([(x0, y), (x1, y)], fill=GRID_H_RGBA)
+        d.text((x0 - 16, y), f"{v:g}", fill=TICK_RGB, font=font, anchor="rm")
     for tt in _nice_ticks(0, tmax, 8):
         x = px(tt)
-        d.line([(x, y0), (x, y1)], fill=(255, 255, 255, 18))
-        d.text((x, y1 + 12), f"{tt:g}", fill=(200, 200, 200), font=font, anchor="mt")
-    d.rectangle([x0, y0, x1, y1], outline=(120, 120, 120))
-    d.text((x0, y1 + 48), "time (s)", fill=(200, 200, 200), font=font)
+        d.line([(x, y0), (x, y1)], fill=GRID_V_RGBA)
+        d.text((x, y1 + 12), f"{tt:g}", fill=TICK_RGB, font=font, anchor="mt")
+    d.rectangle([x0, y0, x1, y1], outline=FRAME_RGB)
+    d.text((x0, y1 + 48), "time (s)", fill=TICK_RGB, font=font)
     units = "°C" if (reader.ir_format or "").startswith("TemperatureLinear") else "counts"
-    d.text((12, y0 - 44), units, fill=(200, 200, 200), font=font)
+    d.text((12, y0 - 44), units, fill=TICK_RGB, font=font)
     marks = plot_marks(reader)
     for idx, (_, label) in zip(mark_indices(series["frame_id"], marks), marks, strict=True):
         if idx is None or idx >= t.size:
@@ -286,7 +293,7 @@ def roi_plot_png(reader: ExperimentReader, rois: list[dict[str, Any]]) -> bytes:
         d.line(
             [(x, y0), (x, y1)], fill=(255, 200, 80, 150) if nuc else (255, 255, 255, 120), width=1
         )
-        d.text((x + 6, y0 + 4), label, fill=(255, 210, 120) if nuc else (230, 230, 230), font=font)
+        d.text((x + 6, y0 + 4), label, fill=(255, 210, 120) if nuc else LABEL_RGB, font=font)
     for i, (r, main, mn, mx) in enumerate(traces):
         col = r.get("color") or DEFAULT_COLORS[i % len(DEFAULT_COLORS)]
         rgb = tuple(int(col.lstrip("#")[j : j + 2], 16) for j in (0, 2, 4))
@@ -311,7 +318,7 @@ def roi_plot_png(reader: ExperimentReader, rois: list[dict[str, Any]]) -> bytes:
         label = r.get("name") or f"{r['kind']} {r['id']}"
         lx = x0 + 20 + i * 320
         d.rectangle([lx, 16, lx + 24, 40], fill=(*rgb, 255))
-        d.text((lx + 36, 14), label[:20], fill=(230, 230, 230), font=font)
+        d.text((lx + 36, 14), label[:20], fill=LABEL_RGB, font=font)
     buf = io.BytesIO()
     img.save(buf, format="PNG", optimize=True)
     return buf.getvalue()

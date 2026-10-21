@@ -3,9 +3,11 @@
 Reads each visible segment with ffmpeg (a luma crop around the sample and, when there is one, the
 bed), measures every frame after the start-up skip with :mod:`.visible_sample`, and writes to the
 run's ``exports/``: ``visible_sample.json`` always, and when the video could be analysed also
-``visible_sample.csv`` and one contrast-stretched close-up video per segment. The JSON says what
-happened (``ok``, ``skipped`` or ``failed``, with a reason); a run that was not analysed never
-leaves results of an earlier analysis beside it. Nothing here touches the recording itself.
+``visible_sample.csv``, one contrast-stretched close-up video per segment and the timeline plot
+``visible_sample_plot.png``. The JSON says what happened (``ok``, ``skipped`` or ``failed``, with a
+reason); a run that was not analysed never leaves results of an earlier analysis beside it. The plot
+is derived from the rest: if only it cannot be drawn the run stays ``ok``, without the plot, and
+the JSON's ``plot_error`` says why. Nothing here touches the recording itself.
 """
 
 from __future__ import annotations
@@ -38,6 +40,7 @@ from flir_research_interface.analysis.visible_sample import (
     region_mask,
     roi_outline_ir,
 )
+from flir_research_interface.analysis.visible_sample_plot import visible_sample_plot_png
 from flir_research_interface.playback.reader import ExperimentReader
 from flir_research_interface.playback.visible_timing import FRAME0_SKIP_S, thermal_segments
 from flir_research_interface.visible.recorder import FFMPEG_CANDIDATES
@@ -528,6 +531,7 @@ def _summary(
         "missing": plan.missing,
         "events": events,
         "stretch": {"lo": lo, "hi": STRETCH_HI},
+        "plot_error": None,
         "files": [],
     }
 
@@ -545,6 +549,19 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         writer = csv.writer(fh)
         writer.writerow(CSV_COLUMNS)
         writer.writerows([_cell(r[c]) for c in CSV_COLUMNS] for r in rows)
+
+
+def _plot_png(
+    reader: ExperimentReader, rows: list[dict[str, Any]], summary: dict[str, Any]
+) -> bytes | None:
+    """The timeline plot, or ``None`` when it could not be drawn: the reason is then put in
+    ``summary["plot_error"]`` (the plot is derived, so losing it must not lose the analysis)."""
+    try:
+        return visible_sample_plot_png(reader, rows, summary)
+    except Exception as exc:  # noqa: BLE001 - recorded in the summary, not raised
+        logger.exception("visible sample plot failed")
+        summary["plot_error"] = f"{type(exc).__name__}: {exc}"
+        return None
 
 
 def _write_json(path: Path, summary: dict[str, Any]) -> None:
@@ -639,7 +656,9 @@ def analyse_visible_sample(
                 name = _closeup_name(seg.index)
                 _encode_closeup(plan.ffmpeg, seg.path, staged.part(name), crop, lo)
                 files.append(name)
-        # The timeline plot goes here: write staged.part(PLOT_NAME) and add PLOT_NAME to files.
+        if (png := _plot_png(reader, rows, summary)) is not None:
+            staged.part(PLOT_NAME).write_bytes(png)
+            files.append(PLOT_NAME)
         summary["files"] = [*files, JSON_NAME]
         _write_json(staged.part(JSON_NAME), summary)
         staged.commit()
