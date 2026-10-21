@@ -16,6 +16,7 @@ from typing import Any
 
 import numpy as np
 
+from flir_research_interface.analysis.smart_roi import parse_smart_roi
 from flir_research_interface.playback.reader import ExperimentReader
 from flir_research_interface.radiometry.emissivity import Radiometry, recorrect_celsius
 from flir_research_interface.radiometry.temperature_linear import IRFormat, counts_to_celsius
@@ -99,6 +100,21 @@ def parse_rois(raw: str) -> list[dict[str, Any]]:
                     raise ValueError("polygon points must be [x, y] pairs")
                 points.append([_int(p[0], "x"), _int(p[1], "y")])
             out.append({"id": rid, "kind": "polygon", "points": points})
+        elif kind == "smart":
+            sp = parse_smart_roi(it)
+            out.append(
+                {
+                    "id": sp.id,
+                    "kind": "smart",
+                    "name": sp.name,
+                    "search": [list(p) for p in sp.search],
+                    "rings_px": list(sp.rings_px),
+                    "rule": sp.rule,
+                    "fixed_c": sp.fixed_c,
+                    "sensitivity": sp.sensitivity,
+                    "ring_emissivity": sp.ring_emissivity,
+                }
+            )
         else:
             raise ValueError(f"unknown roi kind {kind!r}")
         _optical(it, out[-1])
@@ -234,6 +250,8 @@ def roi_index(roi: dict[str, Any], w: int, h: int) -> tuple[np.ndarray, np.ndarr
     end-exclusive, frame-clipped box as the recorded series (``[y0:y1, x0:x1]``). Unknown kinds
     raise ``ValueError`` rather than being guessed as polygons."""
     kind = roi["kind"]
+    if kind == "smart":
+        raise ValueError("smart ROIs have no static pixels")
     if kind not in ("rect", "spot", "polyline", "ellipse", "circle", "line", "polygon"):
         raise ValueError(f"unknown ROI kind {kind!r}")
     pts: list[tuple[int, int]]
