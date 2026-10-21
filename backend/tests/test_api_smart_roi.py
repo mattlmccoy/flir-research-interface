@@ -94,6 +94,20 @@ def test_compute_bad_stored_spec_is_400_not_500(
         assert r.status_code == 400 and "smart ROI 7" in r.json()["detail"]
 
 
+def test_compute_huge_int_spec_is_400_not_500(tmp_path: Path) -> None:
+    name = make_smart_run(tmp_path, n=2).name
+    with TestClient(
+        create_app(default_backend="simulated", experiments_root=tmp_path, min_free_gb=0.0),
+        raise_server_exceptions=False,
+    ) as c:
+        huge = {**SMART, "sensitivity": 10**400}
+        from flir_research_interface.recording.metadata import set_experiment_rois
+
+        set_experiment_rois(tmp_path / name, [huge])  # stored as-is, bypassing the PUT checks
+        r = c.post(f"/api/experiments/{name}/smart-roi/7/compute")
+        assert r.status_code == 400, r.text
+
+
 def test_overlay_window(tmp_path: Path) -> None:
     name = make_smart_run(tmp_path, n=8).name
     with _client(tmp_path) as c:

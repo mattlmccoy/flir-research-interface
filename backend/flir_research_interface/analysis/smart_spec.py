@@ -26,16 +26,30 @@ class SmartRoiSpec:
     ring_emissivity: float | None = None
 
 
+def _float(v: Any) -> float | None:
+    """``v`` as a finite float, or None (not a number, a bool, NaN/inf, or an int too large for a
+    float: JSON ints are unbounded, and that must be a ValueError, never an OverflowError)."""
+    if isinstance(v, bool) or not isinstance(v, int | float):
+        return None
+    try:
+        f = float(v)
+    except OverflowError:
+        return None
+    return f if math.isfinite(f) else None
+
+
 def _int(v: Any, name: str) -> int:
-    if isinstance(v, bool) or not isinstance(v, int | float) or not float(v).is_integer():
+    f = _float(v)
+    if f is None or not f.is_integer():
         raise ValueError(f"{name} must be an integer")
     return int(v)
 
 
 def _number(v: Any, name: str) -> float:
-    if isinstance(v, bool) or not isinstance(v, int | float) or not math.isfinite(v):
+    f = _float(v)
+    if f is None:
         raise ValueError(f"{name} must be a finite number")
-    return float(v)
+    return f
 
 
 def parse_smart_roi(raw: dict[str, Any]) -> SmartRoiSpec:

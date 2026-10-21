@@ -66,6 +66,11 @@ def test_parse_smart_full() -> None:
         {"rule": "fixed", "fixed_c": float("inf")},
         {"fixed_c": float("-inf")},
         {"ring_emissivity": float("nan")},
+        {"id": 10**400},  # JSON ints are unbounded: never an OverflowError
+        {"rings_px": [10**400]},
+        {"sensitivity": 10**400},
+        {"rule": "fixed", "fixed_c": 10**400},
+        {"search": [[10**400, 0], [5, 0], [5, 5]]},
     ],
 )
 def test_parse_smart_rejects(bad: dict[str, Any]) -> None:
