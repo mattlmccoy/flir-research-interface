@@ -197,17 +197,17 @@
 **Interfaces:**
 - Produces:
   - `interface VisibleSampleEvent { t_start_s: number; t_peak_s: number; t_end_s: number; peak_brightening: number; n_frames: number; peak_frame: number; }`
-  - `interface VisibleSampleSummary { status: "ok" | "skipped" | "failed"; reason: string | null; coverage?: { frames_analysed: number; t_first_s: number; t_last_s: number; gaps_over_300ms: number }; events?: VisibleSampleEvent[]; }`
+  - `interface VisibleSampleSummary { status: "ok" | "skipped" | "failed"; reason: string | null; coverage?: { frames_analysed: number; t_first_s: number; t_last_s: number; gaps_over_300ms: number }; events?: VisibleSampleEvent[]; missing?: string[]; plot_error?: string | null; }`
   - `ExperimentInfo.visible_sample?: VisibleSampleSummary | null`
   - `visibleFlashMarkers(vs: VisibleSampleSummary | null | undefined): Marker[]`: one marker per event at `t_peak_s`, labelled `visible flash +<peak>`.
   - `visibleSampleStatusText(vs: VisibleSampleSummary | null | undefined): string | null`. Exact copy:
-    - ok → `Visible sample: <n> flash(es) at the sample, <t_first>–<t_last> s analysed (<gaps> gaps > 0.3 s)`; n = 0 reads `0 flashes`;
+    - ok → `Visible sample: <n> flash(es) at the sample, <t_first>–<t_last> s analysed (<gaps> gaps > 0.3 s)`; n = 0 reads `0 flashes`; when `missing` is non-empty append `; missing video: <files joined by ", ">`; when `plot_error` is non-null append `; plot not drawn (<plot_error>)` (ruling R13: an ok run whose PNG was omitted must not read as fully successful);
     - skipped → `Visible sample: not analysed (<reason>)`;
     - failed → `Visible sample: analysis failed (<reason>)`;
     - absent → null.
   - `MARKER_CATS` gains `{ label: "visible flash", color: "var(--trace-5)", match: (l) => l.includes("VISIBLE FLASH") }`, placed before the gap entry.
 
-- [ ] **Step 1: Write failing tests** in `visibleSample.test.ts`: markers from the real run's 3 events (t 554.06/615.66/627.77, labels `visible flash +20`, `+19`, `+97`); `[]` for skipped or absent input; `statusText` for ok with 3 events, ok with zero events (`0 flashes`), skipped, failed and null; `markColor("visible flash +97")` = `var(--trace-5)`.
+- [ ] **Step 1: Write failing tests** in `visibleSample.test.ts`: `statusText` for ok with a non-null `plot_error` contains `plot not drawn (`, and ok with `missing: ["visible_001.mp4"]` contains `missing video: visible_001.mp4`; markers from the real run's 3 events (t 554.06/615.66/627.77, labels `visible flash +20`, `+19`, `+97`); `[]` for skipped or absent input; `statusText` for ok with 3 events, ok with zero events (`0 flashes`), skipped, failed and null; `markColor("visible flash +97")` = `var(--trace-5)`.
 - [ ] **Step 2: Run** `cd frontend && npm test`. Expected: FAIL (cannot find module `./visibleSample.ts`).
 - [ ] **Step 3: Implement**, and merge the markers in `PlaybackPage` (`[...eventsToMarkers(...), ...visibleFlashMarkers(info?.visible_sample)]`, sorted by t). Show `visibleSampleStatusText` in the ExportSection's exports block when non-null.
 - [ ] **Step 4: Run** `npm test` and `npx tsc --noEmit`. Expected: PASS, no type errors. **Browser gate** (not unit-testable): open playback of `20261020_144402_Run` in the dev preview. Confirm three marks in the `--trace-5` colour near 554, 616 and 628 s; ▶◆ jumps to them; the legend shows "visible flash"; the exports block shows `Visible sample: 3 flashes …`. Screenshot it.
