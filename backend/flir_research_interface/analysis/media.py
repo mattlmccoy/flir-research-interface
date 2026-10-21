@@ -535,8 +535,12 @@ def _visible_source(reader: ExperimentReader, opts: MediaOptions, ffmpeg: str,
     """A VisibleSource covering [t0, t1] when the visible overlay is requested, else None."""
     if opts.visible_opacity <= 0:
         return None
+    from flir_research_interface.analysis.visible_adjust import is_neutral
     from flir_research_interface.analysis.visible_overlay import VisibleSource
-    return VisibleSource(reader, ffmpeg, t0, t1, out_w, out_h)
+    from flir_research_interface.visible_adjust_store import effective_adjust
+    adjust, _source = effective_adjust(reader.path, reader.metadata)
+    return VisibleSource(reader, ffmpeg, t0, t1, out_w, out_h,
+                         adjust=None if is_neutral(adjust) else adjust)
 
 
 def _compose(reader: ExperimentReader, idx: int, vmin: float, vmax: float, scale: int,

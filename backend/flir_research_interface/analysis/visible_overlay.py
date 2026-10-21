@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import subprocess
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
 from types import TracebackType
 from typing import Any
@@ -20,6 +21,7 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
+from flir_research_interface.analysis.visible_adjust import apply_adjust
 from flir_research_interface.playback.visible_timing import FRAME0_SKIP_S, thermal_segments
 
 logger = logging.getLogger(__name__)
@@ -80,10 +82,15 @@ class VisibleSource:
 
     ``out_w``/``out_h`` are the IR *body* size in the export (native × scale). Use as a context
     manager so the temp directory is removed. ``warped_at`` returns None when there is no frame.
+
+    ``adjust`` is the run's validated exposure/brightness/contrast; it is applied to each extracted
+    RGB frame before warping and caching. The warp cache belongs to this instance, so a different
+    adjustment means a new source and never reuses a stale frame. ``None`` leaves frames as decoded.
     """
 
     def __init__(self, reader: Any, ffmpeg: str, t0: float, t1: float,
-                 out_w: int, out_h: int) -> None:
+                 out_w: int, out_h: int, adjust: Mapping[str, float] | None = None) -> None:
+        self._adjust = adjust
         self._dir = tempfile.mkdtemp(prefix="fri_visible_")
         self._out_w, self._out_h = out_w, out_h
         self._times: list[float] = []
@@ -130,6 +137,8 @@ class VisibleSource:
             frame = np.asarray(Image.open(self._files[i]).convert("RGB"), dtype=np.uint8)
         except OSError:
             return None
+        if self._adjust is not None:
+            frame = apply_adjust(frame, self._adjust)
         warped = _warp(frame, self._coeffs, self._out_w, self._out_h)
         self._cache[i] = warped
         return warped
