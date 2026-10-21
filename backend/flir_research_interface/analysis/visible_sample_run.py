@@ -68,6 +68,8 @@ THRESHOLD_WINDOW_S = 5.0  # the run's dark threshold comes from this much video 
 FLOOR, K, MAD_FLOOR, MERGE_S = 15.0, 6.0, 1.0, 1.0  # the flash rule (see visible_sample)
 STRETCH_HI = 250  # close-up: luma from the run's sample luma up to this maps to 0-255
 CLOSEUP_SCALE = 3
+CLOSEUP_MIN_TIMEOUT_S = 300.0  # the close-up's ffmpeg is killed after max(this, factor x duration)
+CLOSEUP_TIMEOUT_FACTOR = 2.0  # seconds allowed per second of the segment's video
 BLOCK_PX = 16  # an event's bounding box is made of blocks this size
 _MAX_COORD_FACTOR = 10  # a mapped ROI farther than this many frame widths is not an alignment
 
@@ -174,12 +176,32 @@ def _closeup_command(
     ]  # fmt: skip
 
 
+def _closeup_timeout(duration_s: float) -> float:
+    """Seconds the close-up encode of a ``duration_s`` segment may take (about 100x real time on
+    the reference run; this allows far more, so only a stuck ffmpeg hits it)."""
+    return max(CLOSEUP_MIN_TIMEOUT_S, CLOSEUP_TIMEOUT_FACTOR * duration_s)
+
+
 def _encode_closeup(
-    ffmpeg: str, src: Path, out: Path, crop: tuple[int, int, int], lo: float
+    ffmpeg: str,
+    src: Path,
+    out: Path,
+    crop: tuple[int, int, int],
+    lo: float,
+    duration_s: float = 0.0,
 ) -> None:
-    run = subprocess.run(
-        _closeup_command(ffmpeg, src, out, crop, lo), capture_output=True, text=True
-    )
+    """Encode the close-up of ``src`` (``duration_s`` of video) into ``out``; ffmpeg is killed and
+    ``TimeoutError`` raised when it runs longer than :func:`_closeup_timeout`."""
+    timeout = _closeup_timeout(duration_s)
+    try:
+        run = subprocess.run(
+            _closeup_command(ffmpeg, src, out, crop, lo),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise TimeoutError(f"ffmpeg close-up timed out after {timeout:g} s") from exc
     if run.returncode != 0:
         raise RuntimeError(f"ffmpeg close-up failed (rc {run.returncode}): {run.stderr[-300:]}")
 
@@ -633,7 +655,8 @@ def analyse_visible_sample(
             crop = _closeup_box(plan.box, plan.vis_size)
             for seg in plan.segments:
                 name = _closeup_name(seg.index)
-                _encode_closeup(plan.ffmpeg, seg.path, staged.part(name), crop, lo)
+                span = float(seg.pts_s[-1] - seg.pts_s[0])
+                _encode_closeup(plan.ffmpeg, seg.path, staged.part(name), crop, lo, span)
                 files.append(name)
         if (png := _plot_png(reader, rows, summary)) is not None:
             staged.part(PLOT_NAME).write_bytes(png)

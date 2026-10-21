@@ -207,7 +207,12 @@ and compression blocks.
 folder. It never touches `thermal.zarr`, `visible.mp4`, `metadata.json` or the camera. It runs in
 the post-stop export job (step "visible sample analysis", after the run summary and before the
 thermal preview video) and again in the derived-files regenerate job; a failure is logged and never
-blocks Stop.
+blocks Stop. Both ffmpeg calls have time limits, because the job holds the run's render lock, which
+the media export, the offload move and the range scan also wait on: the decode is killed after
+120 s without output (`DECODE_STALL_S` in `visible_sample_io.py`) and the close-up encode after
+max(300 s, 2 x the segment's duration) (`CLOSEUP_MIN_TIMEOUT_S` and `CLOSEUP_TIMEOUT_FACTOR` in
+`visible_sample_run.py`). The run is then `failed` with a reason that contains `timed out`; ffmpeg
+is gone and no `.part` file is left. The reference run needs 4 s for the close-up.
 
 | File | Content |
 |---|---|
