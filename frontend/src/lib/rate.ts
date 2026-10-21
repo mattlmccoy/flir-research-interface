@@ -2,6 +2,12 @@
 // least-squares slope over the last `windowS` seconds: a two-point difference of 15 Hz samples
 // would turn camera noise (±0.1 °C) into ±1.5 °C/s swings and trip any useful threshold.
 
+/** The ROIs the rate readout and alarm can watch: smart ROIs are excluded (their live number comes
+ *  from the operator's feed, and no rate is computed for it yet). */
+export function rateRois<R extends { kind: string }>(rois: readonly R[]): R[] {
+  return rois.filter((r) => r.kind !== "smart");
+}
+
 export interface Series { length: number; tAt(k: number): number; vAt(k: number): number; }
 
 /** Least-squares slope (per second) of the points in the last `windowS` seconds; null when the

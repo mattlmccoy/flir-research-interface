@@ -1,5 +1,5 @@
 import { roiLabel, type Roi } from "../lib/roi.ts";
-import { RATE_WINDOWS, type RateAlarmConfig, type RateAlarmState } from "../lib/rate.ts";
+import { RATE_WINDOWS, rateRois, type RateAlarmConfig, type RateAlarmState } from "../lib/rate.ts";
 
 interface Props {
   rois: Roi[];
@@ -14,8 +14,10 @@ interface Props {
 const fmtRate = (r: number | null | undefined) => (r == null || !Number.isFinite(r) ? "—" : `${r >= 0 ? "+" : ""}${r.toFixed(2)}`);
 
 /** Live heating rate per ROI (°C/s, least-squares over a window) and a threshold alarm. */
-export function RatePanel({ rois, rates, cfg, onCfg, latched, onAck }: Props) {
-  if (rois.length === 0) return null;
+export function RatePanel({ rois: all, rates, cfg, onCfg, latched, onAck }: Props) {
+  const rois = rateRois(all);
+  const smartSkipped = rois.length < all.length;
+  if (rois.length === 0) return smartSkipped ? <div className="hint">Smart ROIs aren't rate-watched yet.</div> : null;
   const set = (p: Partial<RateAlarmConfig>) => onCfg({ ...cfg, ...p });
   const name = (id: number | null) => { const r = rois.find((x) => x.id === id); return r ? roiLabel(r) : "ROI"; };
   return (
@@ -30,7 +32,7 @@ export function RatePanel({ rois, rates, cfg, onCfg, latched, onAck }: Props) {
       </div>
       <div className="row" style={{ gap: 4, alignItems: "center", flexWrap: "wrap" }}>
         <label className="hint" title="Alarm when the heating rate reaches the threshold"><input type="checkbox" checked={cfg.on} onChange={(e) => set({ on: e.target.checked })} /> rate alarm</label>
-        <select value={String(cfg.roi)} aria-label="ROI watched by the rate alarm" onChange={(e) => set({ roi: e.target.value === "any" ? "any" : Number(e.target.value) })}>
+        <select value={cfg.roi === "any" || rois.some((r) => r.id === cfg.roi) ? String(cfg.roi) : "any"} aria-label="ROI watched by the rate alarm" onChange={(e) => set({ roi: e.target.value === "any" ? "any" : Number(e.target.value) })}>
           <option value="any">any ROI</option>
           {rois.map((r) => <option key={r.id} value={r.id}>{roiLabel(r)}</option>)}
         </select>
@@ -48,6 +50,7 @@ export function RatePanel({ rois, rates, cfg, onCfg, latched, onAck }: Props) {
         <label className="hint"><input type="checkbox" checked={cfg.beep} onChange={(e) => set({ beep: e.target.checked })} /> beep</label>
         <label className="hint" title="While recording, add a 'rate alarm' event mark to the run when it trips"><input type="checkbox" checked={cfg.mark} onChange={(e) => set({ mark: e.target.checked })} /> mark run</label>
       </div>
+      {smartSkipped && <div className="hint">Smart ROIs aren't rate-watched yet.</div>}
       {latched && (
         <div className="errbox" role="alert">
           <b>Heating-rate alarm</b>: {name(latched.roi)} rose {fmtRate(latched.rate)} °C/s (limit {cfg.threshold} °C/s).

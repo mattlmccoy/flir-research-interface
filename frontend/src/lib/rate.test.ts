@@ -59,3 +59,14 @@ test("alarm config round-trips and falls back to defaults on garbage", () => {
   store.set("fri.rateAlarm.v1", JSON.stringify({ on: "yes", threshold: -3, roi: "x" }));
   assert.deepEqual(loadRateAlarm(storage), DEFAULT_RATE_ALARM);
 });
+
+test("rateRois: smart ROIs are not rate-watched (their rate is never computed), others keep their order", async () => {
+  const { rateRois } = await import("./rate.ts");
+  const rois = [
+    { id: 1, kind: "box", x: 0, y: 0, w: 4, h: 4 },
+    { id: 2, kind: "smart", search: [[0, 0], [9, 0], [9, 9]], rings_px: [5, 10, 25], rule: "relative", sensitivity: 0.5 },
+    { id: 3, kind: "spot", x: 2, y: 2 },
+  ] as unknown as import("./roi.ts").Roi[];
+  assert.deepEqual(rateRois(rois).map((r) => r.id), [1, 3]);
+  assert.deepEqual(rateRois([]), []);
+});
