@@ -296,7 +296,8 @@ export function RoiOverlay(p: Props) {
       const [ccx, ccy, reach] = roiLeaderAnchor(r, sx, sy); // a point the leader can connect to
       const c = toScr(ccx, ccy);
       const content = r.kind === "smart" ? smartContent(r, sd, p.smartFeed?.get(r.id)) : labelContent(r, p.stats.get(r.id));
-      labels.push({ id: r.id, content, color, ax: scr.x, ay: scr.y, cx: c.x, cy: c.y, reach, selected: r.id === p.selected });
+      const dot = r.kind === "smart" && smartChip(sd, p.smartFeed?.get(r.id)).muted ? cssVar("--muted") : color;  // smart: ROI colour only when valid
+      labels.push({ id: r.id, content, color: dot, ax: scr.x, ay: scr.y, cx: c.x, cy: c.y, reach, selected: r.id === p.selected });
       if (r.id === p.selected) for (const [vx, vy] of vertexHandles(r)) {
         const hx = (vx + 0.5) * sx, hy = (vy + 0.5) * sy;
         ctx.setLineDash([]); ctx.fillStyle = accent; ctx.strokeStyle = scrim; ctx.lineWidth = 1.5;

@@ -1,12 +1,12 @@
 import { NumberField } from "./NumberField.tsx";
 import { convertTemp, fmtTemp, type Conversion, type Units } from "../lib/units.ts";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { roiId, roiLabel, type Roi, type RoiAction, type RoiStats, loadRois } from "../lib/roi.ts";
 import { COLOR_PRESETS, roiColor } from "../lib/overlay.ts";
 import { Disclosure } from "./Disclosure.tsx";
-import { smartReadoutLines } from "../lib/smartReadout.ts";
 import { parseRingOffsets } from "../lib/smartSettings.ts";
-import type { SmartFeed } from "../lib/useSmartFeed.ts";
+import { smartRowView, type SmartFeed } from "../lib/smartFeed.ts";
+import { SMART_FEED_INTERVAL_MS } from "../lib/useSmartFeed.ts";
 
 interface Props {
   units?: Units; conv?: Conversion | null;
@@ -23,27 +23,22 @@ interface Props {
 
 type SmartRoi = Extract<Roi, { kind: "smart" }>;
 
-/** Value column of a smart row: the operator's mean (never a client-side number), else its state. */
+/** Value column of a smart row: the operator's mean (never a client-side number) while the feed is
+ *  fresh and the entry valid; holding is marked and warn-coloured so it never reads as locked. */
 function SmartValue({ id, feed, units, conv }: { id: number; feed: SmartFeed | null | undefined; units: Units; conv: Conversion | null }) {
-  if (!feed) return <span className="vals">…</span>;
-  const e = feed.entries.get(id);
-  if (!feed.ok || !e) return <span className="vals">n/a</span>;
-  if (!e.valid || e.sample.mean_c === null) return <span className="vals">{e.state === "searching" ? "searching" : "not valid"}</span>;
-  return <span className="vals">{fmtTemp(e.sample.mean_c, units, conv)}</span>;
+  if (feed === undefined) return <span className="vals">…</span>;
+  const v = smartRowView(feed, id, Date.now(), SMART_FEED_INTERVAL_MS);
+  if (v.mean === null) return <span className={`vals smart-val tone-${v.tone}`}>{v.marker ?? "n/a"}</span>;
+  return <span className={`vals smart-val tone-${v.tone}`} title={v.marker ? "holding the last good outline (edge lost this frame)" : undefined}>{v.marker ? `${v.marker} · ` : ""}{fmtTemp(v.mean, units, conv)}</span>;
 }
 
 /** Second line of a smart row: the operator's readout (state, sample, rings, thermal-edge size). */
 function SmartLines({ id, feed }: { id: number; feed: SmartFeed | null | undefined }) {
   if (feed === undefined) return null;  // playback: the stored series carries the values
-  const e = feed?.entries.get(id);
-  const lines = !feed ? ["waiting for the operator…"]
-    : !feed.ok ? ["no reading: the operator's live feed is unreachable"]
-    : !e ? ["no reading from the operator yet"]
-    : smartReadoutLines(e);
-  const state = feed?.ok && e ? (e.valid ? e.state : "invalid") : "none";
+  const v = smartRowView(feed, id, Date.now(), SMART_FEED_INTERVAL_MS);
   return (
-    <div className={`roi-stats smart-readout state-${state}`} title="Smart ROI values from the operator. Size is measured from the thermal edge, which also moves when heat spreading blurs the boundary: read it with the edge sharpness.">
-      {lines.map((l, i) => <div key={i} className={i === 0 ? "smart-head" : undefined}>{l}</div>)}
+    <div className={`roi-stats smart-readout state-${v.tone}`} title="Smart ROI values from the operator. Size is measured from the thermal edge, which also moves when heat spreading blurs the boundary: read it with the edge sharpness.">
+      {v.lines.map((l, k) => <div key={k} className={k === 0 ? "smart-head" : undefined}>{l}</div>)}
     </div>
   );
 }
@@ -51,14 +46,16 @@ function SmartLines({ id, feed }: { id: number; feed: SmartFeed | null | undefin
 function SmartEditor({ r, dispatch }: { r: SmartRoi; dispatch: (a: RoiAction) => void }) {
   const [rings, setRings] = useState<string | null>(null);  // draft while typing
   const [ringErr, setRingErr] = useState<string | null>(null);
-  const [wantFixed, setWantFixed] = useState(r.rule === "fixed");
+  // "fixed" chosen but no °C typed yet; dropped whenever the stored rule changes (undo, load, reset)
+  const [pendingFixed, setPendingFixed] = useState(false);
+  useEffect(() => { setPendingFixed(false); }, [r.rule, r.id]);
   const set = (patch: Omit<Extract<RoiAction, { type: "setSmart" }>, "type" | "id">) => dispatch({ type: "setSmart", id: r.id, ...patch });
   const commitRings = () => {
     if (rings === null) return;
     const got = parseRingOffsets(rings);
     if (got.ok) { set({ rings_px: got.rings }); setRings(null); setRingErr(null); } else setRingErr(got.error);
   };
-  const fixed = wantFixed || r.rule === "fixed";
+  const fixed = r.rule === "fixed" || pendingFixed;
   return (
     <div className="optics smart-settings">
       <div className="optics-title">Smart ROI · {roiLabel(r)}</div>
@@ -71,7 +68,7 @@ function SmartEditor({ r, dispatch }: { r: SmartRoi; dispatch: (a: RoiAction) =>
 
         <label htmlFor={`rule-${r.id}`}>edge rule</label>
         <select id={`rule-${r.id}`} value={fixed ? "fixed" : "relative"} aria-label={`edge rule of ${roiLabel(r)}`}
-          onChange={(e) => { const f = e.target.value === "fixed"; setWantFixed(f); if (!f) set({ rule: "relative" }); }}>
+          onChange={(e) => { const f = e.target.value === "fixed"; setPendingFixed(f); if (!f) set({ rule: "relative" }); }}>
           <option value="relative">relative</option>
           <option value="fixed">fixed °C</option>
         </select>

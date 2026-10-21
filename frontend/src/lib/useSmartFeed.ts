@@ -2,12 +2,12 @@
 // truth for smart ROI numbers; spec §6). Only runs while `enabled` (live page with a smart ROI).
 import { useEffect, useState } from "react";
 import { api } from "./api.ts";
-import { smartFeedMap, type SmartReadoutEntry } from "./smartReadout.ts";
-
-/** `ok` false = the last poll failed: no reading, which must never look like a healthy one. */
-export interface SmartFeed { ok: boolean; entries: Map<number, SmartReadoutEntry>; }
+import { smartFeedFrom, type SmartFeed } from "./smartFeed.ts";
 
 export const SMART_FEED_INTERVAL_MS = 500;
+/** A poll that has not answered by then is abandoned (failed), so a hung request can never keep
+ *  the last good numbers on screen; the rail also treats a feed older than 2 intervals as stale. */
+export const SMART_FEED_TIMEOUT_MS = 1500;
 
 export function useSmartFeed(enabled: boolean, intervalMs = SMART_FEED_INTERVAL_MS): SmartFeed | null {
   const [feed, setFeed] = useState<SmartFeed | null>(null);
@@ -16,9 +16,9 @@ export function useSmartFeed(enabled: boolean, intervalMs = SMART_FEED_INTERVAL_
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const tick = () => {
-      api.liveRoiTemps()
-        .then((p) => { if (alive) setFeed({ ok: true, entries: smartFeedMap(p) }); })
-        .catch(() => { if (alive) setFeed({ ok: false, entries: new Map() }); })
+      api.liveRoiTemps(AbortSignal.timeout(SMART_FEED_TIMEOUT_MS))
+        .then((p) => { if (alive) setFeed(smartFeedFrom(p, Date.now())); })
+        .catch(() => { if (alive) setFeed({ ok: false, at: Date.now(), live: false, entries: new Map() }); })
         .finally(() => { if (alive) timer = setTimeout(tick, intervalMs); });
     };
     tick();

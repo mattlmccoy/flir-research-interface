@@ -112,11 +112,15 @@ test("a change that rounds to zero reads +0.0 %, never −0.0 %", () => {
 
 test("smartChip: state from the frame's overlay, numbers only when the feed agrees and is valid", () => {
   const locked = entry(FEED_LOCKED);
-  assert.deepEqual(smartChip({ state: "locked", valid: true }, locked), { value: "locked", range: "mean 507.3  max 522.1" });
+  assert.deepEqual(smartChip({ state: "locked", valid: true }, locked), { value: "locked", range: "mean 507.3  max 522.1", muted: false });
+  assert.equal(smartChip({ state: "locked", valid: true }, locked).muted, false, "valid: ROI colour dot");
+  assert.equal(smartChip({ state: "searching", valid: false }, locked).muted, true, "searching: muted dot");
+  assert.equal(smartChip({ state: "locked", valid: false }, undefined).muted, true, "invalid: muted dot");
+  assert.equal(smartChip(undefined, undefined).muted, true);
   // the feed (polled) lags the frame stream: never pair the frame's state with another state's numbers
-  assert.deepEqual(smartChip({ state: "searching", valid: false }, locked), { value: "searching… (not locked yet)", range: null });
-  assert.deepEqual(smartChip({ state: "holding", valid: true }, undefined), { value: "holding — edge lost", range: null });
-  assert.deepEqual(smartChip({ state: "locked", valid: false }, undefined), { value: "locked · not valid", range: null });
-  assert.deepEqual(smartChip(undefined, locked), { value: "locked", range: "mean 507.3  max 522.1" }, "no overlay: the feed alone");
-  assert.deepEqual(smartChip(undefined, undefined), { value: "no outline", range: null });
+  assert.deepEqual(smartChip({ state: "searching", valid: false }, locked), { value: "searching… (not locked yet)", range: null, muted: true });
+  assert.deepEqual(smartChip({ state: "holding", valid: true }, undefined), { value: "holding — edge lost", range: null, muted: false });
+  assert.deepEqual(smartChip({ state: "locked", valid: false }, undefined), { value: "locked · not valid", range: null, muted: true });
+  assert.deepEqual(smartChip(undefined, locked), { value: "locked", range: "mean 507.3  max 522.1", muted: false }, "no overlay: the feed alone");
+  assert.deepEqual(smartChip(undefined, undefined), { value: "no outline", range: null, muted: true });
 });

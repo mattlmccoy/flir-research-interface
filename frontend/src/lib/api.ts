@@ -240,7 +240,7 @@ export const api = {
   putLiveRois: (rois: unknown[]) =>
     j<{ count: number }>(req("/api/live/rois", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ rois }) })),
   /** The operator's per-ROI live feed (smart ROI numbers come only from here; see lib/smartReadout.ts). */
-  liveRoiTemps: () => j<unknown>(req("/api/live/roi-temps")),
+  liveRoiTemps: (signal?: AbortSignal) => j<unknown>(req("/api/live/roi-temps", { signal })),
   /** Stored smart ROI outlines for frame indices [start, start + count) of a recorded run (404 until computed). */
   smartOverlay: (name: string, roiId: number, start: number, count: number) =>
     j<SmartOverlay[]>(req(`/api/experiments/${encodeURIComponent(name)}/smart-roi/${roiId}/overlay?start=${start}&count=${count}`)),
