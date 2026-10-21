@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 
 from flir_research_interface import __version__, storage
 from flir_research_interface import labels as labels_mod
+from flir_research_interface import visible_adjust_store as vadj_store
 from flir_research_interface.acquisition.service import AcquisitionService, ServiceState
 from flir_research_interface.api.frames import encode_frame_message
 from flir_research_interface.api.reveal import Runner, contained, reveal
@@ -104,6 +105,25 @@ class ConnectRequest(BaseModel):
     serial: str | None = None
 
 
+class VisibleAdjustIn(BaseModel):
+    """Slider values in effect when recording starts; stamped into ``metadata.json``."""
+
+    exposure_ev: float
+    brightness: float
+    contrast: float
+    preset: str | None = None
+    based_on: str | None = None
+
+
+class VisibleAdjustRequest(BaseModel):
+    """A run's saved visible adjustment (PUT body)."""
+
+    exposure_ev: float
+    brightness: float
+    contrast: float
+    library: str | None = None  # "local"|"drive"|None (None = first found, local-first)
+
+
 class RecordingStartRequest(BaseModel):
     name: str
     metadata: dict[str, Any] = {}
@@ -115,6 +135,7 @@ class RecordingStartRequest(BaseModel):
     nuc_hold: bool = True
     # Periodic (time-lapse) recording: keep every Nth frame (1 = every frame).
     every_nth: int = Field(default=1, ge=1, le=100000)
+    visible_adjust: VisibleAdjustIn | None = None
 
 
 class FrameRangeRequest(BaseModel):
@@ -959,6 +980,12 @@ def create_app(
             extra["rois"] = _rois_with_labels(req.rois)
         if req.masks:
             extra["masks"] = _parsed_masks(req.masks)
+        if req.visible_adjust is not None:
+            try:
+                stamp = vadj_store.recording_stamp(req.visible_adjust.model_dump())
+                extra["visible_adjust"] = stamp
+            except ValueError as exc:
+                raise HTTPException(400, f"visible_adjust: {exc}") from exc
         return extra
 
     def _parsed_masks(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1469,6 +1496,18 @@ def create_app(
         extra = {k: getattr(req, k) for k in ("title", "notes") if k in req.model_fields_set}
         return labels_mod.write_labels(run, starred=req.starred, tags=req.tags, **extra)
 
+    @app.put("/api/experiments/{name}/visible-adjust")
+    def set_visible_adjust(name: str, req: VisibleAdjustRequest) -> dict[str, Any]:
+        run = _exp_dir_in(name, req.library)
+        try:
+            return vadj_store.write_sidecar(run, req.model_dump(exclude={"library"}))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.delete("/api/experiments/{name}/visible-adjust")
+    def clear_visible_adjust(name: str, library: str | None = None) -> dict[str, Any]:
+        return {"removed": vadj_store.delete_sidecar(_exp_dir_in(name, library))}
+
     def _open(name: str) -> ExperimentReader:
         d = _exp_dir(name)
         try:
@@ -1529,6 +1568,9 @@ def create_app(
         info["events"] = r.events
         info["visible_sample"] = _visible_sample_json(r.path)
         info["visible_range"] = full_range.visible_range(r.path, full_range.resolve_ffmpeg())
+        values, source = vadj_store.effective_adjust(r.path, r.metadata)
+        info["visible_adjust"] = {**values, "source": source}
+        info["visible_adjust_recorded"] = r.metadata.get("visible_adjust")
         return info
 
     @app.get("/api/experiments/{name}/timeline")

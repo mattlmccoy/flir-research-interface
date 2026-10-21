@@ -38,9 +38,9 @@ CONFIG_NAME = ".storage.json"
 TOOL = "flir"
 #: Small integrity-critical files that ``verify_copy`` always hash-compares.
 CRITICAL_FILES = frozenset({"metadata.json", "manifest.json"})
-#: Files FLIR rewrites inside a run after recording (stars/tags, exports); a conflict that differs
-#: only in these is reported as sidecar-only.
-MUTABLE_PATHS = ("labels.json", "exports/*")
+#: Files FLIR rewrites inside a run after recording (stars/tags, visible adjustment, exports); a
+#: conflict that differs only in these is reported as sidecar-only.
+MUTABLE_PATHS = ("labels.json", "visible_adjust.json", "exports/*")
 
 
 class MoveConflictError(RuntimeError):
