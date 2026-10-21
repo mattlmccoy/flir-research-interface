@@ -2,14 +2,15 @@
 
 The A70's visible video clips the powder, but the sample stays well exposed. This module holds the
 pure functions of that analysis: picking the sample (and bed) ROI, mapping its outline from IR
-pixels into visible pixels, and rasterising the analysis region. Nothing here touches the store or
-the video file.
+pixels into visible pixels, rasterising the analysis region, choosing the dark threshold and
+measuring each frame. Nothing here touches the store or the video file.
 """
 
 from __future__ import annotations
 
 import logging
 import math
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -184,3 +185,67 @@ def region_mask(
     out = np.zeros((bh, bw), dtype=bool)
     out[ty0 - by0 : ty0 - by0 + tight.shape[0], tx0 - bx0 : tx0 - bx0 + tight.shape[1]] = tight
     return out, (bx0, by0, bw, bh)
+
+
+def otsu_threshold(values: np.ndarray) -> int:
+    """Otsu's threshold of 8-bit ``values``: the level 0-255 that maximises the between-class
+    variance of a 256-bin histogram, with the lower class holding the levels up to and including it.
+
+    Ties go to the lowest level. Values outside 0..255 are ignored; an input with no value in range
+    raises ``ValueError``. An input of a single level has no two classes and gives 0.
+    """
+    hist, _ = np.histogram(values, bins=256, range=(0, 256))
+    total = int(hist.sum())
+    if total == 0:
+        raise ValueError("otsu_threshold needs at least one value in 0..255")
+    n_low = np.cumsum(hist)  # pixels at or below each level
+    sum_low = np.cumsum(hist * np.arange(256))  # their summed levels
+    n_high = total - n_low
+    both = (n_low > 0) & (n_high > 0)  # only levels that leave both classes non-empty
+    between = np.zeros(256)
+    mean_low = sum_low[both] / n_low[both]
+    mean_high = (sum_low[-1] - sum_low[both]) / n_high[both]
+    between[both] = n_low[both] * n_high[both] * (mean_low - mean_high) ** 2
+    return int(np.argmax(between))
+
+
+@dataclass(frozen=True)
+class FrameMetrics:
+    """What one visible frame says about the sample.
+
+    ``sample_dark_px`` counts region pixels darker than the run's threshold and ``sample_mean_luma``
+    is their mean luma (``None`` when there are none). ``bed_clipped_frac`` is the fraction of the
+    bed at 255 (``None`` without a bed). ``brightening`` is the 99.5th percentile of the change in
+    luma over the region since the previous analysed frame (``None`` for the first one).
+    """
+
+    sample_dark_px: int
+    sample_mean_luma: float | None
+    bed_clipped_frac: float | None
+    brightening: float | None
+
+
+def frame_metrics(
+    luma: np.ndarray,
+    prev: np.ndarray | None,
+    region: np.ndarray,
+    threshold: int,
+    bed: np.ndarray | None = None,
+) -> FrameMetrics:
+    """The :class:`FrameMetrics` of one frame.
+
+    ``luma`` and ``prev`` are uint8 crops of one bounding box; ``region`` and ``bed`` are boolean
+    masks of that box. A pixel is dark when its luma is strictly below ``threshold``. ``prev`` is
+    the previous *analysed* frame of the same video segment (``None`` for a segment's first), so
+    the frames of the start-up skip never serve as one. The luma change is taken in ``int16``.
+    """
+    in_region = luma[region]
+    dark = in_region < threshold
+    n_dark = int(np.count_nonzero(dark))
+    mean_luma = float(in_region[dark].mean()) if n_dark else None
+    clipped = float(np.mean(luma[bed] == 255)) if bed is not None and bed.any() else None
+    brightening = None
+    if prev is not None and in_region.size:
+        change = in_region.astype(np.int16) - prev[region].astype(np.int16)
+        brightening = float(np.percentile(change, 99.5))
+    return FrameMetrics(n_dark, mean_luma, clipped, brightening)
