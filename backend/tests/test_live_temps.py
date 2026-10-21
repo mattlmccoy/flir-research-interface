@@ -205,3 +205,34 @@ def test_feed_smart_result_older_than_frame_is_invalid() -> None:
     r.frame_ts_ns = 1_000_000_000 - int((SMART_LAG_MS - 1) * 1e6)  # within one frame: still ok
     (roi,) = _live([SMART], {7: r})["rois"]
     assert roi["valid"] is True
+
+
+_NULL_RINGS = [{"inner_px": a, "outer_px": b, "mean_c": None, "max_c": None, "min_c": None}
+               for a, b in ((0, 5), (5, 10), (10, 25))]
+
+
+def test_feed_invalid_smart_entries_always_carry_k_null_rings() -> None:
+    """Every smart entry has one ring per rings_px offset; an invalid one never carries ring
+    numbers (no tracker result, a lagging result, or an over-range locked/holding one)."""
+    (none,) = _live([SMART], {})["rois"]
+    assert none["rings"] == _NULL_RINGS
+    lag = _smart_result("locked")
+    lag.frame_ts_ns = None
+    (lagging,) = _live([SMART], {7: lag})["rois"]
+    assert lagging["rings"] == _NULL_RINGS
+    for state in ("locked", "holding"):
+        over = _smart_result(state)
+        over.valid, over.over_range = False, True  # rings keep numbers in the tracker result
+        over.sample = {"mean_c": None, "max_c": None, "min_c": None}
+        (roi,) = _live([SMART], {7: over})["rois"]
+        assert roi["valid"] is False and roi["state"] == state and roi["over_range"] is True
+        assert roi["rings"] == _NULL_RINGS
+    custom = {**SMART, "rings_px": [3, 8]}
+    (two,) = _live([custom], {})["rois"]
+    assert [(g["inner_px"], g["outer_px"]) for g in two["rings"]] == [(0, 3), (3, 8)]
+
+
+def test_feed_not_live_smart_entry_carries_k_null_rings() -> None:
+    p = live_roi_payload(counts=None, ir_format=None, rois=[SMART], acquiring=False,
+                         frame_id=None, host_ts_ns=None, now_ns=1)
+    assert p["rois"][0]["rings"] == _NULL_RINGS

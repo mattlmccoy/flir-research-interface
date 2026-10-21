@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from flir_research_interface.analysis.series import roi_index
+from flir_research_interface.analysis.smart_spec import parse_smart_roi
 from flir_research_interface.radiometry.overrange import over_range_mask
 from flir_research_interface.radiometry.temperature_linear import IRFormat, counts_to_celsius
 
@@ -33,6 +34,19 @@ def _iso(ns: int) -> str:
     return datetime.fromtimestamp(ns / 1e9, tz=timezone.utc).isoformat()
 
 
+def _null_rings(roi: dict[str, Any]) -> list[dict[str, Any]]:
+    """One ring entry per ``rings_px`` offset with null stats (an invalid entry's rings). A ROI
+    whose spec does not parse has no trustworthy ring list, so it gets none."""
+    try:
+        rings = parse_smart_roi(roi).rings_px
+    except (ValueError, TypeError):
+        return []
+    return [
+        {"inner_px": a, "outer_px": b, "mean_c": None, "max_c": None, "min_c": None}
+        for a, b in zip((0, *rings), rings, strict=False)
+    ]
+
+
 def _invalid_roi(roi: dict[str, Any], *, over_range: bool = False) -> dict[str, Any]:
     """An ROI entry with no trustworthy temperature (names the ROI so the roster stays stable)."""
     out: dict[str, Any] = {
@@ -41,7 +55,7 @@ def _invalid_roi(roi: dict[str, Any], *, over_range: bool = False) -> dict[str, 
         "over_range": over_range, "valid": False,
     }
     if roi.get("kind") == "smart":  # keep the smart keys present so the shape never changes
-        out.update({"state": "searching", "rings": [], "dims": None})
+        out.update({"state": "searching", "rings": _null_rings(roi), "dims": None})
     return out
 
 
@@ -61,8 +75,7 @@ def _smart_entry(
     valid = bool(result.valid) and all(isinstance(v, float) for v in temps.values())
     if not valid:
         entry = _invalid_roi(roi, over_range=bool(result.over_range))
-        entry["state"] = result.state
-        entry["rings"] = [dict(g) for g in result.rings]
+        entry["state"] = result.state  # rings stay null: an invalid entry never carries numbers
         return entry
     return {
         "id": roi.get("id"), "name": roi.get("name"), "kind": "smart",
