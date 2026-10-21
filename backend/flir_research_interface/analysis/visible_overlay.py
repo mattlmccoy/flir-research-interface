@@ -105,7 +105,8 @@ class VisibleSource:
         for k, (name, ss, dur, g0) in enumerate(windows):
             cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-ss", f"{ss:.3f}",
                    "-i", str(reader.path / name), "-t", f"{max(1.0 / fps, dur):.3f}",
-                   "-vf", f"fps={fps:g}", "-q:v", "3", str(Path(self._dir) / f"s{k:03d}_%05d.jpg")]
+                   "-vf", f"scale=in_range=full:out_range=full,fps={fps:g}",  # untagged
+                   "-q:v", "3", str(Path(self._dir) / f"s{k:03d}_%05d.jpg")]
             try:
                 subprocess.run(cmd, check=True, capture_output=True, timeout=600)
             except (subprocess.SubprocessError, OSError) as exc:  # export works without visible

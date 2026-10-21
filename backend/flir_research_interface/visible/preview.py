@@ -47,7 +47,7 @@ def mjpeg_command(ffmpeg: str, url: str, *, fps: int = 8, width: int = 640) -> l
         "-timeout", str(SOCKET_TIMEOUT_US),
         "-i", url,
         "-map", "0:v:0", "-an", "-dn", "-sn",
-        "-vf", f"scale={width}:-2",
+        "-vf", f"scale={width}:-2:in_range=full:out_range=full",
         "-r", str(fps),
         "-q:v", "6",
         "-f", "mpjpeg",

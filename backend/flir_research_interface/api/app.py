@@ -40,6 +40,7 @@ from flir_research_interface.concurrency import KeyedLocks
 from flir_research_interface.playback.reader import ExperimentReader, list_experiments
 from flir_research_interface.recording.recorder import Recorder, RecorderState
 from flir_research_interface.sdk_install import detect_and_select, pyspin_importable
+from flir_research_interface.visible import full_range
 
 logger = logging.getLogger(__name__)
 
@@ -1527,6 +1528,7 @@ def create_app(
         )
         info["events"] = r.events
         info["visible_sample"] = _visible_sample_json(r.path)
+        info["visible_range"] = full_range.visible_range(r.path, full_range.resolve_ffmpeg())
         return info
 
     @app.get("/api/experiments/{name}/timeline")
@@ -2043,13 +2045,20 @@ def create_app(
             headers={"Cache-Control": "no-cache", "ETag": etag},
         )
 
+    def _visible_served(run: Path, file: str) -> tuple[Path, str]:
+        """The file to play and its range state: the full-range copy, else the raw recording."""
+        copy = full_range.full_range_copy(run, file, full_range.resolve_ffmpeg())
+        return (copy, full_range.FULL) if copy else (run / file, full_range.RAW_UNTAGGED)
+
     @app.get("/api/experiments/{name}/visible.mp4")
     def experiment_visible_video(name: str) -> Response:
         d = _exp_dir(name)
-        path = d / "visible.mp4"
-        if not path.is_file():
+        if not (d / "visible.mp4").is_file():
             raise HTTPException(404, "this recording has no visible video")
-        return _named_file(path, d, "visible.mp4", "video/mp4")
+        path, state = _visible_served(d, "visible.mp4")
+        resp = _named_file(path, d, "visible.mp4", "video/mp4")
+        resp.headers["X-Visible-Range"] = state
+        return resp
 
     @app.get("/api/experiments/{name}/visible/{index}")
     def experiment_visible_segment(name: str, index: int) -> Response:
@@ -2058,10 +2067,15 @@ def create_app(
 
         from flir_research_interface.visible.recorder import segment_file
 
-        path = _exp_dir(name) / segment_file(index) if index >= 0 else None
-        if path is None or not path.is_file():
+        d = _exp_dir(name)
+        file = segment_file(index) if index >= 0 else None
+        if file is None or not (d / file).is_file():
             raise HTTPException(404, f"this recording has no visible segment {index}")
-        return FileResponse(path, media_type="video/mp4", headers={"Accept-Ranges": "bytes"})
+        path, state = _visible_served(d, file)
+        return FileResponse(
+            path, media_type="video/mp4",
+            headers={"Accept-Ranges": "bytes", "X-Visible-Range": state},
+        )
 
     @app.get("/api/experiments/{name}/preview.png")
     def experiment_preview(name: str, request: Request) -> Response:
