@@ -46,7 +46,8 @@ import { rfNotchStatus } from "./lib/rfNotch.ts";
 import { EMPTY_MASKS, hasMasks, loadMasks, maskPixels, maskedStats, masksAsRois, saveMasks, toolForMaskMode } from "./lib/mask.ts";
 import { initMaskHistory, maskHistoryReducer, type MaskHistoryAction } from "./lib/maskHistory.ts";
 import type { RoiAction } from "./lib/roi.ts";
-import { useSmartFeed } from "./lib/useSmartFeed.ts";
+import { SMART_FEED_INTERVAL_MS, useSmartFeed } from "./lib/useSmartFeed.ts";
+import { smartLiveValue } from "./lib/smartFeed.ts";
 
 type Page = "live" | "setup" | "experiments" | "playback";
 const storage = (() => {
@@ -201,6 +202,19 @@ export function App() {
   const rateCfgRef = useRef(rateCfg);
   rateCfgRef.current = rateCfg;
   const [rates, setRates] = useState<Map<number, number | null>>(new Map());
+  // Smart ROI live traces: one point per operator feed poll (2 Hz), at the latest frame time; gaps
+  // (NaN) whenever the feed is not a valid reading. Not fed to the heating-rate alarm.
+  const smartBuffers = useRef(new Map<number, TraceBuffer>());
+  useEffect(() => {
+    if (!smartFeed || t0Ref.current === null) return;
+    const ids = new Set(rois.rois.filter((r) => r.kind === "smart").map((r) => r.id));
+    for (const id of Array.from(smartBuffers.current.keys())) if (!ids.has(id)) smartBuffers.current.delete(id);
+    for (const id of ids) {
+      let b = smartBuffers.current.get(id);
+      if (!b) { b = new TraceBuffer(MAX_TRACE_POINTS); smartBuffers.current.set(id, b); }
+      if (b.lastT !== nowTRef.current) b.push(nowTRef.current, smartLiveValue(smartFeed, id, Date.now(), SMART_FEED_INTERVAL_MS));
+    }
+  }, [smartFeed]);  // eslint-disable-line react-hooks/exhaustive-deps
   const onStats = useCallback((m: StatsMap, f: FrameMessage) => {
     if (t0Ref.current === null) t0Ref.current = f.header.device_timestamp_ns;
     const t = (f.header.device_timestamp_ns - t0Ref.current) / 1e9;
@@ -283,6 +297,7 @@ export function App() {
     setFrame(null);
     buffers.current.clear();
     maxBuffers.current.clear();
+    smartBuffers.current.clear();
     liveCtl.current.clear();
     t0Ref.current = null;
     await refresh();
@@ -301,8 +316,9 @@ export function App() {
 
   const nowT = hdr && t0Ref.current !== null ? (hdr.device_timestamp_ns - t0Ref.current) / 1e9 : 0;
   const traces: Trace[] = rois.rois.flatMap((r, i) => {
-    if (r.hidden || r.kind === "smart") return []; // hidden on the image = hidden on the plot (still measured + recorded); smart ROIs have no client-side series (their values come from the operator)
-    const b = buffers.current.get(r.id);
+    if (r.hidden) return []; // hidden on the image = hidden on the plot (still measured + recorded)
+    // smart ROIs plot the operator's sample mean (never a client-side measurement)
+    const b = (r.kind === "smart" ? smartBuffers : buffers).current.get(r.id);
     return [{ id: r.id, label: roiLabel(r), color: roiColor(r, i), t: b?.t ?? [], v: b?.v ?? [] }];
   });
   const withDelta = (() => {

@@ -473,3 +473,6 @@ button:disabled .spinner { opacity: 0.7; }
 .mask-chip { width: 10px; height: 10px; border-radius: 2px; border: 1px solid currentColor; background: currentColor; flex: 0 0 auto; }
 .mask-chip.include { color: var(--mask-include); }
 .mask-chip.exclude { color: var(--mask-exclude); }
+.roi-rows .smart-compute { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
+.roi-rows .smart-compute progress { flex: 1 1 80px; min-width: 60px; }
+.smart-plot-choice { margin-right: 10px; white-space: nowrap; }

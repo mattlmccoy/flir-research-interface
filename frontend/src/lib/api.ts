@@ -2,6 +2,7 @@ import { apiUrl, loadOperatorBase, saveOperatorBase } from "./operator.ts";
 import { mediaPreviewQuery, type MediaPreviewOptions } from "./mediaQuery.ts";
 import type { VisibleGap, VisibleSegment } from "./visibleSegments.ts";
 import type { SmartOverlay } from "./smartLabels.ts";
+import type { SmartJob } from "./smartSeries.ts";
 
 /** Site mode: the UI is served from GitHub Pages and talks to a local operator (spec §6.3). */
 export const SITE_MODE = import.meta.env.VITE_SITE_MODE === "1";
@@ -244,6 +245,14 @@ export const api = {
   /** Stored smart ROI outlines for frame indices [start, start + count) of a recorded run (404 until computed). */
   smartOverlay: (name: string, roiId: number, start: number, count: number) =>
     j<SmartOverlay[]>(req(`/api/experiments/${encodeURIComponent(name)}/smart-roi/${roiId}/overlay?start=${start}&count=${count}`)),
+  /** A recorded run's stored smart ROI series for the plot (404 until computed; parse with lib/smartSeries.ts). */
+  smartSeries: (name: string, roiId: number, maxPoints: number) =>
+    j<unknown>(req(`/api/experiments/${encodeURIComponent(name)}/smart-roi/${roiId}?max_points=${maxPoints}`)),
+  /** Start (or join) the full-rate smart ROI compute job for a stored smart ROI; poll smartStatus. */
+  smartCompute: (name: string, roiId: number) =>
+    j<SmartJob>(req(`/api/experiments/${encodeURIComponent(name)}/smart-roi/${roiId}/compute`, { method: "POST" })),
+  smartStatus: (name: string, roiId: number) =>
+    j<SmartJob>(req(`/api/experiments/${encodeURIComponent(name)}/smart-roi/${roiId}/status`)),
   controlStatus: () => j<ControlStatus>(req("/api/control/status")),
   controlSeries: (name: string) =>
     j<ControlSeries>(req(`/api/experiments/${encodeURIComponent(name)}/control`)),

@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api.ts";
 import type { SmartOverlay } from "./smartLabels.ts";
-import { OVERLAY_BLOCK, overlayBlock, pickOverlays, type OverlayCache } from "./smartPlayback.ts";
+import { OVERLAY_BLOCK, overlayBlock, overlayOnError, pickOverlays, type OverlayCache } from "./smartPlayback.ts";
+
+const RETRY_MS = 3000;
 
 /** Overlays for frame `index` of run `name` for the given smart ROI ids. `version` drops the cache
  *  (bump it after the stored series is recomputed). */
@@ -12,6 +14,7 @@ export function useSmartPlaybackOverlays(name: string, ids: number[], index: num
   const inflight = useRef(new Set<string>());
   const mounted = useRef(true);
   const [tick, setTick] = useState(0);
+  const [retry, setRetry] = useState(0);  // bumped after a transient failure so the fetch runs again
   const key = `${name}|${version}`;
   const keyRef = useRef(key);
   if (keyRef.current !== key) { keyRef.current = key; cache.current = new Map(); inflight.current = new Set(); }
@@ -29,10 +32,13 @@ export function useSmartPlaybackOverlays(name: string, ids: number[], index: num
       busy.add(k);
       api.smartOverlay(name, id, b, OVERLAY_BLOCK)
         .then((list) => { c.set(k, list); })
-        .catch(() => { c.set(k, "missing"); })  // not computed yet (404) or unreachable: no outline
+        .catch((e: unknown) => {
+          if (overlayOnError(e) === "missing") c.set(k, "missing");  // not computed yet: no outline
+          else window.setTimeout(() => { if (mounted.current) setRetry((r) => r + 1); }, RETRY_MS);
+        })
         .finally(() => { busy.delete(k); if (mounted.current) setTick((t) => t + 1); });
     }
-  }, [name, idsKey, index, version]);  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [name, idsKey, index, version, retry]);  // eslint-disable-line react-hooks/exhaustive-deps
   // a stable array per (frame, loaded data) so the outline decode in ThermalView runs only on change
   return useMemo(() => pickOverlays(cache.current, ids, index, OVERLAY_BLOCK), [key, idsKey, index, tick]);  // eslint-disable-line react-hooks/exhaustive-deps
 }

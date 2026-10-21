@@ -1,6 +1,7 @@
 // Recorded-run smart ROI outlines: the stored per-frame overlays (GET …/smart-roi/{id}/overlay),
 // fetched a block of frames at a time and cached (useSmartPlaybackOverlays.ts); pure helpers here.
 import type { SmartOverlay } from "./smartLabels.ts";
+import { isNotFound } from "./smartSeries.ts";
 
 /** Key `${roiId}:${blockStart}` → that block's overlays, or "missing" (no stored series / failed). */
 export type OverlayCache = Map<string, SmartOverlay[] | "missing">;
@@ -21,4 +22,10 @@ export function pickOverlays(cache: OverlayCache, ids: number[], index: number, 
     if (o) out.push(o);
   }
   return out;
+}
+
+/** A failed block fetch: a 404 means the series is not computed (cache "missing" until the cache
+ *  version is bumped); anything else (operator unreachable, 5xx) is retried, never cached. */
+export function overlayOnError(e: unknown): "missing" | "retry" {
+  return isNotFound(e) ? "missing" : "retry";
 }

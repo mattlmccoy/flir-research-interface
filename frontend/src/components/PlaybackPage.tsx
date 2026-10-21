@@ -29,6 +29,10 @@ import { eventsToMarkers, markColor, nearestIndex, nextMarkerTime } from "../lib
 import { fmtAny, fmtCelsius } from "../lib/format.ts";
 import { ThermalView, type StatsMap } from "./ThermalView.tsx";
 import { useSmartPlaybackOverlays } from "../lib/useSmartPlaybackOverlays.ts";
+import { useSmartSeries } from "../lib/useSmartSeries.ts";
+import { smartComputeAction, smartEdited, smartJobText, smartPlaybackRow } from "../lib/smartSeries.ts";
+import { smartTraces, type SmartDimChoice } from "../lib/smartTraces.ts";
+import type { SmartPlaybackRow } from "./RoiRows.tsx";
 import { DisplayControls } from "./DisplayControls.tsx";
 import { RoiRows } from "./RoiRows.tsx";
 import { ExportSection } from "./ExportSection.tsx";
@@ -92,6 +96,9 @@ export function PlaybackPage(p: Props) {
   const [rightMode, setRightMode] = useState<RightAxisMode>("rf");
   const [showMedia, setShowMedia] = useState(false);
   const [regenBusy, setRegenBusy] = useState(false);
+  // smart ROI plot choices: sample / ring-band means on the °C axis; one dimension on the right axis
+  const [smartShow, setSmartShow] = useState({ sample: true, rings: false });
+  const [sizeDim, setSizeDim] = useState<Exclude<SmartDimChoice, "off">>("area");
   const cache = useRef(new Map<number, FrameMessage>());
   const inflight = useRef(new Map<number, Promise<void>>());
   const BLOCK = 60;
@@ -235,9 +242,44 @@ export function PlaybackPage(p: Props) {
   }, [n]);
 
   const t = tl ? tl.t_s[index] : 0;
-  // stored smart ROI outlines for this frame (none until the run's smart series is computed)
   const smartIds = useMemo(() => p.rois.rois.filter((r) => r.kind === "smart").map((r) => r.id), [p.rois.rois]);
-  const smartOverlays = useSmartPlaybackOverlays(p.name, smartIds, index);
+  // A compute reads the ROI stored with the run, so an unsaved or edited smart ROI is saved first
+  // (this replaces the run's stored ROI set with the one on screen, as "regenerate" does).
+  const beforeCompute = useCallback(async (id: number): Promise<boolean> => {
+    const r = p.rois.rois.find((x) => x.id === id);
+    if (!r || r.kind !== "smart") return false;
+    if (!smartEdited(r, info?.rois)) return true;
+    if (!window.confirm(`Save the ${p.rois.rois.length} ROI${p.rois.rois.length === 1 ? "" : "s"} on screen into this run (replacing its stored ROIs), then compute ${roiLabel(r)} over every frame?`)) return false;
+    await api.putRois(p.name, p.rois.rois);
+    api.experiment(p.name).then(setInfo).catch(() => undefined);
+    return true;
+  }, [p.name, p.rois.rois, info?.rois]);
+  const onSmartError = useCallback((m: string) => setErr(m), []);
+  const smart = useSmartSeries(p.name, smartIds, beforeCompute, onSmartError);
+  // stored smart ROI outlines for this frame (none until the run's smart series is computed)
+  const smartOverlays = useSmartPlaybackOverlays(p.name, smartIds, index, smart.version);
+  const smartRows = useMemo(() => {
+    const m = new Map<number, SmartPlaybackRow>();
+    for (const r of p.rois.rois) {
+      if (r.kind !== "smart") continue;
+      const st = smart.states.get(r.id) ?? { kind: "loading" as const };
+      const job = smart.jobs.get(r.id) ?? null;
+      const act = smartComputeAction(st, job, smartEdited(r, info?.rois));
+      const text = smartJobText(job);
+      m.set(r.id, {
+        view: smartPlaybackRow(st, index),
+        action: act || text ? (
+          <div className="smart-compute">
+            {act && <button className="secondary" type="button" disabled={act.disabled} onClick={() => (act.kind === "reload" ? smart.reload(r.id) : smart.compute(r.id))}
+              title="Track this smart ROI over every frame of the run (full rate) and store the result with the run">{act.label}</button>}
+            {job?.state === "running" && job.total > 0 && <progress max={job.total} value={job.done} aria-label={`computing ${roiLabel(r)}`} />}
+            {text && <span className={job?.state === "error" ? "smart-error" : "hint"}>{text}</span>}
+          </div>
+        ) : null,
+      });
+    }
+    return m;
+  }, [p.rois.rois, smart.states, smart.jobs, smart.compute, smart.reload, index, info?.rois]);
   const hdr = frame?.header;
   const exp = (info?.experiment ?? {}) as Record<string, unknown>;
   const cam = (info?.camera ?? {}) as Record<string, unknown>;
@@ -257,13 +299,20 @@ export function PlaybackPage(p: Props) {
   const playVis = info ? visibleForPlayback(info) : null; // segments on the thermal clock
   const recordedH = info?.visible_alignment ? parseAlignment(info.visible_alignment).H : null;
   const overlayH = recordedH ?? loadAlignment(typeof localStorage !== "undefined" ? localStorage : null).H;
-  const traces = seriesTraces(series, p.rois);
-  // Secondary (right) axis, frame-aligned to the temperature trace: RF forward power (W) or the AIT
-  // tune/load capacitor positions (%). One unit per axis, so they are alternatives.
-  const axisOpts = rightAxisOptions(control);
+  // smart ROIs plot from their stored series (the strided series path skips them)
+  const smartPlot = p.rois.rois.flatMap((r, i) => {
+    const st = smart.states.get(r.id);
+    if (r.kind !== "smart" || r.hidden || st?.kind !== "ready") return [];
+    return smartTraces(st.series, { ...smartShow, dims: sizeDim }, { id: r.id, label: roiLabel(r), color: roiColor(r, i) });
+  });
+  const traces = [...seriesTraces(series, p.rois), ...smartPlot.filter((x) => x.axis === "temp")];
+  // Secondary (right) axis, frame-aligned to the temperature trace: RF forward power (W), the AIT
+  // tune/load capacitor positions (%) or a smart ROI dimension (px). One unit per axis.
+  const sizeTraces = smartPlot.filter((x) => x.axis === "size");
+  const axisOpts = rightAxisOptions(control, sizeTraces.length > 0);
   const axisMode: RightAxisMode = rightMode === "off" ? "off"
     : axisOpts.includes(rightMode) ? rightMode : (axisOpts[0] ?? "off");
-  const right = rightAxis(control, axisMode);
+  const right = rightAxis(control, axisMode, sizeTraces);
   // Derived files (ROI plot, peak frames, ROI video, roi_series.csv) are stale when the ROIs on
   // screen no longer match the ones stored with the recording; badge the export section so it's
   // visible even when collapsed.
@@ -368,20 +417,39 @@ export function PlaybackPage(p: Props) {
       }
       dock={
         <PlotDock title="temperature vs time (whole recording)" foot={transport} onCollapse={() => p.dispatch({ type: "toggle", panel: "dock" })}
-          controls={axisOpts.length ? (
-            <label className="hint" title="What the right axis overlays, aligned to the temperature: the RF forward power (W) recorded from the generator, or the AIT matching-network tune/load capacitor positions (%) that TC-POWER reports.">
+          controls={axisOpts.length || smartIds.length ? (<>
+            {smartIds.length > 0 && (
+              <span className="hint smart-plot-choice" title="Smart ROI lines from the stored series: the sample mean (solid) and each ring band's mean (dashed), in the ROI colour. Searching frames are gaps.">
+                smart{" "}
+                <label><input type="checkbox" checked={smartShow.sample} onChange={(e) => setSmartShow((v) => ({ ...v, sample: e.target.checked }))} /> sample</label>{" "}
+                <label><input type="checkbox" checked={smartShow.rings} onChange={(e) => setSmartShow((v) => ({ ...v, rings: e.target.checked }))} /> rings</label>
+              </span>
+            )}
+            {axisOpts.length > 0 && (
+            <label className="hint" title="What the right axis overlays, aligned to the temperature: the RF forward power (W) recorded from the generator, the AIT matching-network tune/load capacitor positions (%) that TC-POWER reports, or a smart ROI's size measured from its thermal edge (px).">
               right axis{" "}
               <select value={axisMode} onChange={(e) => setRightMode(e.target.value as RightAxisMode)} aria-label="right axis overlay">
                 <option value="off">off</option>
                 {axisOpts.includes("rf") && <option value="rf">RF power (W)</option>}
                 {axisOpts.includes("caps") && <option value="caps">cap positions (%)</option>}
+                {axisOpts.includes("size") && <option value="size">smart ROI size (px)</option>}
               </select>
+              {axisMode === "size" && (
+                <select value={sizeDim} onChange={(e) => setSizeDim(e.target.value as Exclude<SmartDimChoice, "off">)} aria-label="smart ROI dimension">
+                  <option value="area">area</option>
+                  <option value="length">length</option>
+                  <option value="width">width</option>
+                </select>
+              )}
             </label>
-          ) : undefined}>
+            )}
+          </>) : undefined}>
           <TimePlot traces={withDelta} markers={markers} window={{ t0: 0, t1: Math.max(info?.duration_s ?? 0, 0.001) }} cursorT={t}
             rightTraces={right.traces} rightUnits={right.units || "W"}
             emptyText={
               !p.rois.rois.length ? "add a spot or rectangle ROI to plot it over the whole recording"
+              : p.rois.rois.every((r) => r.kind === "smart") && ![...smart.states.values()].some((st) => st.kind === "ready" || st.kind === "loading")
+                ? "smart ROI not computed for this run yet: use “compute smart ROI” in the measurements panel"
               : seriesStatus === "error" ? "couldn’t load the series — check the operator, then adjust an ROI to retry"
               : "loading series over the whole recording… (long recordings can take several seconds)"
             }
@@ -424,7 +492,7 @@ export function PlaybackPage(p: Props) {
                 <span className="hint">discards edits and restores the ROIs as they were recorded (exports/roi_series.csv matches them)</span>
               </div>
             )}
-            <RoiRows rois={p.rois.rois} units={p.layout.units} conv={field?.conv ?? null} stats={stats} selected={p.rois.selected} selectedIds={p.rois.selectedIds} extremes={p.layout.extremes} onExtremes={(on) => p.dispatch({ type: "setExtremes", on })}
+            <RoiRows rois={p.rois.rois} smartPlayback={smartRows} units={p.layout.units} conv={field?.conv ?? null} stats={stats} selected={p.rois.selected} selectedIds={p.rois.selectedIds} extremes={p.layout.extremes} onExtremes={(on) => p.dispatch({ type: "setExtremes", on })}
               dispatch={p.roiDispatch} />
             <MaskPanel state={p.masks} dispatch={p.maskDispatch} maskMode={p.maskMode} onMaskMode={p.onMaskMode} usedPx={maskUsed} frame={field ? { w: field.w, h: field.h } : null} />
             <DeltaPicker rois={p.rois.rois} delta={p.layout.delta} onChange={(delta) => p.dispatch({ type: "setDelta", delta })} />

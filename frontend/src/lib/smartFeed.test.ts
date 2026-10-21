@@ -56,3 +56,16 @@ test("smartRowView: searching / missing entry / no feed yet carry no number", ()
   assert.deepEqual(smartRowView(smartFeedFrom(payload(), 0), 99, 0, 500).lines, ["no reading from the operator yet"]);
   assert.deepEqual(smartRowView(null, 3, 0, 500).lines, ["waiting for the operator…"]);
 });
+
+test("smartLiveValue: the live plot point is the operator's mean, NaN (a gap) whenever it is not a reading", async () => {
+  const { smartLiveValue } = await import("./smartFeed.ts");
+  assert.equal(smartLiveValue(smartFeedFrom(payload(), 0), 3, 0, 500), 507.3);
+  assert.equal(smartLiveValue(smartFeedFrom(payload({ state: "holding" }), 0), 3, 0, 500), 507.3, "holding is valid");
+  for (const [why, v] of [
+    ["searching", smartLiveValue(smartFeedFrom(payload({ state: "searching", valid: false, mean_c: null, max_c: null, min_c: null }), 0), 3, 0, 500)],
+    ["stale feed", smartLiveValue(smartFeedFrom(payload(), 0), 3, 5_000, 500)],
+    ["not live", smartLiveValue(smartFeedFrom(payload({}, false), 0), 3, 0, 500)],
+    ["no entry", smartLiveValue(smartFeedFrom(payload(), 0), 9, 0, 500)],
+    ["no feed", smartLiveValue(null, 3, 0, 500)],
+  ] as const) assert.ok(Number.isNaN(v), why);
+});

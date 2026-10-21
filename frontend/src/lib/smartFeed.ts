@@ -39,3 +39,9 @@ export function smartRowView(feed: SmartFeed | null, id: number, now: number, in
   if (!e.valid) return { lines, tone: e.state === "searching" ? "searching" : "invalid", mean: null, marker: e.state === "searching" ? "searching" : "not valid" };
   return { lines, tone: e.state === "holding" ? "holding" : "locked", mean: e.sample.mean_c, marker: e.state === "holding" ? "holding" : null };
 }
+
+/** One live-plot point for a smart ROI: the operator's sample mean, or NaN (a gap) when the feed
+ *  is stale, not live, or the entry is not a valid reading (searching / hold expired). */
+export function smartLiveValue(feed: SmartFeed | null, id: number, now: number, intervalMs: number): number {
+  return smartRowView(feed, id, now, intervalMs).mean ?? NaN;
+}

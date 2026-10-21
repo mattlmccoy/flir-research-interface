@@ -1,11 +1,11 @@
 import { NumberField } from "./NumberField.tsx";
 import { convertTemp, fmtTemp, type Conversion, type Units } from "../lib/units.ts";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { roiId, roiLabel, type Roi, type RoiAction, type RoiStats, loadRois } from "../lib/roi.ts";
 import { COLOR_PRESETS, roiColor } from "../lib/overlay.ts";
 import { Disclosure } from "./Disclosure.tsx";
 import { parseRingOffsets } from "../lib/smartSettings.ts";
-import { smartRowView, type SmartFeed } from "../lib/smartFeed.ts";
+import { smartRowView, type SmartFeed, type SmartRowView } from "../lib/smartFeed.ts";
 import { SMART_FEED_INTERVAL_MS } from "../lib/useSmartFeed.ts";
 
 interface Props {
@@ -16,29 +16,33 @@ interface Props {
   stats: Map<number, RoiStats>;
   selected: number | null; selectedIds?: number[];
   dispatch: (a: RoiAction) => void;
-  /** Live: the operator's smart ROI readouts (null = feed not running). Playback: omitted (its
-   *  smart values come from the stored series, not this panel). */
+  /** Live: the operator's smart ROI readouts (null = feed not running). Playback: omitted. */
   smartFeed?: SmartFeed | null;
+  /** Playback: each smart ROI's readout at the playhead from its stored series, plus its compute
+   *  control (lib/smartSeries.ts smartPlaybackRow). Takes precedence over `smartFeed`. */
+  smartPlayback?: Map<number, SmartPlaybackRow>;
 }
+export interface SmartPlaybackRow { view: SmartRowView; action: ReactNode; }
 
 type SmartRoi = Extract<Roi, { kind: "smart" }>;
 
 /** Value column of a smart row: the operator's mean (never a client-side number) while the feed is
  *  fresh and the entry valid; holding is marked and warn-coloured so it never reads as locked. */
-function SmartValue({ id, feed, units, conv }: { id: number; feed: SmartFeed | null | undefined; units: Units; conv: Conversion | null }) {
-  if (feed === undefined) return <span className="vals">…</span>;
-  const v = smartRowView(feed, id, Date.now(), SMART_FEED_INTERVAL_MS);
+function SmartValue({ id, feed, played, units, conv }: { id: number; feed: SmartFeed | null | undefined; played?: SmartPlaybackRow; units: Units; conv: Conversion | null }) {
+  if (feed === undefined && !played) return <span className="vals">…</span>;
+  const v = played ? played.view : smartRowView(feed ?? null, id, Date.now(), SMART_FEED_INTERVAL_MS);
   if (v.mean === null) return <span className={`vals smart-val tone-${v.tone}`}>{v.marker ?? "n/a"}</span>;
   return <span className={`vals smart-val tone-${v.tone}`} title={v.marker ? "holding the last good outline (edge lost this frame)" : undefined}>{v.marker ? `${v.marker} · ` : ""}{fmtTemp(v.mean, units, conv)}</span>;
 }
 
 /** Second line of a smart row: the operator's readout (state, sample, rings, thermal-edge size). */
-function SmartLines({ id, feed }: { id: number; feed: SmartFeed | null | undefined }) {
-  if (feed === undefined) return null;  // playback: the stored series carries the values
-  const v = smartRowView(feed, id, Date.now(), SMART_FEED_INTERVAL_MS);
+function SmartLines({ id, feed, played }: { id: number; feed: SmartFeed | null | undefined; played?: SmartPlaybackRow }) {
+  if (feed === undefined && !played) return null;
+  const v = played ? played.view : smartRowView(feed ?? null, id, Date.now(), SMART_FEED_INTERVAL_MS);
   return (
-    <div className={`roi-stats smart-readout state-${v.tone}`} title="Smart ROI values from the operator. Size is measured from the thermal edge, which also moves when heat spreading blurs the boundary: read it with the edge sharpness.">
+    <div className={`roi-stats smart-readout state-${v.tone}`} title={played ? "Smart ROI values at the playhead, from the series the operator computed and stored with this run. Size is measured from the thermal edge: read it with the edge sharpness." : "Smart ROI values from the operator. Size is measured from the thermal edge, which also moves when heat spreading blurs the boundary: read it with the edge sharpness."}>
       {v.lines.map((l, k) => <div key={k} className={k === 0 ? "smart-head" : undefined}>{l}</div>)}
+      {played?.action}
     </div>
   );
 }
@@ -177,7 +181,7 @@ function OpticsEditor({ r, dispatch }: { r: Roi; dispatch: (a: RoiAction) => voi
 }
 
 /** One row per ROI: color swatch (click to change), editable name, current values, remove. */
-export function RoiRows({ rois, stats, selected, selectedIds, dispatch, extremes, onExtremes, units = "C", conv = null, smartFeed }: Props) {
+export function RoiRows({ rois, stats, selected, selectedIds, dispatch, extremes, onExtremes, units = "C", conv = null, smartFeed, smartPlayback }: Props) {
   const isSel = (id: number) => (selectedIds ? selectedIds.includes(id) : selected === id);
   const [editing, setEditing] = useState<number | null>(null);
   const [picking, setPicking] = useState<number | null>(null);
@@ -216,14 +220,14 @@ export function RoiRows({ rois, stats, selected, selectedIds, dispatch, extremes
                 </button>
               )}
             </span>,
-            r.kind === "smart" ? <SmartValue key={`v${r.id}`} id={r.id} feed={smartFeed} units={units} conv={conv} /> : <Values key={`v${r.id}`} s={stats.get(r.id)} units={units} conv={conv} />,
+            r.kind === "smart" ? <SmartValue key={`v${r.id}`} id={r.id} feed={smartFeed} played={smartPlayback?.get(r.id)} units={units} conv={conv} /> : <Values key={`v${r.id}`} s={stats.get(r.id)} units={units} conv={conv} />,
             <span key={`x${r.id}`} style={{ display: "flex", gap: 4 }}>
               <button className="secondary" type="button" onClick={() => dispatch({ type: "toggleHidden", id: r.id })} aria-pressed={!!r.hidden} aria-label={`${r.hidden ? "Show" : "Hide"} ${roiLabel(r)}`} title={r.hidden ? "Hidden on the image (still measured and recorded) · click to show" : "Hide on the image (still measured and recorded)"} style={{ opacity: r.hidden ? 0.5 : 1 }}>{r.hidden ? "◌" : "◉"}</button>
               {r.kind === "smart" ? <button className="secondary" type="button" onClick={() => setOptics(optics === r.id ? null : r.id)} aria-pressed={optics === r.id} aria-label={`Smart ROI settings for ${roiLabel(r)}`} title="Smart ROI settings: ring offsets, edge rule, sensitivity, ring emissivity">⚙</button> :
               <button className="secondary" type="button" onClick={() => setOptics(optics === r.id ? null : r.id)} aria-pressed={optics === r.id} aria-label={`Optics for ${roiLabel(r)}`} title="Per-ROI emissivity, reflected temperature and distance (for accuracy on this region)" style={{ fontWeight: (r.emissivity !== undefined || r.reflected_c !== undefined || r.distance_m !== undefined) ? 700 : 400, color: (r.emissivity !== undefined || r.reflected_c !== undefined || r.distance_m !== undefined) ? "var(--accent)" : undefined }}>ε</button>}
               <button className="secondary" type="button" onClick={() => { dispatch({ type: "commit" }); dispatch({ type: "remove", id: r.id }); dispatch({ type: "commit" }); }} aria-label={`Remove ${roiLabel(r)}`} title="Remove">×</button>
             </span>,
-            r.kind === "smart" ? <SmartLines key={`s${r.id}`} id={r.id} feed={smartFeed} /> : <StatsLine key={`s${r.id}`} r={r} s={stats.get(r.id)} units={units} conv={conv} />,
+            r.kind === "smart" ? <SmartLines key={`s${r.id}`} id={r.id} feed={smartFeed} played={smartPlayback?.get(r.id)} /> : <StatsLine key={`s${r.id}`} r={r} s={stats.get(r.id)} units={units} conv={conv} />,
             picking === r.id ? <div key={`c${r.id}`} style={{ gridColumn: "1 / -1" }}><ColorPicker r={r} i={i} dispatch={dispatch} onDone={() => setPicking(null)} /></div> : null,
             optics === r.id ? <div key={`o${r.id}`} style={{ gridColumn: "1 / -1" }}>{r.kind === "smart" ? <SmartEditor r={r} dispatch={dispatch} /> : <OpticsEditor r={r} dispatch={dispatch} />}</div> : null,
           ]

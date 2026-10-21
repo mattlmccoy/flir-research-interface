@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { overlayBlock, pickOverlays, type OverlayCache } from "./smartPlayback.ts";
+import { overlayBlock, overlayOnError, pickOverlays, type OverlayCache } from "./smartPlayback.ts";
 import type { SmartOverlay } from "./smartLabels.ts";
 
 const ov = (id: number, state: SmartOverlay["state"]): SmartOverlay => ({ id, state, valid: state !== "searching", bbox: null, labels: null });
@@ -20,4 +20,10 @@ test("pickOverlays takes each ROI's overlay for the index from its cached block"
   assert.deepEqual(pickOverlays(cache, [1, 2], 121, 120), [ov(1, "locked")]);
   assert.deepEqual(pickOverlays(cache, [1], 125, 120), [], "past the end of the stored window");
   assert.deepEqual(pickOverlays(cache, [1], 5, 120), [], "block not loaded yet");
+});
+
+test("overlayOnError: only a 404 (not computed) is cached as missing; other failures are retried", () => {
+  assert.equal(overlayOnError(new Error("404 no smart ROI series for ROI 3; compute it")), "missing");
+  assert.equal(overlayOnError(new Error("500 Internal Server Error")), "retry");
+  assert.equal(overlayOnError(new TypeError("Failed to fetch")), "retry");
 });
