@@ -2,8 +2,9 @@
 
 The stored per-frame series (``smart_series``) is the single source: rows are by frame index, the
 same order as ``roi_series``. Frames the tracker was ``searching`` (and any value that is NaN on
-disk) are blank, never 0. A ROI without a usable stored series (not computed, or the frame count
-changed) gets all-blank columns and a header comment saying so, so absence never reads as data.
+disk) are blank, never 0. A ROI without a usable stored series (not computed, the frame count
+changed, or computed for a different spec than the exported ROI) gets all-blank columns and a
+header comment saying so, so absence or a stale series never reads as data for this ROI.
 """
 
 from __future__ import annotations
@@ -13,10 +14,12 @@ from typing import Any
 
 import numpy as np
 
+from flir_research_interface.analysis.smart_roi import parse_smart_roi
 from flir_research_interface.analysis.smart_series import (
     STATE_CODES,
     STATE_NAMES,
     load_smart_series,
+    smart_series_stale,
 )
 from flir_research_interface.playback.reader import ExperimentReader
 
@@ -55,11 +58,25 @@ def edge_note(roi: dict[str, Any]) -> str:
     return f"smart ROI {label}: thermal edge ({rule}); dimensions in pixels"
 
 
-def _series_for(reader: ExperimentReader, roi: dict[str, Any]) -> dict[str, Any] | None:
+_NO_SERIES = " [no stored series for this run: compute it, columns are blank]"
+_STALE = " [stored series computed for a different ROI spec: recompute]"
+
+
+def _series_for(
+    reader: ExperimentReader, roi: dict[str, Any]
+) -> tuple[dict[str, Any] | None, str]:
+    """``(usable stored series or None, note suffix)``. The series is usable only when it was
+    computed for this ROI's spec (as exported) with the run's stored optics and frame count."""
     data = load_smart_series(reader.path, int(roi["id"]))
-    if data is None or len(data["state"]) != reader.n_frames:
-        return None
-    return data
+    if data is None:
+        return None, _NO_SERIES
+    try:
+        spec = parse_smart_roi(roi)
+    except (ValueError, TypeError):
+        return None, _STALE
+    if smart_series_stale(reader, spec, data):
+        return None, _STALE
+    return data, ""
 
 
 def _cell(v: float, searching: bool) -> str:
@@ -72,8 +89,9 @@ def smart_csv_block(
     """``(header comment, column names, columns of n cell strings)`` for one smart ROI."""
     label = smart_label(roi)
     n = reader.n_frames
-    data = _series_for(reader, roi)
-    rings = [int(x) for x in (roi.get("rings_px") or _DEFAULT_RINGS)]
+    data, why = _series_for(reader, roi)
+    raw = data["rings_px"] if data is not None and data["rings_px"] else roi.get("rings_px")
+    rings = [int(x) for x in (raw or _DEFAULT_RINGS)]
     inner = [0, *rings[:-1]]
     names = [f"{label} {s}" for s in ("mean", "max", "min", "state")]
     for a, b in zip(inner, rings, strict=True):
@@ -81,8 +99,7 @@ def smart_csv_block(
     names += [f"{label} {title}" for _, title in _DIM_COLUMNS]
     note = edge_note(roi)
     if data is None:
-        note += " [no stored series for this run: compute it, columns are blank]"
-        return note, names, [[""] * n for _ in names]
+        return note + why, names, [[""] * n for _ in names]
     searching = np.asarray(data["state"]) == STATE_CODES["searching"]
     flags = [bool(x) for x in searching]
     cols: list[list[str]] = [
@@ -103,8 +120,9 @@ def smart_csv_block(
 
 
 def smart_plot_trace(reader: ExperimentReader, roi: dict[str, Any]) -> np.ndarray | None:
-    """Sample mean per frame (NaN while searching/unknown) for the run-summary plot, or None."""
-    data = _series_for(reader, roi)
+    """Sample mean per frame (NaN while searching/unknown) for the run-summary plot, or None when
+    there is no usable (computed, current) stored series."""
+    data, _ = _series_for(reader, roi)
     if data is None:
         return None
     mean = np.asarray(data["sample_mean"], dtype=float).copy()

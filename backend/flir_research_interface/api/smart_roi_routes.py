@@ -9,7 +9,6 @@ races a post-stop render, a regenerate or a move of the same run.
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import logging
 import threading
 from collections.abc import Callable
@@ -26,7 +25,7 @@ from flir_research_interface.analysis.smart_series import (
     overlay_window,
     series_path,
     series_payload,
-    stored_optics,
+    smart_series_stale,
 )
 from flir_research_interface.playback.reader import ExperimentReader
 
@@ -62,21 +61,6 @@ def _run_job(job: dict[str, Any], reader: ExperimentReader, spec: SmartRoiSpec) 
     except Exception as exc:  # noqa: BLE001 - surface the failure to the poller
         job["state"], job["error"] = "error", str(exc)
         logger.exception("smart ROI %d series failed for %s", spec.id, reader.path)
-
-
-def smart_series_stale(reader: ExperimentReader, spec: SmartRoiSpec, data: dict[str, Any]) -> bool:
-    """True when the stored series was computed from a different ROI spec / optics / frame count
-    than the run now stores (the ROI was edited after the series was computed)."""
-    now = {**dataclasses.asdict(spec), "search": [list(p) for p in spec.search],
-           "rings_px": list(spec.rings_px)}
-    then = dict(data.get("spec") or {})
-    now.pop("name", None)  # a rename does not change the tracking
-    then.pop("name", None)
-    return (
-        now != then
-        or stored_optics(reader, spec.id) != data.get("optics")
-        or reader.n_frames != len(data["state"])
-    )
 
 
 def compute_stored_smart_rois(

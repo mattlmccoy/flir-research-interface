@@ -275,3 +275,26 @@ def test_csv_smart_without_stored_series_is_blank_and_says_so(tmp_path: Path) ->
     )
     rows = list(csv.reader(ln for ln in text.splitlines() if not ln.startswith("#")))
     assert all(v == "" for v in rows[1][2:])
+
+
+def test_csv_smart_stale_series_is_blank_and_says_recompute(tmp_path: Path) -> None:
+    """A series computed for other rings must not be labelled with the ROI's current spec."""
+    reader, rois = _smart_run(tmp_path)
+    edited = [{**rois[0], "rings_px": [6, 12, 25]}]  # edited after the compute
+    text = series_csv(reader, edited)
+    assert any(
+        ln.startswith("# smart ROI part:")
+        and "[stored series computed for a different ROI spec: recompute]" in ln
+        for ln in text.splitlines()
+    ), text.splitlines()[:6]
+    rows = list(csv.reader(ln for ln in text.splitlines() if not ln.startswith("#")))
+    assert len(rows) == 1 + 6
+    assert all(v == "" for row in rows[1:] for v in row[2:])
+
+
+def test_run_summary_trace_skips_stale_smart_series(tmp_path: Path) -> None:
+    from flir_research_interface.analysis.smart_export import smart_plot_trace
+
+    reader, rois = _smart_run(tmp_path)
+    assert smart_plot_trace(reader, rois[0]) is not None
+    assert smart_plot_trace(reader, {**rois[0], "sensitivity": 0.6}) is None

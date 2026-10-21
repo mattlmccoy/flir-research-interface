@@ -72,6 +72,21 @@ def stored_optics(reader: ExperimentReader, roi_id: int) -> dict[str, Any]:
     return {}
 
 
+def smart_series_stale(reader: ExperimentReader, spec: SmartRoiSpec, data: dict[str, Any]) -> bool:
+    """True when the stored series was computed from a different ROI spec / optics / frame count
+    than ``spec`` and the run's stored optics (the ROI was edited after the series was computed)."""
+    now = {**asdict(spec), "search": [list(p) for p in spec.search],
+           "rings_px": list(spec.rings_px)}
+    then = dict(data.get("spec") or {})
+    now.pop("name", None)  # a rename does not change the tracking
+    then.pop("name", None)
+    return (
+        now != then
+        or stored_optics(reader, spec.id) != data.get("optics")
+        or reader.n_frames != len(data["state"])
+    )
+
+
 def compute_smart_series(
     reader: ExperimentReader,
     spec: SmartRoiSpec,
@@ -254,5 +269,6 @@ __all__ = [
     "overlay_window",
     "series_payload",
     "series_path",
+    "smart_series_stale",
     "stored_optics",
 ]
