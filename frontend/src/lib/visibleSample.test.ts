@@ -118,6 +118,13 @@ test("one launch-anchored segment among first-frame ones is enough to say so", (
   assert.ok(text.includes("; visible times from ffmpeg launch (~1 s early)"), text);
 });
 
+test("a result written before segments carried an anchor does not read as launch-timed", () => {
+  // the reference run's exports/visible_sample.json as it was written before `anchor` existed
+  const { anchor: _anchor, ...legacy } = OK.segments![0];
+  const text = visibleSampleStatusText({ ...OK, segments: [legacy] })!;
+  assert.ok(!text.includes("ffmpeg launch"), text);
+});
+
 test("segments timed from their first frame, or absent from the summary, add no timing note", () => {
   assert.ok(!visibleSampleStatusText(OK)!.includes("ffmpeg launch"));
   const { segments: _segments, ...noSegments } = OK;

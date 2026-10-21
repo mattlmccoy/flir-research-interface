@@ -26,7 +26,8 @@ export interface VisibleSampleSegment {
   index: number;
   file: string;
   t_start_s: number;
-  anchor: "first_frame" | "launch" | "relative";
+  /** Absent in results written before the field existed (2026-10-21). */
+  anchor?: "first_frame" | "launch" | "relative";
   frames_analysed: number;
 }
 
@@ -100,7 +101,9 @@ function describe(vs: VisibleSampleSummary): StatusLine {
       : "coverage unknown";
     text = `Visible sample: ${n} ${n === 1 ? "flash" : "flashes"} at the sample, ${span}`;
   }
-  if (Array.isArray(vs.segments) && vs.segments.some((s) => s.anchor !== "first_frame")) {
+  // Only an anchor that is recorded and is not the first frame counts: a result written before the
+  // field existed has none, and says nothing either way.
+  if (Array.isArray(vs.segments) && vs.segments.some((s) => s.anchor != null && s.anchor !== "first_frame")) {
     text += "; visible times from ffmpeg launch (~1 s early)";
   }
   if (vs.missing && vs.missing.length > 0) text += `; missing video: ${vs.missing.join(", ")}`;
