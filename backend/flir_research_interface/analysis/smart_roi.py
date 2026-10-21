@@ -19,7 +19,7 @@ SEARCH_MARGIN_PX = 15  # extra margin round the outline (beyond the outermost ri
 MIN_CONTRAST_C = 2.0  # core (p99) minus surroundings (p20) of the search area
 MIN_AREA_PX = 20
 MAX_AREA_JUMP = 0.35  # fractional area change vs the previous lock allowed in one frame
-_HOT_PCT, _COLD_PCT = 99.0, 20.0
+_HOT_PCT, _COLD_PCT = 99.0, 20.0  # core of the sample; drawn-outline surroundings
 
 DEFAULT_RINGS_PX: tuple[int, ...] = (5, 10, 25)
 SENSITIVITY_RANGE = (0.3, 0.7)
@@ -166,9 +166,14 @@ def _dilate(mask: BoolArr, r: int) -> BoolArr:
     return np.asarray(ndimage.distance_transform_edt(~mask) <= r, dtype=bool)
 
 
-def _edge(mask: BoolArr) -> BoolArr:
-    """Pixels of ``mask`` with a 4-neighbour outside it (the crop border counts as outside)."""
-    inner = ndimage.binary_erosion(mask, structure=ndimage.generate_binary_structure(2, 1))
+def _edge(mask: BoolArr, crop_border_inside: bool = False) -> BoolArr:
+    """Pixels of ``mask`` with a 4-neighbour outside it. The crop border counts as outside unless
+    ``crop_border_inside`` (then a mask cut off by the frame edge has no boundary there)."""
+    inner = ndimage.binary_erosion(
+        mask,
+        structure=ndimage.generate_binary_structure(2, 1),
+        border_value=1 if crop_border_inside else 0,
+    )
     return np.asarray(mask & ~inner, dtype=bool)
 
 
@@ -253,26 +258,44 @@ class SmartTracker:
 
     # -- per frame ---------------------------------------------------------------------------
 
-    def _search(self) -> tuple[BoolArr, Box] | None:
+    def _search(self) -> tuple[BoolArr, BoolArr | None, Box] | None:
+        """(search mask, cold band or None, their box). The band — the shell (max ring, max ring
+        + margin] outside the last outline — is where the surroundings are read while tracking."""
         if self._outline is None or self._outline_box is None:
             if self._user_box is None:
                 return None
             b = self._user_box
-            return self._user[b[1] : b[3], b[0] : b[2]], b
-        r = max(self.spec.rings_px) + SEARCH_MARGIN_PX
+            return self._user[b[1] : b[3], b[0] : b[2]], None, b
+        ring = max(self.spec.rings_px)
+        r = ring + SEARCH_MARGIN_PX
         b = _pad(self._outline_box, r + 1, self.w, self.h)
-        mask = _dilate(_place(self._outline, self._outline_box, b), r)
+        dist = ndimage.distance_transform_edt(~_place(self._outline, self._outline_box, b))
+        mask = np.asarray(dist <= r, dtype=bool)
+        band: BoolArr | None = None
         if self._state == "searching":  # re-lock: never wander far from where the user drew
             mask &= self._cap[b[1] : b[3], b[0] : b[2]]
+        else:
+            band = np.asarray(dist > ring, dtype=bool) & mask
         sb = _bbox(mask)
         if sb is None:
             return None
-        return mask[sb[1] : sb[3], sb[0] : sb[2]], (
-            b[0] + sb[0],
-            b[1] + sb[1],
-            b[0] + sb[2],
-            b[1] + sb[3],
-        )
+        cut = (slice(sb[1], sb[3]), slice(sb[0], sb[2]))
+        box = (b[0] + sb[0], b[1] + sb[1], b[0] + sb[2], b[1] + sb[3])
+        return mask[cut], None if band is None else band[cut], box
+
+    def _user_cold(
+        self, celsius: npt.NDArray[Any], over: npt.NDArray[np.bool_] | None
+    ) -> float | None:
+        """p20 of the drawn outline (over-range excluded): the surroundings before a lock."""
+        if self._user_box is None:
+            return None
+        x0, y0, x1, y1 = self._user_box
+        field_c, _ = self._fields(np.asarray(celsius[y0:y1, x0:x1], dtype=np.float64))
+        use = self._user[y0:y1, x0:x1] & np.isfinite(field_c)
+        if over is not None:
+            use &= ~np.asarray(over[y0:y1, x0:x1], dtype=bool)
+        vals = field_c[use]
+        return float(np.percentile(vals, _COLD_PCT)) if vals.size else None
 
     def _fields(self, crop: FloatArr) -> tuple[FloatArr, FloatArr]:
         from flir_research_interface.analysis.series import roi_field  # series imports us
@@ -284,14 +307,18 @@ class SmartTracker:
         return sample, roi_field(crop, ring_roi, self._cam, True)
 
     def _detect(
-        self, field_c: FloatArr, search: BoolArr, bad: BoolArr
+        self, field_c: FloatArr, search: BoolArr, bad: BoolArr, cold: float | None
     ) -> tuple[BoolArr | None, float | None]:
-        """(sample mask or None if this frame fails the checks, edge level)."""
+        """(sample mask or None if this frame fails the checks, edge level). ``hot`` is the p99 of
+        the pixels above a provisional level (the sample core), so it does not depend on how much
+        background the search area holds."""
         usable = search & ~bad
         vals = field_c[usable]
-        if vals.size == 0:
+        if vals.size == 0 or cold is None:
             return None, None
-        hot, cold = (float(v) for v in np.percentile(vals, [_HOT_PCT, _COLD_PCT]))
+        top = float(np.percentile(vals, _HOT_PCT))
+        core = vals[vals >= cold + self.spec.sensitivity * (top - cold)]
+        hot = float(np.percentile(core, _HOT_PCT)) if core.size else top
         if self.spec.rule == "fixed" and self.spec.fixed_c is not None:
             level = float(self.spec.fixed_c)
         else:
@@ -311,7 +338,7 @@ class SmartTracker:
             k = int(np.bincount(labels.ravel(), minlength=n + 1)[1:].argmax()) + 1
         comp = labels == k
         area = int(comp.sum())
-        if area < MIN_AREA_PX or bool((comp & _edge(search)).any()):
+        if area < MIN_AREA_PX or bool((comp & _edge(search, crop_border_inside=True)).any()):
             return None, level
         sample = np.asarray(ndimage.binary_fill_holes(comp), dtype=bool)
         area = int(sample.sum())
@@ -326,19 +353,7 @@ class SmartTracker:
         """Find the sample in this frame (or hold / search) and measure it."""
         if self._state != "searching" and t_s - self._last_good_t > HOLD_S:
             self._state = "searching"  # the last lock is stale: search again from this frame
-        relock = self._state == "searching"
         step = self._step(celsius, t_s, over)
-        if relock and self._state == "locked":
-            # The relative level depends on the area it is estimated in. A lock is found in the
-            # (tight) drawn outline, but every later frame searches the outline + margin, so measure
-            # the lock frame there too — otherwise the area jumps on the frame after a lock.
-            first_area = self._last_area
-            self._last_area = 0  # no jump check against the first pass
-            again = self._step(celsius, t_s, over)
-            if self._state == "locked":
-                step = again
-            else:  # the refinement failed: the first pass (outline still stored) stands
-                self._state, self._last_area = "locked", first_area
         if step is None:
             return self._lost(self._level)
         return self._measure(*step)
@@ -352,7 +367,7 @@ class SmartTracker:
         if found is None:
             self._state = "searching"
             return None
-        search_c, sbox = found
+        search_c, band_c, sbox = found
         work = self._work = _pad(sbox, max(self.spec.rings_px) + 1, self.w, self.h)
         x0, y0, x1, y1 = work
         search = _place(search_c, sbox, work)
@@ -362,7 +377,15 @@ class SmartTracker:
             if over is None
             else np.asarray(over[y0:y1, x0:x1], dtype=bool)
         )
-        sample, self._level = self._detect(sample_c, search, over_c | ~np.isfinite(sample_c))
+        bad = over_c | ~np.isfinite(sample_c)
+        cold: float | None = None
+        if band_c is not None:  # tracking: median of the shell outside the last outline
+            band = _place(band_c, sbox, work) & ~bad
+            if band.any():
+                cold = float(np.median(sample_c[band]))
+        if cold is None:
+            cold = self._user_cold(celsius, over)
+        sample, self._level = self._detect(sample_c, search, bad, cold)
         if sample is not None:
             self._state, self._last_good_t, self._last_area = "locked", t_s, int(sample.sum())
             sb = _bbox(sample)
