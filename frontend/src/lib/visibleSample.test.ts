@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { markColor, markerLegend } from "./events.ts";
-import { visibleFlashMarkers, visibleSampleStatusText, type VisibleSampleSummary } from "./visibleSample.ts";
+import { visibleFlashMarkers, visibleSampleIsError, visibleSampleStatusText, type VisibleSampleSummary } from "./visibleSample.ts";
 
 // Event times, peaks and coverage are the values measured on the real run 20261020_144402_Run
 // (task-3 report, `merge_s=1.0`); the surrounding keys follow `_summary` in visible_sample_run.py.
@@ -106,7 +106,72 @@ test("a skipped or failed run with a null reason still says why nothing was anal
 });
 
 test("an ok summary without coverage is reported as incomplete rather than as a clean run", () => {
-  const text = visibleSampleStatusText({ status: "ok", reason: null })!;
+  const text = visibleSampleStatusText({ status: "ok", reason: null, events: [] })!;
   assert.ok(text.startsWith("Visible sample:"), text);
   assert.ok(text.includes("coverage unknown"), text);
+});
+
+// -- unreadable and empty summaries must never read as healthy -------------------------------------
+
+// coverage() in analysis/visible_sample.py returns exactly this for no analysed frames (checked by
+// running it: {"frames_analysed": 0, "t_first_s": null, "t_last_s": null, "gaps_over_300ms": 0}).
+const NO_FRAMES = { frames_analysed: 0, t_first_s: null, t_last_s: null, gaps_over_300ms: 0 };
+const NOTHING_TO_MEASURE = "Visible sample: 0 frames analysed, nothing to measure";
+
+test("an ok run with no analysed frames (null bounds, as coverage() returns) does not throw", () => {
+  const vs: VisibleSampleSummary = { ...OK, coverage: NO_FRAMES, events: [] };
+  assert.equal(visibleSampleStatusText(vs), NOTHING_TO_MEASURE);
+});
+
+test("zero analysed frames reads as nothing to measure even if the bounds are numbers", () => {
+  const vs: VisibleSampleSummary = { ...OK, coverage: { ...OK.coverage!, frames_analysed: 0 }, events: [] };
+  assert.equal(visibleSampleStatusText(vs), NOTHING_TO_MEASURE);
+});
+
+test("a null bound alone is enough to report nothing to measure, not a crash", () => {
+  const noFirst: VisibleSampleSummary = { ...OK, coverage: { ...OK.coverage!, t_first_s: null } };
+  const noLast: VisibleSampleSummary = { ...OK, coverage: { ...OK.coverage!, t_last_s: null } };
+  assert.equal(visibleSampleStatusText(noFirst), NOTHING_TO_MEASURE);
+  assert.equal(visibleSampleStatusText(noLast), NOTHING_TO_MEASURE);
+});
+
+test("zero analysed frames still reports a missing video segment", () => {
+  const text = visibleSampleStatusText({ ...OK, coverage: NO_FRAMES, events: [], missing: ["visible_000.mp4"] })!;
+  assert.ok(text.startsWith(NOTHING_TO_MEASURE), text);
+  assert.ok(text.includes("missing video: visible_000.mp4"), text);
+});
+
+test("a summary with no status is unreadable, not an ok run", () => {
+  assert.equal(visibleSampleStatusText({} as unknown as VisibleSampleSummary), "Visible sample: unreadable result (status missing)");
+});
+
+test("a summary with a status this UI does not know is unreadable and names it", () => {
+  const vs = { status: "running", reason: null } as unknown as VisibleSampleSummary;
+  assert.equal(visibleSampleStatusText(vs), "Visible sample: unreadable result (status running)");
+});
+
+test("an ok summary without an events list is unreadable, not '0 flashes'", () => {
+  const { events: _events, ...noEvents } = OK;
+  assert.equal(visibleSampleStatusText(noEvents), "Visible sample: unreadable result (no events list)");
+  const notAnArray = { ...OK, events: {} } as unknown as VisibleSampleSummary;
+  assert.equal(visibleSampleStatusText(notAnArray), "Visible sample: unreadable result (no events list)");
+});
+
+test("no markers come from an unknown status or a malformed events list", () => {
+  assert.deepEqual(visibleFlashMarkers({ ...OK, status: "running" } as unknown as VisibleSampleSummary), []);
+  assert.deepEqual(visibleFlashMarkers({} as unknown as VisibleSampleSummary), []);
+  assert.deepEqual(visibleFlashMarkers({ ...OK, events: {} } as unknown as VisibleSampleSummary), []);
+});
+
+test("failed and unreadable summaries are styled as errors; skipped, ok, empty and absent are not", () => {
+  assert.equal(visibleSampleIsError(FAILED), true);
+  assert.equal(visibleSampleIsError({} as unknown as VisibleSampleSummary), true);
+  assert.equal(visibleSampleIsError({ status: "running", reason: null } as unknown as VisibleSampleSummary), true);
+  const { events: _events, ...noEvents } = OK;
+  assert.equal(visibleSampleIsError(noEvents), true);
+  assert.equal(visibleSampleIsError(SKIPPED), false);
+  assert.equal(visibleSampleIsError(OK), false);
+  assert.equal(visibleSampleIsError({ ...OK, coverage: NO_FRAMES, events: [] }), false);
+  assert.equal(visibleSampleIsError(null), false);
+  assert.equal(visibleSampleIsError(undefined), false);
 });

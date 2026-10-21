@@ -2,7 +2,7 @@ import { NumberField } from "./NumberField.tsx";
 import { useState } from "react";
 import { api, type Hdf5Export, type ThermalVideoExport } from "../lib/api.ts";
 import { roisDifferFromStored, type Roi } from "../lib/roi.ts";
-import { visibleSampleStatusText, type VisibleSampleSummary } from "../lib/visibleSample.ts";
+import { visibleSampleIsError, visibleSampleStatusText, type VisibleSampleSummary } from "../lib/visibleSample.ts";
 
 interface Props { name: string; index: number; nFrames: number; rois: Roi[]; celsius: boolean; thermalPreview?: { bytes: number } | null; onThermalPreview?: () => void; files?: { name: string; bytes: number }[]; onRefresh?: () => void; storedRois?: unknown[] | null; visibleSample?: VisibleSampleSummary | null; }
 
@@ -113,7 +113,7 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
         <div className="warnbox derived-progress">
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}><Spinner /><b>{progLabel(prog)}</b></div>
           <ProgressBar done={prog?.done ?? 0} total={prog?.total ?? 0} />
-          <div className="hint" style={{ marginTop: 3 }}>Rendering the ROI-annotated video is the slow step; you can keep working while it finishes.</div>
+          <div className="hint" style={{ marginTop: 3 }}>Analysing the visible video and rendering the ROI-annotated video (not in a quick regenerate) are the slow steps; you can keep working while they finish.</div>
         </div>
       ) : stale ? (
         <div className="warnbox derived-stale">
@@ -130,7 +130,7 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
           </div>
           <button className="linkish" disabled={busyElsewhere} onClick={() => regenerateDerived(true, false)} style={{ marginTop: 6 }}
             title="Update the ROI plot, roi_series.csv, the peak-frame image and the visible-camera analysis (with its close-up video) from the ROIs on screen, but skip re-rendering the slow ROI video.">
-            or just the plot + CSV — skip the video (fast)
+            or just plot + CSV + visible analysis — skip the ROI video
           </button>
         </div>
       ) : (files.length > 0 || rois.length > 0) ? (
@@ -142,12 +142,12 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
             </button>
           </div>
           <button className="linkish" disabled={busyElsewhere} onClick={() => regenerateDerived(true, false)} title="Rebuild the ROI plot, roi_series.csv, the peak-frame image and the visible-camera analysis (with its close-up video), but skip the slow ROI video.">
-            plot + CSV only (skip video)
+            plot + CSV + visible analysis (skip ROI video)
           </button>
         </div>
       ) : null}
       {!derivedBusy && derivedOut && <div className="hint" style={{ color: "var(--accent)" }}>{derivedOut}</div>}
-      {visibleSampleText && <div className={visibleSample?.status === "failed" ? "errbox" : "hint"}>{visibleSampleText}</div>}
+      {visibleSampleText && <div className={visibleSampleIsError(visibleSample) ? "errbox" : "hint"}>{visibleSampleText}</div>}
       <div className="kv">
         <span>ROI series</span>
         <span className="v plain" style={{ textAlign: "right" }}>
