@@ -62,8 +62,11 @@ def segment_windows(
     ``timeline`` is :func:`~flir_research_interface.playback.visible_timing.thermal_segments`:
     each segment starts ``t_start_s`` into the thermal axis; one with no probed duration runs until
     the next one starts. A window never begins inside a segment's first ``FRAME0_SKIP_S`` (the torn
-    opening keyframe), and thermal time before the video starts has no visible frame.
+    opening keyframe), and thermal time before the video starts has no visible frame. A point
+    query (``t0 == t1``, the export preview) inside a segment is a zero-length window there, which
+    :class:`VisibleSource` extracts as one frame.
     """
+    point = t0 == t1
     out: list[tuple[str, float, float, float]] = []
     for i, seg in enumerate(timeline):
         o = float(seg["t_start_s"])
@@ -72,7 +75,7 @@ def segment_windows(
             float(timeline[i + 1]["t_start_s"]) if i + 1 < len(timeline) else float("inf")
         )
         a, b = max(t0, o + FRAME0_SKIP_S), min(t1, end)
-        if b > a:
+        if b > a or (point and b == a and a < end):
             out.append((str(seg["file"]), a - o, b - a, a))
     return out
 
