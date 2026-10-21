@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { feedFresh, smartFeedFrom, smartRowView, type SmartFeed } from "./smartFeed.ts";
 
-// GET /api/live/roi-temps shape (backend analysis/live_temps.py): {live, stale, rois:[...]}
-const LOCKED = {
-  id: 3, kind: "smart", mean_c: 507.3, max_c: 522.1, min_c: 480.4, over_range: false, valid: true, state: "locked",
-  rings: [], dims: null,
-};
-const payload = (over: Record<string, unknown> = {}, live = true) => ({ live, stale: !live, rois: [{ ...LOCKED, ...over }] });
+// Real GET /api/live/roi-temps payloads (backend live_temps.live_roi_payload + SmartLive over real
+// A70 frames), captured by scripts/capture_smart_series_fixture.py --only feed.
+type Payload = { live: boolean; stale: boolean; rois: Record<string, unknown>[] };
+const FEED = JSON.parse(readFileSync(new URL("./fixtures/smart_feed_20261020.json", import.meta.url), "utf8")) as Record<"locked" | "holding" | "searching", Payload>;
+const LOCKED = FEED.locked.rois[0];
+const MEAN = LOCKED.mean_c as number;
+/** A captured payload; `over` patches its smart entry (for cases the real frames lack). */
+const payload = (over: Record<string, unknown> = {}, live = true, base: Payload = FEED.locked) => ({ ...base, live, stale: !live, rois: [{ ...base.rois[0], ...over }] });
 
 test("feedFresh: a feed older than two poll intervals (or failed) is not fresh", () => {
   const f = smartFeedFrom(payload(), 10_000);
@@ -28,8 +31,7 @@ test("smartRowView: a stale feed reads unreachable, never the last numbers", () 
 });
 
 test("smartRowView: operator not live says so instead of searching", () => {
-  const raw = { ...LOCKED, valid: false, state: "searching", mean_c: null, max_c: null, min_c: null };
-  const f = smartFeedFrom({ live: false, stale: true, rois: [raw] }, 0);
+  const f = smartFeedFrom(payload({}, false, FEED.searching), 0);
   const v = smartRowView(f, 3, 0, 500);
   assert.deepEqual(v.lines, ["operator not live: no current camera frame"]);
   assert.equal(v.mean, null);
@@ -39,17 +41,17 @@ test("smartRowView: operator not live says so instead of searching", () => {
 test("smartRowView: locked is live-toned with its mean; holding is warn-toned with a holding marker", () => {
   const l = smartRowView(smartFeedFrom(payload(), 0), 3, 0, 500);
   assert.equal(l.tone, "locked");
-  assert.equal(l.mean, 507.3);
+  assert.equal(l.mean, MEAN);
   assert.equal(l.marker, null);
-  const h = smartRowView(smartFeedFrom(payload({ state: "holding" }), 0), 3, 0, 500);
+  const h = smartRowView(smartFeedFrom(FEED.holding, 0), 3, 0, 500);
   assert.equal(h.tone, "holding");
-  assert.equal(h.mean, 507.3);
+  assert.equal(h.mean, 25.0);
   assert.equal(h.marker, "holding");
   assert.match(h.lines[0], /^holding — edge lost · mean/);
 });
 
 test("smartRowView: searching / missing entry / no feed yet carry no number", () => {
-  const s = smartRowView(smartFeedFrom(payload({ valid: false, state: "searching", mean_c: null }), 0), 3, 0, 500);
+  const s = smartRowView(smartFeedFrom(FEED.searching, 0), 3, 0, 500);
   assert.equal(s.mean, null);
   assert.equal(s.tone, "searching");
   assert.equal(s.marker, "searching");
@@ -59,10 +61,10 @@ test("smartRowView: searching / missing entry / no feed yet carry no number", ()
 
 test("smartLiveValue: the live plot point is the operator's mean, NaN (a gap) whenever it is not a reading", async () => {
   const { smartLiveValue } = await import("./smartFeed.ts");
-  assert.equal(smartLiveValue(smartFeedFrom(payload(), 0), 3, 0, 500), 507.3);
-  assert.equal(smartLiveValue(smartFeedFrom(payload({ state: "holding" }), 0), 3, 0, 500), 507.3, "holding is valid");
+  assert.equal(smartLiveValue(smartFeedFrom(payload(), 0), 3, 0, 500), MEAN);
+  assert.equal(smartLiveValue(smartFeedFrom(FEED.holding, 0), 3, 0, 500), 25.0, "holding is valid");
   for (const [why, v] of [
-    ["searching", smartLiveValue(smartFeedFrom(payload({ state: "searching", valid: false, mean_c: null, max_c: null, min_c: null }), 0), 3, 0, 500)],
+    ["searching", smartLiveValue(smartFeedFrom(FEED.searching, 0), 3, 0, 500)],
     ["stale feed", smartLiveValue(smartFeedFrom(payload(), 0), 3, 5_000, 500)],
     ["not live", smartLiveValue(smartFeedFrom(payload({}, false), 0), 3, 0, 500)],
     ["no entry", smartLiveValue(smartFeedFrom(payload(), 0), 9, 0, 500)],
@@ -73,7 +75,7 @@ test("smartLiveValue: the live plot point is the operator's mean, NaN (a gap) wh
 test("smartChipFeed: the on-image chips get the feed's entries only while it is fresh and live", async () => {
   const { smartChipFeed } = await import("./smartFeed.ts");
   const f = smartFeedFrom(payload(), 10_000);
-  assert.equal(smartChipFeed(f, 10_500, 500)?.get(3)?.sample.mean_c, 507.3);
+  assert.equal(smartChipFeed(f, 10_500, 500)?.get(3)?.sample.mean_c, MEAN);
   assert.equal(smartChipFeed(f, 11_001, 500), undefined, "hung poll: chips must not keep the last numbers");
   assert.equal(smartChipFeed(smartFeedFrom(payload({}, false), 10_000), 10_000, 500), undefined, "not live");
   assert.equal(smartChipFeed({ ok: false, at: 10_000, live: true, entries: f.entries }, 10_000, 500), undefined, "failed poll");

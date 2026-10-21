@@ -1,24 +1,17 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { smartBadge, smartChip, smartEntryFromFeed, smartFeedMap, smartReadoutLines, type SmartReadoutEntry } from "./smartReadout.ts";
 
-// Shape of a smart entry in GET /api/live/roi-temps (backend analysis/live_temps.py _smart_entry):
-// flat mean_c/max_c/min_c plus state, valid, rings [{inner_px, outer_px, mean_c, max_c, min_c}]
-// and dims (smart_roi.py _dims + *_change_pct).
-const FEED_LOCKED = {
-  id: 3, name: "graphite", kind: "smart",
-  mean_c: 507.3, max_c: 522.1, min_c: 480.4, value_c: null, over_range: false, valid: true,
-  state: "locked",
-  rings: [
-    { inner_px: 0, outer_px: 5, mean_c: 159.4, max_c: 170.2, min_c: 150.0 },
-    { inner_px: 5, outer_px: 10, mean_c: 80.0, max_c: 90.0, min_c: 70.0 },
-    { inner_px: 10, outer_px: 25, mean_c: 41.26, max_c: 45.0, min_c: 38.0 },
-  ],
-  dims: {
-    area_px: 5697, length_px: 98.24, width_px: 61.0, perimeter_px: 310, centroid_x: 312.44, centroid_y: 240.06,
-    sharpness_c_per_px: 4.123, area_change_pct: 1.24, length_change_pct: 0.4, width_change_pct: -0.31, units: "px",
-  },
-};
+// Real GET /api/live/roi-temps payloads (backend live_temps.live_roi_payload over the real live
+// tracker SmartLive and five real A70 frames of run 20261020_144402_Run), captured by
+// scripts/capture_smart_series_fixture.py --only feed. Locked = the 549 s frame, holding = the
+// first frame after the sample vanished, searching = the first frame after HOLD_S lapsed.
+type Payload = { rois: Record<string, unknown>[] };
+const FEED = JSON.parse(readFileSync(new URL("./fixtures/smart_feed_20261020.json", import.meta.url), "utf8")) as Record<"locked" | "holding" | "searching", Payload>;
+const FEED_LOCKED = FEED.locked.rois[0] as Record<string, unknown> & { rings: Record<string, unknown>[]; dims: Record<string, unknown> };
+const FEED_HOLDING = FEED.holding.rois[0];
+const FEED_SEARCHING = FEED.searching.rois[0];
 
 const entry = (raw: unknown): SmartReadoutEntry => {
   const e = smartEntryFromFeed(raw);
@@ -28,32 +21,35 @@ const entry = (raw: unknown): SmartReadoutEntry => {
 
 test("locked: numbers, rings, thermal-edge size and change since first lock", () => {
   assert.deepEqual(smartReadoutLines(entry(FEED_LOCKED)), [
-    "locked · mean 507 °C · max 522 · min 480 · area 5697 px",
-    "ring 0–5 px · mean 159 °C · max 170 · min 150",
-    "ring 5–10 px · mean 80.0 °C · max 90.0 · min 70.0",
-    "ring 10–25 px · mean 41.3 °C · max 45.0 · min 38.0",
-    "size (thermal edge, px) · length 98.2 · width 61.0 · perimeter 310 · sharpness 4.12 °C/px",
-    "change since first lock · area +1.2 % · length +0.4 % · width −0.3 %",
-    "centroid 312.4, 240.1 px",
+    "locked · mean 113 °C · max 147 · min 86.7 · area 1077 px",
+    "ring 0–5 px · mean 72.5 °C · max 86.5 · min 53.2",
+    "ring 5–10 px · mean 51.1 °C · max 73.1 · min 39.5",
+    "ring 10–25 px · mean 33.7 °C · max 50.3 · min 26.8",
+    "size (thermal edge, px) · length 41.6 · width 34.5 · perimeter 118 · sharpness 6.33 °C/px",
+    "change since first lock · area +19.3 % · length +8.6 % · width −5.0 %",
+    "centroid 60.5, 59.5 px",
   ]);
 });
 
 test("holding is valid: numbers shown, prefixed holding — edge lost", () => {
-  const lines = smartReadoutLines(entry({ ...FEED_LOCKED, state: "holding" }));
-  assert.equal(lines[0], "holding — edge lost · mean 507 °C · max 522 · min 480 · area 5697 px");
-  assert.equal(lines[1], "ring 0–5 px · mean 159 °C · max 170 · min 150");
+  const lines = smartReadoutLines(entry(FEED_HOLDING));
+  assert.equal(lines[0], "holding — edge lost · mean 25.0 °C · max 25.0 · min 25.0 · area 1077 px");
+  assert.equal(lines[1], "ring 0–5 px · mean 25.0 °C · max 25.0 · min 25.0");
   assert.equal(lines.length, 7);
 });
 
 test("searching (invalid): status text only, no numbers", () => {
-  const raw = { ...FEED_LOCKED, state: "searching", valid: false, mean_c: null, max_c: null, min_c: null, dims: null,
-    rings: FEED_LOCKED.rings.map((r) => ({ ...r, mean_c: null, max_c: null, min_c: null })) };
-  assert.deepEqual(smartReadoutLines(entry(raw)), ["searching… (not locked yet)"]);
+  const e = entry(FEED_SEARCHING);
+  assert.equal(e.valid, false);
+  assert.equal(e.rings.length, 3, "the operator always sends one (null) ring per offset");
+  assert.deepEqual(smartReadoutLines(e), ["searching… (not locked yet)"]);
 });
 
 test("invalid while locked or holding (e.g. over-range) never shows numbers", () => {
-  // the operator keeps the state but drops the numbers (live_temps._smart_entry, invalid branch)
-  const over = { ...FEED_LOCKED, valid: false, over_range: true, mean_c: null, max_c: null, min_c: null, dims: null };
+  // the operator keeps the state but drops the numbers (live_temps._smart_entry, invalid branch);
+  // derived from the captured locked entry (the five real frames have no over-range pixels)
+  const nullRings = FEED_LOCKED.rings.map((r) => ({ ...r, mean_c: null, max_c: null, min_c: null }));
+  const over = { ...FEED_LOCKED, valid: false, over_range: true, mean_c: null, max_c: null, min_c: null, dims: null, rings: nullRings };
   assert.deepEqual(smartReadoutLines(entry(over)), ["locked · not valid (over-range pixels)"]);
   const lapsed = { ...over, state: "holding", over_range: false };
   assert.deepEqual(smartReadoutLines(entry(lapsed)), ["holding — edge lost · not valid"]);
@@ -64,17 +60,17 @@ test("missing values read n/a, never as a number", () => {
     rings: [{ inner_px: 0, outer_px: 5, mean_c: null, max_c: null, min_c: null }],
     dims: { ...FEED_LOCKED.dims, sharpness_c_per_px: null, area_change_pct: null, length_change_pct: null, width_change_pct: null } };
   assert.deepEqual(smartReadoutLines(entry(raw)), [
-    "locked · mean 507 °C · max 522 · min 480 · area 5697 px",
+    "locked · mean 113 °C · max 147 · min 86.7 · area 1077 px",
     "ring 0–5 px · n/a",
-    "size (thermal edge, px) · length 98.2 · width 61.0 · perimeter 310 · sharpness n/a",
+    "size (thermal edge, px) · length 41.6 · width 34.5 · perimeter 118 · sharpness n/a",
     "change since first lock · area n/a · length n/a · width n/a",
-    "centroid 312.4, 240.1 px",
+    "centroid 60.5, 59.5 px",
   ]);
 });
 
 test("a valid entry without dims shows no size lines", () => {
   assert.deepEqual(smartReadoutLines(entry({ ...FEED_LOCKED, rings: [], dims: null })), [
-    "locked · mean 507 °C · max 522 · min 480",
+    "locked · mean 113 °C · max 147 · min 86.7",
   ]);
 });
 
@@ -100,7 +96,7 @@ test("smartFeedMap keys the feed's smart entries by ROI id and skips everything 
   ] };
   const m = smartFeedMap(payload);
   assert.deepEqual([...m.keys()], [3]);
-  assert.equal(m.get(3)?.sample.mean_c, 507.3);
+  assert.equal(m.get(3)?.sample.mean_c, FEED_LOCKED.mean_c);
   assert.equal(smartFeedMap(null).size, 0);
   assert.equal(smartFeedMap({ rois: "nope" }).size, 0);
 });
@@ -112,7 +108,7 @@ test("a change that rounds to zero reads +0.0 %, never −0.0 %", () => {
 
 test("smartChip: state from the frame's overlay, numbers only when the feed agrees and is valid", () => {
   const locked = entry(FEED_LOCKED);
-  assert.deepEqual(smartChip({ state: "locked", valid: true }, locked), { value: "locked", range: "mean 507.3  max 522.1", muted: false });
+  assert.deepEqual(smartChip({ state: "locked", valid: true }, locked), { value: "locked", range: "mean 113.4  max 147.4", muted: false });
   assert.equal(smartChip({ state: "locked", valid: true }, locked).muted, false, "valid: ROI colour dot");
   assert.equal(smartChip({ state: "searching", valid: false }, locked).muted, true, "searching: muted dot");
   assert.equal(smartChip({ state: "locked", valid: false }, undefined).muted, true, "invalid: muted dot");
@@ -121,6 +117,6 @@ test("smartChip: state from the frame's overlay, numbers only when the feed agre
   assert.deepEqual(smartChip({ state: "searching", valid: false }, locked), { value: "searching… (not locked yet)", range: null, muted: true });
   assert.deepEqual(smartChip({ state: "holding", valid: true }, undefined), { value: "holding — edge lost", range: null, muted: false });
   assert.deepEqual(smartChip({ state: "locked", valid: false }, undefined), { value: "locked · not valid", range: null, muted: true });
-  assert.deepEqual(smartChip(undefined, locked), { value: "locked", range: "mean 507.3  max 522.1", muted: false }, "no overlay: the feed alone");
+  assert.deepEqual(smartChip(undefined, locked), { value: "locked", range: "mean 113.4  max 147.4", muted: false }, "no overlay: the feed alone");
   assert.deepEqual(smartChip(undefined, undefined), { value: "no outline", range: null, muted: true });
 });
