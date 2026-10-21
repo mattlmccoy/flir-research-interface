@@ -19,6 +19,9 @@ interface Args {
   info: ExperimentInfo | null;
   setInfo: (i: ExperimentInfo) => void;
   setErr: (m: string) => void;
+  /** Index of the frame on screen (null: none yet); the outline and readout follow it. */
+  shown: number | null;
+  /** Playhead index, used for the readout only while no frame is on screen. */
   index: number;
   show: { sample: boolean; rings: boolean };
   sizeDim: Exclude<SmartDimChoice, "off">;
@@ -27,8 +30,12 @@ interface Args {
 export interface SmartPlayback {
   smartIds: number[];
   smart: SmartSeriesHook;
-  /** Stored outlines for this frame (none until the run's smart series is computed). */
+  /** Stored outlines of the frame on screen (none until the run's smart series is computed). */
   overlays: SmartOverlay[];
+  /** Await before showing frame `index` so it and its outline appear together. */
+  ensureOverlays: (index: number) => Promise<void>;
+  /** Abort overlay fetches that hold none of these frame indices. */
+  retainOverlays: (indexes: number[]) => void;
   /** Ids whose stored series no longer matches the ROI (stored or on screen): drawn muted. */
   stale: Set<number>;
   rows: Map<number, SmartPlaybackRow>;
@@ -36,7 +43,7 @@ export interface SmartPlayback {
   plot: SmartTrace[];
 }
 
-export function useSmartPlayback({ name, rois, info, setInfo, setErr, index, show, sizeDim }: Args): SmartPlayback {
+export function useSmartPlayback({ name, rois, info, setInfo, setErr, shown, index, show, sizeDim }: Args): SmartPlayback {
   const smartIds = useMemo(() => rois.filter((r) => r.kind === "smart").map((r) => r.id), [rois]);
   // A compute reads the ROI stored with the run, so an unsaved or edited smart ROI is saved first:
   // only that ROI is written into the run's stored set (same id replaced, else appended). The info
@@ -58,7 +65,8 @@ export function useSmartPlayback({ name, rois, info, setInfo, setErr, index, sho
     return got.ok;
   }, [name, rois, setErr, setInfo]);
   const smart = useSmartSeries(name, smartIds, beforeCompute, setErr);
-  const overlays = useSmartPlaybackOverlays(name, smartIds, index, smart.version);
+  const { overlays, ensure: ensureOverlays, retain: retainOverlays } = useSmartPlaybackOverlays(name, smartIds, shown, smart.version);
+  const at = shown ?? index;
   const stale = useMemo(() => new Set(rois.flatMap((r) => {
     const st = smart.states.get(r.id);
     return r.kind === "smart" && st?.kind === "ready" && (st.series.stale || smartEdited(r, info?.rois)) ? [r.id] : [];
@@ -74,7 +82,7 @@ export function useSmartPlayback({ name, rois, info, setInfo, setErr, index, sho
       const text = smartJobText(job);
       m.set(r.id, {
         // the exact frame's stored state (overlay) gates the number when the series is downsampled
-        view: smartPlaybackRow(st, index, { edited, overlay: overlays.find((o) => o.id === r.id) ?? null }),
+        view: smartPlaybackRow(st, at, { edited, overlay: overlays.find((o) => o.id === r.id) ?? null }),
         action: act || text ? createElement(SmartComputeCell, {
           label: roiLabel(r), act, job, text,
           onAct: () => (act?.kind === "reload" ? smart.reload(r.id) : smart.compute(r.id)),
@@ -82,12 +90,12 @@ export function useSmartPlayback({ name, rois, info, setInfo, setErr, index, sho
       });
     }
     return m;
-  }, [rois, smart.states, smart.jobs, smart.compute, smart.reload, index, info?.rois, overlays]);  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [rois, smart.states, smart.jobs, smart.compute, smart.reload, at, info?.rois, overlays]);  // eslint-disable-line react-hooks/exhaustive-deps
   const plot = rois.flatMap((r, i) => {
     const st = smart.states.get(r.id);
     if (r.kind !== "smart" || r.hidden || st?.kind !== "ready") return [];
     const isStale = st.series.stale || smartEdited(r, info?.rois);
     return smartTraces(st.series, { ...show, dims: sizeDim }, { id: r.id, label: roiLabel(r), color: roiColor(r, i), stale: isStale });
   });
-  return { smartIds, smart, overlays, stale, rows, plot };
+  return { smartIds, smart, overlays, ensureOverlays, retainOverlays, stale, rows, plot };
 }

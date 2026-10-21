@@ -175,8 +175,9 @@ export const api = {
     if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
     return res.arrayBuffer();
   },
-  frameBlock: async (name: string, start: number, count: number, rfNotch = false): Promise<ArrayBuffer> => {
-    const res = await req(`/api/experiments/${encodeURIComponent(name)}/frames?start=${start}&count=${count}${rfNotch ? "&rf_notch=1" : ""}`);
+  /** `signal` aborts the download when the playhead no longer needs the block (lib/frameBlocks.ts). */
+  frameBlock: async (name: string, start: number, count: number, rfNotch = false, signal?: AbortSignal): Promise<ArrayBuffer> => {
+    const res = await req(`/api/experiments/${encodeURIComponent(name)}/frames?start=${start}&count=${count}${rfNotch ? "&rf_notch=1" : ""}`, { signal });
     if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
     return res.arrayBuffer();
   },
@@ -243,8 +244,8 @@ export const api = {
   /** The operator's per-ROI live feed (smart ROI numbers come only from here; see lib/smartReadout.ts). */
   liveRoiTemps: (signal?: AbortSignal) => j<unknown>(req("/api/live/roi-temps", { signal })),
   /** Stored smart ROI outlines for frame indices [start, start + count) of a recorded run (404 until computed). */
-  smartOverlay: (name: string, roiId: number, start: number, count: number) =>
-    j<SmartOverlay[]>(req(`/api/experiments/${encodeURIComponent(name)}/smart-roi/${roiId}/overlay?start=${start}&count=${count}`)),
+  smartOverlay: (name: string, roiId: number, start: number, count: number, signal?: AbortSignal) =>
+    j<SmartOverlay[]>(req(`/api/experiments/${encodeURIComponent(name)}/smart-roi/${roiId}/overlay?start=${start}&count=${count}`, { signal })),
   /** A recorded run's stored smart ROI series for the plot (404 until computed; parse with lib/smartSeries.ts). */
   smartSeries: (name: string, roiId: number, maxPoints: number) =>
     j<unknown>(req(`/api/experiments/${encodeURIComponent(name)}/smart-roi/${roiId}?max_points=${maxPoints}`)),

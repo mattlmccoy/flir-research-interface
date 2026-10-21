@@ -12,6 +12,8 @@ import type { PaletteName } from "../lib/palette.ts";
 import type { Range, ScaleMode } from "../lib/scale.ts";
 import type { LayoutAction, LayoutState } from "../lib/layout.ts";
 import { SPEEDS, clampIndex, nextFrameDelayMs, speedLabel } from "../lib/playback.ts";
+import { blockLoader, blockOf, isAbort, wantedBlocks } from "../lib/frameBlocks.ts";
+import { shownIndex } from "../lib/smartPlayback.ts";
 import type { RoiHistoryAction } from "../lib/roiHistory.ts";
 import { hasRois, loadRois, roiLabel, roisDifferFromStored, type Roi, type RoiState } from "../lib/roi.ts";
 import { hasMasks, maskPixels, maskedStats, masksAsRois, type MaskAction, type MaskState } from "../lib/mask.ts";
@@ -97,14 +99,12 @@ export function PlaybackPage(p: Props) {
   const [smartShow, setSmartShow] = useState({ sample: true, rings: false });
   const [sizeDim, setSizeDim] = useState<Exclude<SmartDimChoice, "off">>("area");
   const cache = useRef(new Map<number, FrameMessage>());
-  const inflight = useRef(new Map<number, Promise<void>>());
   const BLOCK = 60;
   const n = info?.n_frames ?? 0;
   const onStats = useCallback((m: StatsMap) => setStats(m), []);
 
   useEffect(() => {
     cache.current.clear();
-    inflight.current.clear();
     Promise.all([api.experiment(p.name), api.timeline(p.name)])
       .then(([i, t]) => { setInfo(i); setTl(t); setIndex(0); }).catch((e) => setErr(String(e)));
   }, [p.name]);
@@ -161,58 +161,72 @@ export function PlaybackPage(p: Props) {
     return () => { alive = false; };
   }, [p.name, info]);
 
-  // With the RF-banding filter on, frames carry a display copy; a cached frame without one is refetched.
-  const rf = p.layout.rfNotch;
-  const ensureBlock = useCallback((start: number): Promise<void> => {
-    const key = start * 2 + (rf ? 1 : 0);
-    const running = inflight.current.get(key);
-    if (running) return running;
-    const promise = api.frameBlock(p.name, start, BLOCK, rf)
-      .then((buf) => {
-        for (const m of decodeFrameBlock(buf)) {
-          const idx = (m.header as { index?: number }).index;
-          if (typeof idx === "number") cache.current.set(idx, m);
-        }
-        // keep the cache bounded to a few blocks around the play head
-        if (cache.current.size > BLOCK * 4) {
-          const keys = [...cache.current.keys()].sort((a, b) => a - b);
-          for (const k of keys.slice(0, keys.length - BLOCK * 3)) cache.current.delete(k);
-        }
-      })
-      .finally(() => { inflight.current.delete(key); });
-    inflight.current.set(key, promise);
-    return promise;
-  }, [p.name, rf]);
+  // The smart ROI outline and readout follow the frame on screen (`shownFrame`), never the playhead,
+  // so while a block loads the outline of frame N can never sit over the image of frame M.
+  const shownFrame = shownIndex(frame);
+  const smartPb = useSmartPlayback({
+    name: p.name, rois: p.rois.rois, info, setInfo, setErr, shown: shownFrame, index, show: smartShow, sizeDim,
+  });
+  const { smartIds, smart, overlays: smartOverlays, stale: smartStale, rows: smartRows, plot: smartPlot } = smartPb;
+  const smartRef = useRef(smartPb);
+  smartRef.current = smartPb;
 
+  // With the RF-banding filter on, frames carry a display copy; a cached frame without one is refetched.
+  // Each block is ~37 MB: fetches the playhead no longer needs are aborted (retain below), so a
+  // scrub does not queue every block it passed in front of the small outline requests.
+  const rf = p.layout.rfNotch;
+  const loader = useMemo(() => blockLoader(
+    (start, signal) => api.frameBlock(p.name, start, BLOCK, rf, signal),
+    (_start, buf: ArrayBuffer) => {
+      for (const m of decodeFrameBlock(buf)) {
+        const idx = (m.header as { index?: number }).index;
+        if (typeof idx === "number") cache.current.set(idx, m);
+      }
+      // keep the cache bounded to a few blocks around the play head
+      if (cache.current.size > BLOCK * 4) {
+        const keys = [...cache.current.keys()].sort((a, b) => a - b);
+        for (const k of keys.slice(0, keys.length - BLOCK * 3)) cache.current.delete(k);
+      }
+    },
+  ), [p.name, rf]);
+  useEffect(() => () => loader.abortAll(), [loader]);
+
+  // A frame is ready only together with its outline: the (small) overlay block is requested
+  // first, then the frame block, and both are awaited.
   const load = useCallback(async (i: number): Promise<FrameMessage> => {
+    const overlay = smartRef.current.ensureOverlays(i);
     const hit = cache.current.get(i);
-    if (hit && (!rf || hit.display)) return hit;
-    await ensureBlock(Math.floor(i / BLOCK) * BLOCK);
+    await Promise.all([overlay, hit && (!rf || hit.display) ? undefined : loader.ensure(blockOf(i, BLOCK))]);
     const m = cache.current.get(i);
     if (!m) throw new Error(`frame ${i} not returned`);
     return m;
-  }, [ensureBlock, rf]);
+  }, [loader, rf]);
 
   useEffect(() => {
     if (!info || n === 0) return;
     let alive = true;
+    // the playhead's block, plus the next one near its end so playback never waits; abort the rest
+    const want = wantedBlocks(index, n, BLOCK, 20);
+    loader.retain(want);
+    smartRef.current.retainOverlays([index, ...want]);
     const hit = cache.current.get(index);
     if (!hit || (rf && !hit.display)) setFrameStatus("loading");  // only show the spinner when we actually have to fetch
     load(index)
       .then((m) => { if (alive) { setFrame(m); setFrameStatus("ready"); setFrameErr(null); } })
-      .catch((e) => { if (alive) { setFrameStatus("error"); setFrameErr(String(e)); } });
-    // prefetch the next block once we're into the current one, so playback never waits
-    const blockStart = Math.floor(index / BLOCK) * BLOCK;
-    if (index - blockStart >= BLOCK - 20 && blockStart + BLOCK < n) void ensureBlock(blockStart + BLOCK).catch(() => undefined);
+      .catch((e: unknown) => { if (alive && !isAbort(e)) { setFrameStatus("error"); setFrameErr(String(e)); } });
+    for (const b of want.slice(1)) {
+      void smartRef.current.ensureOverlays(b).catch(() => undefined);
+      void loader.ensure(b).catch(() => undefined);
+    }
     return () => { alive = false; };
-  }, [index, info, n, load, ensureBlock]);
+  }, [index, info, n, load, loader]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!playing || !tl || n === 0) return;
     if (index >= n - 1) { setPlaying(false); return; }
     if (!Number.isFinite(speed)) {
       let cancelled = false;
-      load(index + 1).then(() => { if (!cancelled) setIndex((i) => clampIndex(i + 1, n)); }).catch(() => setPlaying(false));
+      load(index + 1).then(() => { if (!cancelled) setIndex((i) => clampIndex(i + 1, n)); }).catch((e: unknown) => { if (!cancelled && !isAbort(e)) setPlaying(false); });
       return () => { cancelled = true; };
     }
     const t = window.setTimeout(() => setIndex((i) => clampIndex(i + 1, n)), nextFrameDelayMs(tl.t_s[index], tl.t_s[index + 1], speed));
@@ -239,9 +253,6 @@ export function PlaybackPage(p: Props) {
   }, [n]);
 
   const t = tl ? tl.t_s[index] : 0;
-  const { smartIds, smart, overlays: smartOverlays, stale: smartStale, rows: smartRows, plot: smartPlot } = useSmartPlayback({
-    name: p.name, rois: p.rois.rois, info, setInfo, setErr, index, show: smartShow, sizeDim,
-  });
   const hdr = frame?.header;
   const exp = (info?.experiment ?? {}) as Record<string, unknown>;
   const cam = (info?.camera ?? {}) as Record<string, unknown>;
@@ -360,7 +371,7 @@ export function PlaybackPage(p: Props) {
             <div className="load-overlay error" role="alert">
               <div>couldn’t load frame {index + 1}</div>
               <div className="hint">{frameErr}</div>
-              <button className="secondary" onClick={() => { cache.current.delete(index); inflight.current.delete(Math.floor(index / BLOCK) * BLOCK * 2 + (rf ? 1 : 0)); setFrameStatus("loading"); load(index).then((m) => { setFrame(m); setFrameStatus("ready"); setFrameErr(null); }).catch((e) => { setFrameStatus("error"); setFrameErr(String(e)); }); }}>retry</button>
+              <button className="secondary" onClick={() => { cache.current.delete(index); setFrameStatus("loading"); load(index).then((m) => { setFrame(m); setFrameStatus("ready"); setFrameErr(null); }).catch((e) => { setFrameStatus("error"); setFrameErr(String(e)); }); }}>retry</button>
             </div>
           ) : frameStatus === "loading" && !frame ? (
             <div className="load-overlay"><span className="spinner" /> loading frame {index + 1}…</div>
