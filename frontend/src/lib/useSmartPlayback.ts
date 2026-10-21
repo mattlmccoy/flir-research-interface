@@ -10,6 +10,7 @@ import { smartTraces, type SmartDimChoice, type SmartTrace } from "./smartTraces
 import type { SmartOverlay } from "./smartLabels.ts";
 import { useSmartPlaybackOverlays } from "./useSmartPlaybackOverlays.ts";
 import { useSmartSeries, type SmartSeriesHook } from "./useSmartSeries.ts";
+import { smartPrefs, type SmartViewPrefs } from "./smartView.ts";
 import { SmartComputeCell } from "../components/SmartComputeCell.tsx";
 import type { SmartPlaybackRow } from "../components/RoiRows.tsx";
 
@@ -25,6 +26,8 @@ interface Args {
   index: number;
   show: { sample: boolean; rings: boolean };
   sizeDim: Exclude<SmartDimChoice, "off">;
+  /** Ring bands switched off per ROI (layout.smartView): left out of the plot. */
+  view: SmartViewPrefs;
 }
 
 export interface SmartPlayback {
@@ -43,7 +46,7 @@ export interface SmartPlayback {
   plot: SmartTrace[];
 }
 
-export function useSmartPlayback({ name, rois, info, setInfo, setErr, shown, index, show, sizeDim }: Args): SmartPlayback {
+export function useSmartPlayback({ name, rois, info, setInfo, setErr, shown, index, show, sizeDim, view }: Args): SmartPlayback {
   const smartIds = useMemo(() => rois.filter((r) => r.kind === "smart").map((r) => r.id), [rois]);
   // A compute reads the ROI stored with the run, so an unsaved or edited smart ROI is saved first:
   // only that ROI is written into the run's stored set (same id replaced, else appended). The info
@@ -95,7 +98,7 @@ export function useSmartPlayback({ name, rois, info, setInfo, setErr, shown, ind
     const st = smart.states.get(r.id);
     if (r.kind !== "smart" || r.hidden || st?.kind !== "ready") return [];
     const isStale = st.series.stale || smartEdited(r, info?.rois);
-    return smartTraces(st.series, { ...show, dims: sizeDim }, { id: r.id, label: roiLabel(r), color: roiColor(r, i), stale: isStale });
+    return smartTraces(st.series, { ...show, dims: sizeDim, hiddenRings: smartPrefs(view, r.id).hiddenRings }, { id: r.id, label: roiLabel(r), color: roiColor(r, i), stale: isStale });
   });
   return { smartIds, smart, overlays, ensureOverlays, retainOverlays, stale, rows, plot };
 }

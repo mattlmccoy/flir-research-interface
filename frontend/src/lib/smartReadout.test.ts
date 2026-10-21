@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { smartBadge, smartChip, smartEntryFromFeed, smartFeedMap, smartReadoutLines, type SmartReadoutEntry } from "./smartReadout.ts";
+import { smartBadge, smartChip, smartDetails, smartEntryFromFeed, smartFeedMap, smartReadoutLines, smartSummary, type SmartReadoutEntry } from "./smartReadout.ts";
 
 // Real GET /api/live/roi-temps payloads (backend live_temps.live_roi_payload over the real live
 // tracker SmartLive and five real A70 frames of run 20261020_144402_Run), captured by
@@ -126,4 +126,42 @@ test("smartChip: a stale stored outline (playback) is muted and says stale, neve
   assert.deepEqual(smartChip({ state: "locked", valid: true, stale: true }, locked), { value: "locked · stale", range: null, muted: true });
   assert.deepEqual(smartChip({ state: "holding", valid: true, stale: true }, undefined), { value: "holding — edge lost · stale", range: null, muted: true });
   assert.deepEqual(smartChip({ state: "locked", valid: true, stale: false }, locked).muted, false);
+});
+
+// --- the rail row: one collapsed line, and a compact table when expanded ---
+
+test("smartSummary: one line, state · mean · max · area", () => {
+  assert.equal(smartSummary(entry(FEED_LOCKED)), "locked · 111 °C · max 147 · area 1172 px");
+  assert.equal(smartSummary(entry(FEED_HOLDING)), "holding — edge lost · 25.0 °C · max 25.0 · area 1172 px");
+  assert.equal(smartSummary(entry({ ...FEED_LOCKED, dims: null })), "locked · 111 °C · max 147", "no dims, no area");
+});
+
+test("smartSummary: not valid reads the badge only, never a number", () => {
+  assert.equal(smartSummary(entry(FEED_SEARCHING)), "searching… (not locked yet)");
+  const over = { ...FEED_LOCKED, valid: false, over_range: true, mean_c: null, max_c: null, min_c: null, dims: null };
+  assert.equal(smartSummary(entry(over)), "locked · not valid (over-range pixels)");
+  assert.doesNotMatch(smartSummary(entry({ ...FEED_LOCKED, valid: false })), /\d/, "the operator said not valid: no numbers even if sent");
+});
+
+test("smartDetails: sample, each ring, size, sharpness, change and centroid as label/value rows", () => {
+  assert.deepEqual(smartDetails(entry(FEED_LOCKED)), [
+    { label: "sample", value: "mean 111 °C · max 147 · min 82.4" },
+    { label: "ring 0–5 px", value: "mean 68.9 °C · max 82.3 · min 51.2" },
+    { label: "ring 5–10 px", value: "mean 48.7 °C · max 64.2 · min 38.1" },
+    { label: "ring 10–25 px", value: "mean 33.1 °C · max 48.4 · min 26.7" },
+    { label: "size (edge)", value: "length 42.8 · width 35.6 · perimeter 119 px" },
+    { label: "sharpness", value: "6.20 °C/px" },
+    { label: "change", value: "area +13.3 % · length +7.6 % · width −5.9 %" },
+    { label: "centroid", value: "60.4, 59.4 px" },
+  ]);
+});
+
+test("smartDetails leaves hidden rings out (keyed by the ring's outer offset)", () => {
+  const labels = smartDetails(entry(FEED_LOCKED), [5, 25]).map((r) => r.label);
+  assert.deepEqual(labels.filter((l) => l.startsWith("ring")), ["ring 5–10 px"]);
+});
+
+test("smartDetails: not valid has no rows; missing dims give no size rows", () => {
+  assert.deepEqual(smartDetails(entry(FEED_SEARCHING)), []);
+  assert.deepEqual(smartDetails(entry({ ...FEED_LOCKED, rings: [], dims: null })), [{ label: "sample", value: "mean 111 °C · max 147 · min 82.4" }]);
 });

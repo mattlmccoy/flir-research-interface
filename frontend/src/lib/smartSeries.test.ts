@@ -68,8 +68,9 @@ test("smartPlaybackRow: readout at the playhead, never a number when unknown", (
   const locked = smartPlaybackRow(ready(), 5);
   assert.equal(locked.tone, "locked");
   assert.ok(locked.mean !== null && Math.abs(locked.mean - 111.02618369144791) < 1e-9);
-  assert.match(locked.lines[0], /^locked · mean 111 °C · max 147/);
-  assert.ok(locked.lines.some((l) => l.startsWith("ring 10–25 px")));
+  assert.match(locked.summary, /^locked · 111 °C · max 147 · area \d+ px$/);
+  assert.deepEqual(locked.entry?.rings.map((g) => g.outer_px), [5, 10, 25], "the expanded table's rings");
+  assert.deepEqual(locked.notes, []);
   const holding = smartPlaybackRow(ready(), 10);
   assert.equal(holding.tone, "holding");
   assert.equal(holding.marker, "holding");
@@ -81,16 +82,18 @@ test("smartPlaybackRow: readout at the playhead, never a number when unknown", (
     assert.equal(v.mean, null, st.kind);
     assert.equal(v.tone, "none", st.kind);
   }
-  assert.match(smartPlaybackRow({ kind: "missing" }, 5).lines[0], /not computed/);
-  assert.match(smartPlaybackRow({ kind: "error", message: "500 boom" }, 5).lines[0], /500 boom/);
+  assert.match(smartPlaybackRow({ kind: "missing" }, 5).summary, /not computed/);
+  assert.match(smartPlaybackRow({ kind: "error", message: "500 boom" }, 5).summary, /500 boom/);
 });
 
 test("smartPlaybackRow labels a downsampled reading and a stale series", () => {
   const s = series();
   const near = smartPlaybackRow(ready({ ...s, index: s.index.map((i) => i * 2) }), 11);
-  assert.ok(near.lines.some((l) => /frame 11 .*nearest stored point/.test(l)), near.lines.join("\n"));
+  assert.ok(near.notes.some((l) => /frame 11 .*nearest stored point/.test(l)), near.notes.join("\n"));
+  assert.match(near.summary, / · ≈ frame 11$/, "the collapsed line keeps the ≈ marker");
   const stale = smartPlaybackRow(ready({ ...s, stale: true }), 5);
-  assert.ok(stale.lines.some((l) => /stale/.test(l)));
+  assert.ok(stale.notes.some((l) => /stale/.test(l)));
+  assert.match(stale.summary, / · stale$/, "the collapsed line keeps the stale marker");
 });
 
 test("smartComputeAction: compute when missing, recompute when stale or edited, nothing while running or fresh", () => {
@@ -146,14 +149,15 @@ test("fix1: a stale series never looks current (stale marker, not the locked ton
   assert.notEqual(v.tone, "locked");
   assert.equal(v.tone, "invalid");
   assert.match(v.marker ?? "", /stale/);
-  assert.ok(v.lines.some((l) => /stale/.test(l)));
+  assert.ok(v.notes.some((l) => /stale/.test(l)));
 });
 
 test("fix1: an ROI edited on screen since the compute is treated as stale", () => {
   const v = smartPlaybackRow(ready(), 5, { edited: true });
   assert.notEqual(v.tone, "locked");
   assert.match(v.marker ?? "", /stale/);
-  assert.ok(v.lines.some((l) => /edited/.test(l)));
+  assert.ok(v.notes.some((l) => /edited/.test(l)));
+  assert.match(v.summary, / · stale$/);
 });
 
 test("fix2: a downsampled (not exact) value is marked ≈ and not locked-toned", () => {

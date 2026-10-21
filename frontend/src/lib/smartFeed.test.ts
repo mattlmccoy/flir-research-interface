@@ -27,13 +27,14 @@ test("smartRowView: a stale feed reads unreachable, never the last numbers", () 
   const v = smartRowView(f, 3, 5_000, 500);
   assert.equal(v.mean, null);
   assert.equal(v.tone, "none");
-  assert.deepEqual(v.lines, ["no reading: the operator's live feed is unreachable"]);
+  assert.equal(v.summary, "no reading: the operator's live feed is unreachable");
+  assert.equal(v.entry, null);
 });
 
 test("smartRowView: operator not live says so instead of searching", () => {
   const f = smartFeedFrom(payload({}, false, FEED.searching), 0);
   const v = smartRowView(f, 3, 0, 500);
-  assert.deepEqual(v.lines, ["operator not live: no current camera frame"]);
+  assert.equal(v.summary, "operator not live: no current camera frame");
   assert.equal(v.mean, null);
   assert.equal(v.tone, "none");
 });
@@ -47,7 +48,9 @@ test("smartRowView: locked is live-toned with its mean; holding is warn-toned wi
   assert.equal(h.tone, "holding");
   assert.equal(h.mean, 25.0);
   assert.equal(h.marker, "holding");
-  assert.match(h.lines[0], /^holding — edge lost · mean/);
+  assert.equal(h.summary, "holding — edge lost · 25.0 °C · max 25.0 · area 1172 px");
+  assert.equal(h.entry?.state, "holding", "the expanded table reads the same entry");
+  assert.match(l.summary, /^locked · \d+ °C · max \d+ · area \d+ px$/, "collapsed: one line");
 });
 
 test("smartRowView: searching / missing entry / no feed yet carry no number", () => {
@@ -55,8 +58,9 @@ test("smartRowView: searching / missing entry / no feed yet carry no number", ()
   assert.equal(s.mean, null);
   assert.equal(s.tone, "searching");
   assert.equal(s.marker, "searching");
-  assert.deepEqual(smartRowView(smartFeedFrom(payload(), 0), 99, 0, 500).lines, ["no reading from the operator yet"]);
-  assert.deepEqual(smartRowView(null, 3, 0, 500).lines, ["waiting for the operator…"]);
+  assert.equal(smartRowView(smartFeedFrom(payload(), 0), 99, 0, 500).summary, "no reading from the operator yet");
+  assert.equal(smartRowView(null, 3, 0, 500).summary, "waiting for the operator…");
+  assert.equal(s.summary, "searching… (not locked yet)");
 });
 
 test("smartLiveValue: the live plot point is the operator's mean, NaN (a gap) whenever it is not a reading", async () => {

@@ -3,6 +3,7 @@ import { FILTER_NAMES, type FilterName } from "./filters.ts";
 import { DEFAULT_ISOTHERM, parseIsotherm, type Isotherm } from "./isotherm.ts";
 /** Studio layout state (spec §3): which panels are open, which rail sections, which tool, image zoom. */
 import { isZoom, type Zoom } from "./zoom.ts";
+import { parseSmartView, toggleSmartExpanded, toggleSmartRing, type SmartViewPrefs } from "./smartView.ts";
 export const TOOLS = ["select", "spot", "rect", "circle", "ellipse", "line", "polyline", "polygon", "freehand", "smart"] as const;
 const isDelta = (v: unknown): v is { a: number; b: number } => !!v && typeof v === "object" && Number.isInteger((v as { a: unknown }).a) && Number.isInteger((v as { b: unknown }).b);
 export interface Agc { mode: "linear" | "plateau"; plateau: number; }
@@ -75,6 +76,8 @@ export interface LayoutState {
   /** Overlay registration: opacity 0–1, scale 0.5–2 and offsets in % of the image (visible lens ≠ IR lens). */
   overlay: Overlay;
   sections: Record<Section, boolean>;
+  /** Per smart ROI id: rail row expanded, ring bands hidden (display only, lib/smartView.ts). */
+  smartView: SmartViewPrefs;
 }
 /** Drag-to-resize bounds (px) for the right rail and the bottom plot dock, with a snap-back
  * window around the default so a resize clicks back to the tidy layout. */
@@ -138,6 +141,7 @@ export const DEFAULT_LAYOUT: LayoutState = {
   units: "C",
   overlay: DEFAULT_OVERLAY,
   sections: { measurements: true, profile: false, camera: true, experiment: true, recording: true, display: true, export: true, visible: true },
+  smartView: {},
 };
 Object.freeze(DEFAULT_LAYOUT.sections);
 Object.freeze(DEFAULT_LAYOUT);
@@ -166,6 +170,8 @@ export type LayoutAction =
   | { type: "setUnits"; units: Units }
   | { type: "setVisibleMode"; mode: VisibleMode }
   | { type: "setOverlay"; patch: Partial<Overlay> }
+  | { type: "toggleSmartExpanded"; id: number }
+  | { type: "toggleSmartRing"; id: number; px: number }
   | { type: "collapseAll" }
   | { type: "restoreAll" };
 
@@ -198,6 +204,8 @@ export function layoutReducer(s: LayoutState, a: LayoutAction): LayoutState {
     case "setSegment": return { ...s, segment: { on: !!a.segment.on, min: Math.min(a.segment.min, a.segment.max), max: Math.max(a.segment.min, a.segment.max) } };
     case "dockBack": { const { [a.section]: _gone, ...rest } = s.floating; return { ...s, floating: rest }; }
     case "setOverlay": return { ...s, overlay: clampOverlay({ ...s.overlay, ...a.patch }) };
+    case "toggleSmartExpanded": return { ...s, smartView: toggleSmartExpanded(s.smartView, a.id) };
+    case "toggleSmartRing": return { ...s, smartView: toggleSmartRing(s.smartView, a.id, a.px) };
     case "collapseAll": return { ...s, strip: true, rail: false, dock: false };
     case "restoreAll": return { ...s, strip: true, rail: true, dock: true };
   }
@@ -262,6 +270,7 @@ export function loadLayout(storage: Storage | null): LayoutState {
       sections: Object.fromEntries(
         SECTIONS.map((k) => [k, bool(sec[k], DEFAULT_LAYOUT.sections[k])]),
       ) as Record<Section, boolean>,
+      smartView: parseSmartView(parsed.smartView),
     };
   } catch {
     return DEFAULT_LAYOUT;

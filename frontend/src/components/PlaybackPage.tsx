@@ -165,7 +165,7 @@ export function PlaybackPage(p: Props) {
   // so while a block loads the outline of frame N can never sit over the image of frame M.
   const shownFrame = shownIndex(frame);
   const smartPb = useSmartPlayback({
-    name: p.name, rois: p.rois.rois, info, setInfo, setErr, shown: shownFrame, index, show: smartShow, sizeDim,
+    name: p.name, rois: p.rois.rois, info, setInfo, setErr, shown: shownFrame, index, show: smartShow, sizeDim, view: p.layout.smartView,
   });
   const { smartIds, smart, overlays: smartOverlays, stale: smartStale, rows: smartRows, plot: smartPlot } = smartPb;
   const smartRef = useRef(smartPb);
@@ -378,7 +378,7 @@ export function PlaybackPage(p: Props) {
           ) : null}
           <ThermalView frame={frame} palette={p.palette} scaleMode={p.scaleMode} manual={p.manual} onScale={setShown} setManual={p.setManual} setScaleMode={p.setScaleMode}
             rois={p.maskMode ? maskRois : p.rois.rois} statsRois={p.rois.rois} selected={p.maskMode ? p.masks.selected : p.rois.selected} selectedIds={p.maskMode ? p.masks.selectedIds : p.rois.selectedIds} tool={p.layout.tool} roisHidden={!p.maskMode && p.layout.roisHidden} labelScope={p.maskMode ? `exp.${p.name}.mask` : `exp.${p.name}`} zoom={p.layout.zoom} onRoi={p.maskMode ? maskEdit : p.roiDispatch} onStats={onStats} rad={rad} extremes={p.layout.extremes} isotherm={p.layout.isotherm} onField={setField} reference={reference} hold={p.layout.hold} flipH={p.layout.flipH} flipV={p.layout.flipV} agc={p.layout.agc} filter={p.layout.filter} units={p.layout.units} useDisplay={p.layout.rfNotch} valid={p.layout.segment.on ? { min: p.layout.segment.min, max: p.layout.segment.max } : null} mask={maskPx} maskShapes={p.masks.enabled || p.maskMode ? p.masks.shapes : []} maskMode={p.maskMode} onMask={p.maskDispatch}
-            overlay={p.layout.visibleMode === "overlay" && hasVideo ? <VisibleVideo plain name={p.name} t={t} playing={playing} speed={speed} vis={playVis} /> : undefined} overlayStyle={p.layout.overlay} overlayH={overlayH} smartOverlays={smartOverlays} smartStale={smartStale} />
+            overlay={p.layout.visibleMode === "overlay" && hasVideo ? <VisibleVideo plain name={p.name} t={t} playing={playing} speed={speed} vis={playVis} /> : undefined} overlayStyle={p.layout.overlay} overlayH={overlayH} smartOverlays={smartOverlays} smartStale={smartStale} smartView={p.layout.smartView} />
           {p.layout.visibleMode === "side" && hasVideo && <VisibleVideo big flipH={p.layout.flipH} flipV={p.layout.flipV} name={p.name} t={t} playing={playing} speed={speed} vis={playVis} measuredFps={info?.visible?.measured_fps} />}
         </div>
       }
@@ -457,7 +457,7 @@ export function PlaybackPage(p: Props) {
                 <span className="hint">discards edits and restores the ROIs as they were recorded (exports/roi_series.csv matches them)</span>
               </div>
             )}
-            <RoiRows rois={p.rois.rois} smartPlayback={smartRows} units={p.layout.units} conv={field?.conv ?? null} stats={stats} selected={p.rois.selected} selectedIds={p.rois.selectedIds} extremes={p.layout.extremes} onExtremes={(on) => p.dispatch({ type: "setExtremes", on })}
+            <RoiRows rois={p.rois.rois} smartPlayback={smartRows} smartView={p.layout.smartView} onSmartView={p.dispatch} units={p.layout.units} conv={field?.conv ?? null} stats={stats} selected={p.rois.selected} selectedIds={p.rois.selectedIds} extremes={p.layout.extremes} onExtremes={(on) => p.dispatch({ type: "setExtremes", on })}
               dispatch={p.roiDispatch} />
             <MaskPanel state={p.masks} dispatch={p.maskDispatch} maskMode={p.maskMode} onMaskMode={p.onMaskMode} usedPx={maskUsed} frame={field ? { w: field.w, h: field.h } : null} />
             <DeltaPicker rois={p.rois.rois} delta={p.layout.delta} onChange={(delta) => p.dispatch({ type: "setDelta", delta })} />

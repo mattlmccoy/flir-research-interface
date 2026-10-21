@@ -1,7 +1,7 @@
 // A recorded run's stored smart ROI series (GET /api/experiments/{name}/smart-roi/{id}, backend
 // analysis/smart_series.py series_payload + `stale`) and the playback readout / compute-job view
 // built from it. Pure: fetching and polling live in components/useSmartSeries.ts.
-import { smartReadoutLines, type SmartReadoutEntry, type SmartState } from "./smartReadout.ts";
+import { smartSummary, type SmartReadoutEntry, type SmartState } from "./smartReadout.ts";
 import type { SmartRowView } from "./smartFeed.ts";
 import { roiLabel, smartTracking, type Smart } from "./roi.ts";
 
@@ -112,7 +112,7 @@ export function smartRowAt(s: SmartSeries, frame: number): { frame: number; exac
   return { frame: s.index[k], exact: s.index[k] === frame, entry };
 }
 
-const none = (line: string): SmartRowView => ({ lines: [line], tone: "none", mean: null, marker: null });
+const none = (line: string): SmartRowView => ({ summary: line, entry: null, notes: [], tone: "none", mean: null, marker: null });
 
 /** Context for the playhead readout: `edited` = the on-screen ROI's tracking settings differ from
  *  the stored ones the series was computed from; `overlay` = the stored per-frame state at exactly
@@ -132,15 +132,21 @@ export function smartPlaybackRow(st: SmartSeriesState, frame: number, ctx: Smart
   const e = ov && (!ov.valid || ov.state === "searching") && r.entry.valid
     ? { ...r.entry, state: ov.state, valid: false, dims: null }  // this exact frame is not a reading
     : r.entry;
-  const lines = smartReadoutLines(e);
-  if (!r.exact && e.valid) lines.push(`≈ values at frame ${r.frame + 1} (nearest stored point before frame ${frame + 1}; the plot series is downsampled)`);
-  if (st.series.stale) lines.push("stale: the ROI or recording changed since this series was computed; recompute it");
-  else if (ctx.edited) lines.push("stale: the ROI was edited on screen since this series was computed; recompute it");
-  if (!e.valid) return { lines, tone: e.state === "searching" ? "searching" : "invalid", mean: null, marker: e.state === "searching" ? "searching" : "not valid" };
+  const notes: string[] = [];
+  let summary = smartSummary(e);
+  if (!r.exact && e.valid) {
+    notes.push(`≈ values at frame ${r.frame + 1} (nearest stored point before frame ${frame + 1}; the plot series is downsampled)`);
+    summary += ` · ≈ frame ${r.frame + 1}`;
+  }
+  if (st.series.stale) notes.push("stale: the ROI or recording changed since this series was computed; recompute it");
+  else if (ctx.edited) notes.push("stale: the ROI was edited on screen since this series was computed; recompute it");
   const stale = st.series.stale || !!ctx.edited;
+  if (stale) summary += " · stale";
+  const row = { summary, entry: e, notes };
+  if (!e.valid) return { ...row, tone: e.state === "searching" ? "searching" : "invalid", mean: null, marker: e.state === "searching" ? "searching" : "not valid" };
   const marks = [stale ? "stale" : null, r.exact ? null : "≈", e.state === "holding" ? "holding" : null].filter((m): m is string => m !== null);
   const tone = stale || !r.exact ? "invalid" : e.state === "holding" ? "holding" : "locked";
-  return { lines, tone, mean: e.sample.mean_c, marker: marks.length ? marks.join(" ") : null };
+  return { ...row, tone, mean: e.sample.mean_c, marker: marks.length ? marks.join(" ") : null };
 }
 
 export interface SmartComputeAction { label: string; kind: "compute" | "reload"; disabled: boolean; }

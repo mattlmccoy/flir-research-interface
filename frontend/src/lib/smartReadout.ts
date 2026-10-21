@@ -87,6 +87,33 @@ export function smartReadoutLines(e: SmartReadoutEntry): string[] {
   return lines;
 }
 
+/** The collapsed rail row: one line, state · sample mean · max · area. Not valid: the badge text
+ *  only (the same status as smartReadoutLines), never a number. */
+export function smartSummary(e: SmartReadoutEntry): string {
+  if (!e.valid) return smartReadoutLines(e)[0];
+  const d = e.dims;
+  return `${smartBadge(e.state)} · ${t(e.sample.mean_c)} °C · max ${t(e.sample.max_c)}${d ? ` · area ${d.area_px} px` : ""}`;
+}
+
+export interface SmartDetailRow { label: string; value: string; }
+
+/** The expanded rail row as label/value rows: sample, each shown ring band (`hiddenRings` = outer
+ *  offsets left out), then the thermal-edge size. Not valid: no rows (no numbers). */
+export function smartDetails(e: SmartReadoutEntry, hiddenRings: readonly number[] = []): SmartDetailRow[] {
+  if (!e.valid) return [];
+  const rows: SmartDetailRow[] = [{ label: "sample", value: temps(e.sample) }];
+  for (const g of e.rings) if (!hiddenRings.includes(g.outer_px)) rows.push({ label: `ring ${g.inner_px}–${g.outer_px} px`, value: temps(g) });
+  const d = e.dims;
+  if (!d) return rows;
+  rows.push(
+    { label: "size (edge)", value: `length ${d.length_px.toFixed(1)} · width ${d.width_px.toFixed(1)} · perimeter ${d.perimeter_px} px` },
+    { label: "sharpness", value: d.sharpness_c_per_px === null ? "n/a" : `${d.sharpness_c_per_px.toFixed(2)} °C/px` },
+    { label: "change", value: `area ${pct(d.area_change_pct)} · length ${pct(d.length_change_pct)} · width ${pct(d.width_change_pct)}` },
+    { label: "centroid", value: `${d.centroid_x.toFixed(1)}, ${d.centroid_y.toFixed(1)} px` },
+  );
+  return rows;
+}
+
 /** The smart entries of a GET /api/live/roi-temps payload, by ROI id. */
 export function smartFeedMap(payload: unknown): Map<number, SmartReadoutEntry> {
   const out = new Map<number, SmartReadoutEntry>();

@@ -1,6 +1,6 @@
 // The operator's live smart ROI feed as the rail shows it (pure; polling lives in useSmartFeed.ts).
 // No-false-green: a failed, stale or not-live feed never shows the last good numbers.
-import { smartFeedMap, smartReadoutLines, type SmartReadoutEntry } from "./smartReadout.ts";
+import { smartFeedMap, smartSummary, type SmartReadoutEntry } from "./smartReadout.ts";
 
 /** One poll's result. `ok` false = the poll failed; `at` = when it completed (ms); `live` = the
  *  operator had a current camera frame (payload `live`). */
@@ -24,7 +24,13 @@ export function smartChipFeed(feed: SmartFeed | null, now: number, intervalMs: n
 
 export type SmartTone = "locked" | "holding" | "searching" | "invalid" | "none";
 export interface SmartRowView {
-  lines: string[];
+  /** The collapsed row: one line (state, numbers only when valid, and the stale / ≈ markers). */
+  summary: string;
+  /** The reading behind the row, for the expanded table (smartReadout.ts smartDetails); null when
+   *  there is no reading at all. */
+  entry: SmartReadoutEntry | null;
+  /** Full explanations of the markers (≈ downsampled, stale), shown when expanded. */
+  notes: string[];
   /** Colours the state line and the value; "none" = no trustworthy reading at all. */
   tone: SmartTone;
   /** Sample mean °C for the value column, only for a valid, fresh entry. */
@@ -33,7 +39,7 @@ export interface SmartRowView {
   marker: string | null;
 }
 
-const none = (line: string): SmartRowView => ({ lines: [line], tone: "none", mean: null, marker: null });
+const none = (line: string): SmartRowView => ({ summary: line, entry: null, notes: [], tone: "none", mean: null, marker: null });
 
 export function smartRowView(feed: SmartFeed | null, id: number, now: number, intervalMs: number): SmartRowView {
   if (!feed) return none("waiting for the operator…");
@@ -41,9 +47,9 @@ export function smartRowView(feed: SmartFeed | null, id: number, now: number, in
   if (!feed.live) return none("operator not live: no current camera frame");
   const e = feed.entries.get(id);
   if (!e) return none("no reading from the operator yet");
-  const lines = smartReadoutLines(e);
-  if (!e.valid) return { lines, tone: e.state === "searching" ? "searching" : "invalid", mean: null, marker: e.state === "searching" ? "searching" : "not valid" };
-  return { lines, tone: e.state === "holding" ? "holding" : "locked", mean: e.sample.mean_c, marker: e.state === "holding" ? "holding" : null };
+  const row = { summary: smartSummary(e), entry: e, notes: [] };
+  if (!e.valid) return { ...row, tone: e.state === "searching" ? "searching" : "invalid", mean: null, marker: e.state === "searching" ? "searching" : "not valid" };
+  return { ...row, tone: e.state === "holding" ? "holding" : "locked", mean: e.sample.mean_c, marker: e.state === "holding" ? "holding" : null };
 }
 
 /** One live-plot point for a smart ROI: the operator's sample mean, or NaN (a gap) when the feed
