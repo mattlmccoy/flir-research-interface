@@ -2,6 +2,12 @@
 // least-squares slope over the last `windowS` seconds: a two-point difference of 15 Hz samples
 // would turn camera noise (±0.1 °C) into ±1.5 °C/s swings and trip any useful threshold.
 
+/** The ROIs the rate readout and alarm can watch: smart ROIs are excluded (their live number comes
+ *  from the operator's feed, and no rate is computed for it yet). */
+export function rateRois<R extends { kind: string }>(rois: readonly R[]): R[] {
+  return rois.filter((r) => r.kind !== "smart");
+}
+
 export interface Series { length: number; tAt(k: number): number; vAt(k: number): number; }
 
 /** Least-squares slope (per second) of the points in the last `windowS` seconds; null when the
@@ -52,17 +58,28 @@ export interface RateAlarmState { tripped: boolean; roi: number | null; rate: nu
  * threshold; stays tripped until it falls below REARM_FRACTION × threshold (so noise around the
  * threshold does not chatter). `roi`/`rate` name the ROI that is (or last was) over.
  */
-export function evalRateAlarm(rates: Map<number, number | null>, cfg: RateAlarmConfig, prev: RateAlarmState): RateAlarmState {
+export function evalRateAlarm(rates: Map<number, number | null>, cfg: RateAlarmConfig, prev: RateAlarmState, eligible?: ReadonlySet<number>): RateAlarmState {
   if (!cfg.on || !(cfg.threshold > 0)) return { tripped: false, roi: null, rate: null };
+  // `eligible` = the rate-watchable ROI ids (rateRois): a watched id outside it (a smart ROI, a
+  // removed one) would never trip, so the alarm watches any eligible ROI instead.
+  const watch = cfg.roi !== "any" && eligible && !eligible.has(cfg.roi) ? "any" : cfg.roi;
   let roi: number | null = null, rate: number | null = null;
   for (const [id, r] of rates) {
-    if (cfg.roi !== "any" && id !== cfg.roi) continue;
+    if (eligible && !eligible.has(id)) continue;
+    if (watch !== "any" && id !== watch) continue;
     if (r !== null && Number.isFinite(r) && (rate === null || r > rate)) { roi = id; rate = r; }
   }
   if (rate === null) return prev.tripped ? prev : { tripped: false, roi: null, rate: null };
   if (rate >= cfg.threshold) return { tripped: true, roi, rate };
   if (prev.tripped && rate >= cfg.threshold * REARM_FRACTION) return { ...prev, rate: prev.roi === roi ? rate : prev.rate };
   return { tripped: false, roi, rate };
+}
+
+/** `cfg` with a watched ROI that is not rate-eligible (smart, removed, unknown) reset to "any", so
+ *  the picker and the alarm agree; the same object when nothing changes. */
+export function normalizeRateCfg<R extends { id: number; kind: string }>(cfg: RateAlarmConfig, rois: readonly R[]): RateAlarmConfig {
+  if (cfg.roi === "any" || rateRois(rois).some((r) => r.id === cfg.roi)) return cfg;
+  return { ...cfg, roi: "any" };
 }
 
 const KEY = "fri.rateAlarm.v1";

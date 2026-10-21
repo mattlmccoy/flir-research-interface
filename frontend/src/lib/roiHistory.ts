@@ -23,7 +23,7 @@ export function initHistory(present: RoiState): RoiHistory {
 /** The coalescing key of a continuous edit; null for actions that are always their own step. */
 function gestureKey(a: RoiAction): string | null {
   switch (a.type) {
-    case "move": case "rename": case "recolor": case "setOptics": return `${a.type}:${a.id}`;
+    case "move": case "rename": case "recolor": case "setOptics": case "setSmart": return `${a.type}:${a.id}`;
     case "moveMany": return `moveMany:${a.ids.join(",")}`;
     case "setVertex": return `setVertex:${a.id}:${a.index}`;
     case "setEndpoint": return `setEndpoint:${a.id}:${a.end}`;

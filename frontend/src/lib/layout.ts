@@ -6,7 +6,7 @@ import { isZoom, type Zoom } from "./zoom.ts";
 import { NEUTRAL_ADJUST, clampAdjust, type VisibleAdjust } from "./visibleAdjust.ts";
 import { PALETTE_NAMES, type PaletteName } from "./palette.ts";
 import type { Range, ScaleMode } from "./scale.ts";
-export const TOOLS = ["select", "spot", "rect", "circle", "ellipse", "line", "polyline", "polygon", "freehand"] as const;
+export const TOOLS = ["select", "spot", "rect", "circle", "ellipse", "line", "polyline", "polygon", "freehand", "smart"] as const;
 const isDelta = (v: unknown): v is { a: number; b: number } => !!v && typeof v === "object" && Number.isInteger((v as { a: unknown }).a) && Number.isInteger((v as { b: unknown }).b);
 export interface Agc { mode: "linear" | "plateau"; plateau: number; }
 function parseAgc(v: unknown): Agc {

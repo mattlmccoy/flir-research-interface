@@ -352,6 +352,19 @@ button:disabled .spinner { opacity: 0.7; }
 .roi-rows .optics-grid input { background: var(--panel); width: 100%; box-sizing: border-box; padding: 3px 6px; }
 .roi-rows .optics-grid .optics-unit { font-family: var(--font-mono); font-size: 12px; color: var(--muted); min-width: 24px; }
 .roi-rows .optics-foot { font-size: 11px; color: var(--muted); margin-top: 8px; }
+/* smart ROI: operator readout under the row (state line coloured by state; numbers never shown when invalid) */
+.roi-rows .smart-readout { text-align: left; white-space: normal; font-family: var(--font-mono); line-height: 1.45; }
+.roi-rows .smart-readout .smart-head { color: var(--fg); }
+.roi-rows .smart-readout.state-locked .smart-head { color: var(--live); }
+.roi-rows .smart-readout.state-holding .smart-head { color: var(--warn); }
+.roi-rows .smart-readout.state-searching .smart-head,
+.roi-rows .smart-readout.state-invalid .smart-head { color: var(--muted); }
+.roi-rows .smart-readout.state-none .smart-head { color: var(--warn); }
+.roi-rows .smart-settings select { background: var(--panel); width: 100%; box-sizing: border-box; }
+.roi-rows .smart-settings input[type="range"] { padding: 0; }
+.roi-rows .smart-error { font-size: 11px; color: var(--err); margin-top: 6px; }
+.roi-rows .smart-val.tone-holding { color: var(--warn); }
+.roi-rows .smart-val.tone-searching, .roi-rows .smart-val.tone-invalid, .roi-rows .smart-val.tone-none { color: var(--muted); }
 
 
 /* ---- Vertical colour scale beside the image --------------------------------------- */
@@ -463,3 +476,6 @@ button:disabled .spinner { opacity: 0.7; }
 .mask-chip { width: 10px; height: 10px; border-radius: 2px; border: 1px solid currentColor; background: currentColor; flex: 0 0 auto; }
 .mask-chip.include { color: var(--mask-include); }
 .mask-chip.exclude { color: var(--mask-exclude); }
+.roi-rows .smart-compute { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
+.roi-rows .smart-compute progress { flex: 1 1 80px; min-width: 60px; }
+.smart-plot-choice { margin-right: 10px; white-space: nowrap; }

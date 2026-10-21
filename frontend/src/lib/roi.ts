@@ -32,8 +32,30 @@ export interface Line extends Meta { id: number; kind: "line"; x0: number; y0: n
 export interface Polygon extends Meta { id: number; kind: "polygon"; points: [number, number][]; }
 /** Open multi-segment line ("spline"; ResearchIR calls it a bendable line); pixels along every segment. */
 export interface Polyline extends Meta { id: number; kind: "polyline"; points: [number, number][]; }
-export type Roi = Spot | Rect | Circle | Ellipse | Line | Polygon | Polyline;
-export type RoiInput = Omit<Spot, "id"> | Omit<Rect, "id"> | Omit<Circle, "id"> | Omit<Ellipse, "id"> | Omit<Line, "id"> | Omit<Polygon, "id"> | Omit<Polyline, "id">;
+/**
+ * Tracked "smart" ROI: the user draws a generous `search` outline and the operator finds the sample's
+ * thermal edge inside it every frame (backend analysis/smart_roi.py). The wire keys are exactly these;
+ * the operator is authoritative for its stats, so the UI never measures it. Pixels only in v1.
+ */
+export interface Smart extends Meta {
+  id: number; kind: "smart"; search: [number, number][];
+  /** Positive, strictly increasing ring boundaries in px outside the sample edge (bands 0–5, 5–10, …). */
+  rings_px: number[];
+  rule: "relative" | "fixed"; fixed_c?: number;
+  /** Relative-rule edge fraction between surroundings and sample, 0.3–0.7. */
+  sensitivity: number;
+  ring_emissivity?: number;
+}
+export const SMART_DEFAULT_RINGS: readonly number[] = Object.freeze([5, 10, 25]);
+export const SMART_DEFAULT_SENSITIVITY = 0.5;
+/** Largest ring offset the operator accepts (backend smart_spec.py MAX_RING_PX). */
+export const MAX_RING_PX = 100;
+/** A new smart ROI around a drawn outline, with the v1 defaults (rings 5/10/25 px, relative rule, sensitivity 0.5). */
+export function newSmart(search: [number, number][]): Omit<Smart, "id"> {
+  return { kind: "smart", search: search.map(([x, y]) => [x, y] as [number, number]), rings_px: [...SMART_DEFAULT_RINGS], rule: "relative", sensitivity: SMART_DEFAULT_SENSITIVITY };
+}
+export type Roi = Spot | Rect | Circle | Ellipse | Line | Polygon | Polyline | Smart;
+export type RoiInput = Omit<Spot, "id"> | Omit<Rect, "id"> | Omit<Circle, "id"> | Omit<Ellipse, "id"> | Omit<Line, "id"> | Omit<Polygon, "id"> | Omit<Polyline, "id"> | Omit<Smart, "id">;
 /** Kinds whose stats are a mean/min/max over several pixels (everything but a spot). */
 export function isArea(roi: Roi): boolean { return roi.kind !== "spot"; }
 
@@ -54,6 +76,8 @@ export type RoiAction =
   | { type: "toggleHidden"; id: number }
   | { type: "setOptics"; id: number; emissivity?: number | null; reflected_c?: number | null; distance_m?: number | null }
   | { type: "setBox"; id: number; box: 1 | 3 }
+  /** Smart ROI tracking settings; values the operator would reject are ignored, null clears ring emissivity. */
+  | { type: "setSmart"; id: number; rings_px?: number[]; rule?: "relative" | "fixed"; fixed_c?: number; sensitivity?: number; ring_emissivity?: number | null }
   | { type: "setHiddenAll"; hidden: boolean }
   | { type: "replace"; rois: Roi[] }
   | { type: "clear" }
@@ -62,6 +86,20 @@ export type RoiAction =
 
 /** The ROIs that should be drawn and hit-tested. */
 export function visibleRois(rois: Roi[]): Roi[] { return rois.filter((r) => !r.hidden); }
+
+/**
+ * The tracking settings of a smart ROI with the backend's defaults applied (smart_spec.py
+ * parse_smart_roi: rings 5/10/25 px, relative rule, sensitivity 0.5), so a stored ROI that omits a
+ * defaulted key equals the on-screen one that carries it. `fixed_c` counts only under the fixed rule.
+ * Works on both the on-screen `Roi` and the plain dicts returned by the API.
+ */
+export function smartTracking(r: Record<string, unknown>): unknown[] {
+  const search = Array.isArray(r.search) ? r.search.map((p) => (Array.isArray(p) ? [Number(p[0]), Number(p[1])] : p)) : r.search;
+  const rings = Array.isArray(r.rings_px) ? r.rings_px.map(Number) : [...SMART_DEFAULT_RINGS];
+  const rule = r.rule ?? "relative";
+  const sens = r.sensitivity === undefined ? SMART_DEFAULT_SENSITIVITY : Number(r.sensitivity);
+  return [search, rings, rule, sens, rule === "fixed" ? Number(r.fixed_c) : null, typeof r.ring_emissivity === "number" ? r.ring_emissivity : null];
+}
 
 /**
  * Canonical signature of one ROI for the "do the derived files still match?" check: only the
@@ -78,6 +116,7 @@ function roiSignature(r: Record<string, unknown>): string {
     case "circle": g.cx = r.cx; g.cy = r.cy; g.r = r.r; break;
     case "ellipse": g.cx = r.cx; g.cy = r.cy; g.rx = r.rx; g.ry = r.ry; break;
     case "polygon": case "polyline": g.points = r.points; break;
+    case "smart": g.tracking = smartTracking(r); break;
   }
   if (typeof r.name === "string" && r.name.trim()) g.name = r.name.trim().slice(0, 40);
   if (typeof r.color === "string") g.color = r.color;
@@ -101,8 +140,8 @@ export function roisDifferFromStored(onScreen: Roi[], stored: unknown[] | null |
   return a.length !== b.length || a.some((s, i) => s !== b[i]);
 }
 
-export function roiXs(r: Roi): number[] { return r.kind === "spot" ? [r.x] : r.kind === "circle" || r.kind === "ellipse" ? [r.cx] : r.kind === "polygon" || r.kind === "polyline" ? r.points.map((p) => p[0]) : [r.x0, r.x1]; }
-export function roiYs(r: Roi): number[] { return r.kind === "spot" ? [r.y] : r.kind === "circle" || r.kind === "ellipse" ? [r.cy] : r.kind === "polygon" || r.kind === "polyline" ? r.points.map((p) => p[1]) : [r.y0, r.y1]; }
+export function roiXs(r: Roi): number[] { return r.kind === "spot" ? [r.x] : r.kind === "circle" || r.kind === "ellipse" ? [r.cx] : r.kind === "polygon" || r.kind === "polyline" ? r.points.map((p) => p[0]) : r.kind === "smart" ? r.search.map((p) => p[0]) : [r.x0, r.x1]; }
+export function roiYs(r: Roi): number[] { return r.kind === "spot" ? [r.y] : r.kind === "circle" || r.kind === "ellipse" ? [r.cy] : r.kind === "polygon" || r.kind === "polyline" ? r.points.map((p) => p[1]) : r.kind === "smart" ? r.search.map((p) => p[1]) : [r.y0, r.y1]; }
 
 /** Translate a shape by exactly (dx, dy) with no clamping (caller has already clamped). */
 export function translateRoi(roi: Roi, dx: number, dy: number): Roi {
@@ -111,6 +150,7 @@ export function translateRoi(roi: Roi, dx: number, dy: number): Roi {
     case "circle": case "ellipse": return { ...roi, cx: roi.cx + dx, cy: roi.cy + dy };
     case "rect": case "line": return { ...roi, x0: roi.x0 + dx, y0: roi.y0 + dy, x1: roi.x1 + dx, y1: roi.y1 + dy };
     case "polygon": case "polyline": return { ...roi, points: roi.points.map(([x, y]) => [x + dx, y + dy] as [number, number]) };
+    case "smart": return { ...roi, search: roi.search.map(([x, y]) => [x + dx, y + dy] as [number, number]) };
   }
 }
 
@@ -179,6 +219,21 @@ export function roiReducer(s: RoiState, a: RoiAction): RoiState {
       return patch(s, a.id, (r) => { const { color: _old, ...rest } = r; return a.color ? { ...rest, color: a.color } as Roi : rest as Roi; });
     case "setBox":
       return patch(s, a.id, (r) => { if (r.kind !== "spot") return r; const { box: _b, ...rest } = r; return a.box === 3 ? { ...rest, box: 3 } as Roi : rest as Roi; });
+    case "setSmart":
+      return patch(s, a.id, (r) => {
+        if (r.kind !== "smart") return r;
+        const next: Smart = { ...r };
+        const rings = a.rings_px;
+        if (rings && rings.length > 0 && rings.every((x, i) => Number.isInteger(x) && x > 0 && x <= MAX_RING_PX && (i === 0 || x > rings[i - 1]))) next.rings_px = [...rings];
+        if (typeof a.sensitivity === "number" && a.sensitivity >= 0.3 && a.sensitivity <= 0.7) next.sensitivity = a.sensitivity;
+        if (a.ring_emissivity === null) delete next.ring_emissivity;
+        else if (typeof a.ring_emissivity === "number" && a.ring_emissivity >= 0.01 && a.ring_emissivity <= 1) next.ring_emissivity = a.ring_emissivity;
+        const fixed = typeof a.fixed_c === "number" && Number.isFinite(a.fixed_c) ? a.fixed_c : next.fixed_c;
+        const rule = a.rule ?? next.rule;
+        if (rule === "fixed" && fixed !== undefined) { next.rule = "fixed"; next.fixed_c = fixed; }
+        else if (rule === "relative") { next.rule = "relative"; delete next.fixed_c; }
+        return next;
+      });
     case "setOptics":
       return patch(s, a.id, (r) => {
         const { emissivity: e0, reflected_c: t0, distance_m: d0, ...rest } = r;
@@ -369,11 +424,14 @@ function computeRoiPixels(roi: Roi, w: number, h: number): number[] {
       return linePixels(roi.x0, roi.y0, roi.x1, roi.y1).filter(([x, y]) => inside(x, y)).map(([x, y]) => y * w + x);
     case "polygon":
       return polygonPixels(roi.points, w, h);
+    case "smart":
+      return [];  // the operator measures it; the outline it tracks is not known client-side
   }
 }
 
 /** Statistics of `field` (row-major w×h) inside `roi`. Out-of-image pixels count as absent. */
 export function roiStats(field: Float32Array, w: number, h: number, roi: Roi, rad?: Radiometry | null, valid?: Range | null): RoiStats {
+  if (roi.kind === "smart") return NONE(0);  // operator is authoritative (tracked region is unknown here)
   let n = 0, nan = 0, excluded = 0, min = Infinity, max = -Infinity, sum = 0, sq = 0, kMin = -1, kMax = -1;
   // Either optic on its own re-corrects (the other falls back to the camera's value), matching
   // the backend's roi_field; a reflected temperature alone used to be ignored live.
@@ -400,7 +458,7 @@ export function roiStats(field: Float32Array, w: number, h: number, roi: Roi, ra
   return out;
 }
 
-const PREFIX: Record<Roi["kind"], string> = { spot: "S", rect: "R", circle: "C", ellipse: "E", line: "L", polygon: "P", polyline: "B" };
+const PREFIX: Record<Roi["kind"], string> = { spot: "S", rect: "R", circle: "C", ellipse: "E", line: "L", polygon: "P", polyline: "B", smart: "M" };
 /** The user's name when set, else a short id like S1 / R2 / C3 / L4 / P5. */
 export function roiLabel(roi: Roi): string {
   return roi.name || `${PREFIX[roi.kind]}${roi.id}`;
@@ -414,6 +472,40 @@ const KEY = "fri.rois.v1";
 function isInt(v: unknown): v is number { return typeof v === "number" && Number.isInteger(v); }
 
 const HEX = /^#[0-9a-f]{6}$/i;
+
+function isPoints(v: unknown): v is [number, number][] {
+  return Array.isArray(v) && v.every((p) => Array.isArray(p) && p.length === 2 && isInt(p[0]) && isInt(p[1]));
+}
+
+/** Mirrors backend parse_smart_roi: ≥ 3 integer search points, positive strictly increasing rings ≤ MAX_RING_PX,
+ *  `fixed_c` required for the fixed rule, sensitivity in [0.3, 0.7], ring emissivity in [0.01, 1]. */
+function asSmart(r: Record<string, unknown>): Smart | null {
+  if (!isPoints(r.search) || r.search.length < 3) return null;
+  let rings: number[] = [...SMART_DEFAULT_RINGS];
+  if (r.rings_px !== undefined) {
+    const v = r.rings_px;
+    if (!Array.isArray(v) || v.length === 0 || !v.every((x) => isInt(x) && x > 0 && x <= MAX_RING_PX) || !v.every((x, i) => i === 0 || x > v[i - 1])) return null;
+    rings = v as number[];
+  }
+  const rule = r.rule === undefined ? "relative" : r.rule;
+  if (rule !== "relative" && rule !== "fixed") return null;
+  let fixed_c: number | undefined;
+  if (rule === "fixed") {
+    if (typeof r.fixed_c !== "number" || !Number.isFinite(r.fixed_c)) return null;
+    fixed_c = r.fixed_c;
+  }
+  const sens = r.sensitivity === undefined ? SMART_DEFAULT_SENSITIVITY : r.sensitivity;
+  if (typeof sens !== "number" || !(sens >= 0.3 && sens <= 0.7)) return null;
+  let ring_emissivity: number | undefined;
+  if (r.ring_emissivity !== undefined && r.ring_emissivity !== null) {
+    if (typeof r.ring_emissivity !== "number" || !(r.ring_emissivity >= 0.01 && r.ring_emissivity <= 1)) return null;
+    ring_emissivity = r.ring_emissivity;
+  }
+  const out: Smart = { id: r.id as number, kind: "smart", search: r.search.map((p) => [p[0], p[1]] as [number, number]), rings_px: rings, rule, sensitivity: sens };
+  if (fixed_c !== undefined) out.fixed_c = fixed_c;
+  if (ring_emissivity !== undefined) out.ring_emissivity = ring_emissivity;
+  return out;
+}
 
 function asRoi(v: unknown): Roi | null {
   if (!v || typeof v !== "object") return null;
@@ -441,6 +533,8 @@ function asRoi(v: unknown): Roi | null {
     shape = { id: r.id, kind: "polygon", points: r.points.map((p) => [p[0], p[1]] as [number, number]) };
   } else if (r.kind === "polyline" && Array.isArray(r.points) && r.points.length >= 2 && r.points.every((p) => Array.isArray(p) && p.length === 2 && isInt(p[0]) && isInt(p[1]))) {
     shape = { id: r.id, kind: "polyline", points: r.points.map((p) => [p[0], p[1]] as [number, number]) };
+  } else if (r.kind === "smart") {
+    shape = asSmart(r);
   }
   return shape ? { ...shape, ...meta } : null;
 }

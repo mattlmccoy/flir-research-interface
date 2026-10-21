@@ -40,6 +40,7 @@ export function hitTestAll(rois: Roi[], x: number, y: number, tol: number): numb
     else if (r.kind === "circle" && Math.hypot(x - r.cx, y - r.cy) <= r.r) out.push(r.id);
     else if (r.kind === "ellipse" && ((x - r.cx) / r.rx) ** 2 + ((y - r.cy) / r.ry) ** 2 <= 1) out.push(r.id);
     else if (r.kind === "polygon" && pointInPolygon(x, y, r.points)) out.push(r.id);
+    else if (r.kind === "smart" && pointInPolygon(x, y, r.search)) out.push(r.id);
   }
   return out;
 }
@@ -126,8 +127,8 @@ export function roiLeaderAnchor(r: Roi, sx: number, sy: number): [number, number
     case "circle": return [(r.cx + 0.5) * sx, (r.cy + 0.5) * sy, r.r * sx];
     case "ellipse": return [(r.cx + 0.5) * sx, (r.cy + 0.5) * sy, Math.min(r.rx * sx, r.ry * sy)];
     case "line": return [((r.x0 + r.x1) / 2 + 0.5) * sx, ((r.y0 + r.y1) / 2 + 0.5) * sy, 0];
-    default: {  // polyline / polygon: centroid of the vertices
-      const pts = r.points;
+    default: {  // polyline / polygon / smart search outline: centroid of the vertices
+      const pts = r.kind === "smart" ? r.search : r.points;
       const mx = pts.reduce((a, p) => a + p[0], 0) / pts.length;
       const my = pts.reduce((a, p) => a + p[1], 0) / pts.length;
       return [(mx + 0.5) * sx, (my + 0.5) * sy, 0];

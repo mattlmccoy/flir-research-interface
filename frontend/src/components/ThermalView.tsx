@@ -9,17 +9,20 @@ import { HoldBuffer } from "../lib/enhance.ts";
 import { subtractReference } from "../lib/reference.ts";
 import { applyIsotherm, type Isotherm } from "../lib/isotherm.ts";
 import type { Radiometry } from "../lib/emissivity.ts";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as RKeyboardEvent, PointerEvent as RPointerEvent, ReactNode } from "react";
 import type { FrameMessage } from "../lib/protocol.ts";
 import { countsToCelsius } from "../lib/radiometry.ts";
 import { overRangeMask } from "../lib/overrange.ts";
 import { buildLut, mapToRgba, type PaletteName } from "../lib/palette.ts";
 import { autoScale, resolveScale, type Range, type ScaleMode } from "../lib/scale.ts";
-import { normalizeRect, roiStats, type Roi, type RoiAction, type RoiInput, type RoiStats, visibleRois } from "../lib/roi.ts";
+import { newSmart, normalizeRect, roiStats, type Roi, type RoiAction, type RoiInput, type RoiStats, visibleRois } from "../lib/roi.ts";
 import { clientToImage, hitTestAll, pickHit, roiForDigit, vertexHit, type Box, type VertexHit } from "../lib/overlay.ts";
 import type { Tool } from "../lib/layout.ts";
-import { RoiOverlay, type Draft } from "./RoiOverlay.tsx";
+import { RoiOverlay, type Draft, type SmartDraw } from "./RoiOverlay.tsx";
+import type { SmartOverlay } from "../lib/smartLabels.ts";
+import { smartOutlines } from "../lib/smartOutline.ts";
+import type { SmartReadoutEntry } from "../lib/smartReadout.ts";
 import { displaySize, type Zoom } from "../lib/zoom.ts";
 import { toCssMatrix3d, type H3 } from "../lib/homography.ts";
 import { maskAt, maskField, type MaskAction, type MaskShape } from "../lib/mask.ts";
@@ -92,6 +95,13 @@ interface Props {
   /** Colour the image from the frame's display copy (RF banding removed) when it has one.
    *  Numbers (hover, ROI stats, the field handed to the rail) always use the raw counts. */
   useDisplay?: boolean;
+  /** Smart ROI outlines to draw (playback: the stored per-frame overlays). Default: the live
+   *  frame header's `smart` (operator trackers). */
+  smartOverlays?: SmartOverlay[] | null;
+  /** Smart ROI ids whose stored outline is stale (playback): drawn and labelled muted. */
+  smartStale?: ReadonlySet<number>;
+  /** The operator's smart ROI readouts (live feed) for the on-image chips. */
+  smartFeed?: Map<number, SmartReadoutEntry>;
 }
 
 const NO_MASKS: readonly MaskShape[] = [];
@@ -119,7 +129,7 @@ export function dragShape(tool: Tool, a: Pt, b: Pt, w: number, h: number): RoiIn
 /** Renders raw counts -> °C -> palette on a canvas, with an ROI overlay layer. Data arrays are never mutated. */
 const divergingLut = buildLut("diverging");
 
-export function ThermalView({ frame, palette, scaleMode, manual, onScale, setManual, setScaleMode, rois = NO_ROIS, selected = null, selectedIds = NO_IDS, tool = "select", roisHidden = false, labelScope, zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null, hold = "off", flipH = false, flipV = false, agc = LINEAR_AGC, valid = null, filter = "off", units = "C", mask = null, maskShapes = NO_MASKS, maskMode = false, onMask, statsRois, useDisplay = false }: Props) {
+export function ThermalView({ frame, palette, scaleMode, manual, onScale, setManual, setScaleMode, rois = NO_ROIS, selected = null, selectedIds = NO_IDS, tool = "select", roisHidden = false, labelScope, zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null, hold = "off", flipH = false, flipV = false, agc = LINEAR_AGC, valid = null, filter = "off", units = "C", mask = null, maskShapes = NO_MASKS, maskMode = false, onMask, statsRois, useDisplay = false, smartOverlays, smartStale, smartFeed }: Props) {
   const viewRef = useRef<HTMLDivElement>(null);
   const holdRef = useRef<HoldBuffer | null>(null);
   const freehand = useRef<[number, number][] | null>(null);
@@ -140,6 +150,12 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
   const editing = useRef<{ id: number; hit: VertexHit } | null>(null);
   const [stats, setStats] = useState<StatsMap>(new Map());
   const hdr = frame?.header;
+  const smartSrc = smartOverlays === undefined ? hdr?.smart : smartOverlays;
+  const smartDraw = useMemo(() => {
+    const m = new Map<number, SmartDraw>();
+    for (const o of smartSrc ?? []) m.set(o.id, { state: o.state, valid: o.valid, stale: smartStale?.has(o.id) ?? false, outline: smartOutlines(o) });
+    return m;
+  }, [smartSrc, smartStale]);
 
   useEffect(() => { lutRef.current = buildLut(palette); }, [palette]);
   useEffect(() => { setVertices([]); setDraft(null); dragStart.current = null; }, [tool]);
@@ -271,7 +287,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
       setDraft(next.length >= 2 ? { kind: tool, points: next } : null);
       return;
     }
-    if (tool === "freehand") {
+    if (tool === "freehand" || tool === "smart") {
       freehand.current = [[p.x, p.y]];
       try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
       return;
@@ -326,7 +342,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
     const s = dragStart.current;
     if (s && (tool === "rect" || tool === "circle" || tool === "ellipse" || tool === "line")) setDraft(dragShape(tool, s, p, hdr.width, hdr.height));
     else if ((tool === "polygon" || tool === "polyline") && vertices.length >= 1) setDraft({ kind: tool, points: [...vertices, [p.x, p.y]] });
-    else if (tool === "freehand" && freehand.current) {
+    else if ((tool === "freehand" || tool === "smart") && freehand.current) {
       const fh = freehand.current, last = fh[fh.length - 1];
       if (Math.abs(last[0] - p.x) + Math.abs(last[1] - p.y) >= 1) { fh.push([p.x, p.y]); setDraft(fh.length >= 2 ? { kind: "polygon", points: fh.slice() } : null); }
     }
@@ -336,7 +352,10 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
     if (freehand.current) {
       const pts = simplifyPath(freehand.current, 1.0);
       freehand.current = null; setDraft(null);
-      if (pts.length >= 3) addShape({ kind: "polygon", points: pts });
+      if (pts.length >= 3) {
+        if (tool === "smart") { if (!maskMode) onRoi?.({ type: "add", roi: newSmart(pts) }); }
+        else addShape({ kind: "polygon", points: pts });
+      }
       return;
     }
     if (editing.current) { editing.current = null; onRoi?.({ type: "commit" }); return; }
@@ -408,7 +427,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
         </svg>
       )}
       {hdr && box && (
-        <RoiOverlay box={box} width={hdr.width} height={hdr.height} rois={rois} selected={selected} selectedIds={selectedIds} stats={stats} draft={draft} extremes={extremes} flipH={flipH} flipV={flipV} tool={tool} hidden={roisHidden} labelScope={labelScope} cursor={drawing ? "crosshair" : selected !== null ? "move" : zoom !== "fit" ? "grab" : "default"}
+        <RoiOverlay box={box} width={hdr.width} height={hdr.height} rois={rois} selected={selected} selectedIds={selectedIds} stats={stats} draft={draft} extremes={extremes} flipH={flipH} flipV={flipV} tool={tool} hidden={roisHidden} labelScope={labelScope} smart={maskMode ? undefined : smartDraw} smartFeed={smartFeed} cursor={drawing ? "crosshair" : selected !== null ? "move" : zoom !== "fit" ? "grab" : "default"}
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => { setHover(null); if (moving.current || editing.current) onRoi?.({ type: "commit" }); moving.current = null; panning.current = null; editing.current = null; }} onKeyDown={onKey}
           onDoubleClick={() => { if (tool === "polygon" || tool === "polyline") finishPolygon(vertices); }} />
       )}

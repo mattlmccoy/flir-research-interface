@@ -4,6 +4,12 @@ import { roiLabel, splineSamples, type Roi, type RoiInput, type RoiStats } from 
 import { roiColor, roiLeaderAnchor, type Box, vertexHandles } from "../lib/overlay.ts";
 import { layoutLabels, type LabelBox } from "../lib/labels.ts";
 import { type ChipRect, hitChip, loadOffsets, type Offsets, saveOffsets } from "../lib/labelDrag.ts";
+import { smartOutlineTokens, type Loop } from "../lib/smartOutline.ts";
+import { smartChip, type SmartReadoutEntry, type SmartState } from "../lib/smartReadout.ts";
+
+/** A smart ROI's live/playback outline from the operator (null outline = nothing located). */
+/** `stale`: a stored playback outline whose ROI changed since it was computed (drawn muted). */
+export interface SmartDraw { state: SmartState; valid: boolean; stale?: boolean; outline: { sample: Loop[]; rings: Loop[][] } | null; }
 
 const storage = (() => { try { return typeof localStorage !== "undefined" ? localStorage : null; } catch { return null; } })();
 
@@ -25,6 +31,8 @@ interface Props {
   tool?: string;
   /** localStorage scope for label-position nudges (live vs a specific experiment). */
   labelScope?: string;
+  /** Smart ROI outlines by ROI id (operator-tracked), and the operator's readout for the chips. */
+  smart?: Map<number, SmartDraw>; smartFeed?: Map<number, SmartReadoutEntry>;
   onPointerDown: (e: PE) => void; onPointerMove: (e: PE) => void; onPointerUp: (e: PE) => void;
   onPointerLeave: () => void; onKeyDown: (e: RKeyboardEvent<HTMLCanvasElement>) => void;
   onDoubleClick?: (e: RMouseEvent<HTMLCanvasElement>) => void;
@@ -87,6 +95,33 @@ function drawChip(ctx: CanvasRenderingContext2D, x: number, y: number, c: ChipCo
   if (c.range) { ctx.fillStyle = DIM_COLOR; ctx.fillText(c.range, x + nameX, y + LINE1_H + LINE2_H / 2 + 2); }
 }
 
+/** Smart ROI chip: name + spec §3 state text; line 2 the operator's mean/max (see smartChip). */
+function smartContent(r: Roi, draw: SmartDraw | undefined, feed: SmartReadoutEntry | undefined): ChipContent {
+  return { name: roiLabel(r), ...smartChip(draw, feed) };
+}
+
+function strokeLoops(ctx: CanvasRenderingContext2D, loops: Loop[], sx: number, sy: number): void {
+  ctx.beginPath();
+  for (const l of loops) {
+    l.forEach(([x, y], i) => { if (i === 0) ctx.moveTo(x * sx, y * sy); else ctx.lineTo(x * sx, y * sy); });
+    ctx.closePath();
+  }
+  ctx.stroke();
+}
+
+/** Tracked outline: ring edges dashed (--trace-3), then the sample edge solid (--live), on top;
+ *  both --muted when the stored outline is stale (smartOutlineTokens). */
+function drawSmartOutline(ctx: CanvasRenderingContext2D, d: SmartDraw, sx: number, sy: number, selected: boolean): void {
+  if (!d.outline) return;
+  const tok = smartOutlineTokens(!!d.stale);
+  ctx.save();
+  ctx.strokeStyle = cssVar(tok.rings); ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+  for (const ring of d.outline.rings) strokeLoops(ctx, ring, sx, sy);
+  ctx.strokeStyle = cssVar(tok.sample); ctx.lineWidth = selected ? 2.5 : 1.5; ctx.setLineDash([]);
+  strokeLoops(ctx, d.outline.sample, sx, sy);
+  ctx.restore();
+}
+
 /** Strokes one shape in canvas pixels (filled shapes get a translucent tint); returns where its label goes. */
 function drawShape(ctx: CanvasRenderingContext2D, r: RoiInput, sx: number, sy: number, fill: boolean): [number, number] {
   const tint = () => { if (!fill) return; ctx.save(); ctx.globalAlpha = FILL_ALPHA; ctx.fillStyle = ctx.strokeStyle; ctx.fill(); ctx.restore(); };
@@ -134,6 +169,15 @@ function drawShape(ctx: CanvasRenderingContext2D, r: RoiInput, sx: number, sy: n
       ctx.stroke();
       for (const [px, py] of r.points) { ctx.beginPath(); ctx.arc((px + 0.5) * sx, (py + 0.5) * sy, 3, 0, Math.PI * 2); ctx.stroke(); }
       const [fx, fy] = r.points[0];
+      return [(fx + 0.5) * sx, (fy + 0.5) * sy - 6];
+    }
+    case "smart": {  // the user's search outline, dashed; the tracked outline and rings: drawSmartOutline
+      ctx.save(); ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      r.search.forEach(([px, py], i) => { const x = (px + 0.5) * sx, y = (py + 0.5) * sy; if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
+      ctx.closePath(); ctx.stroke();
+      ctx.restore();
+      const [fx, fy] = r.search[0];
       return [(fx + 0.5) * sx, (fy + 0.5) * sy - 6];
     }
   }
@@ -242,17 +286,21 @@ export function RoiOverlay(p: Props) {
       if (r.hidden) return; // keep i so default colors match the rows
       const color = resolve(roiColor(r, i));
       const sel = p.selectedIds ? p.selectedIds.includes(r.id) : r.id === p.selected;
-      ctx.strokeStyle = color;
+      ctx.strokeStyle = r.kind === "smart" ? cssVar("--muted") : color;  // smart: the search outline is muted
       ctx.lineWidth = sel ? 2.5 : 1;
       ctx.setLineDash([]);
-      const [lx, ly] = drawShape(ctx, r, sx, sy, true);
+      const [lx, ly] = drawShape(ctx, r, sx, sy, r.kind !== "smart");
+      const sd = r.kind === "smart" ? p.smart?.get(r.id) : undefined;
+      if (sd) drawSmartOutline(ctx, sd, sx, sy, sel);
       if (sel) { ctx.strokeStyle = accent; ctx.lineWidth = 1; ctx.setLineDash([3, 3]); drawShape(ctx, r, sx, sy, false); ctx.setLineDash([]); }
       // the label anchor in unflipped screen space, so a mirrored image never mirrors the text
       const toScr = (dx: number, dy: number) => base.inverse().transformPoint(ctx.getTransform().transformPoint(new DOMPoint(dx, dy)));
       const scr = toScr(lx, ly);
       const [ccx, ccy, reach] = roiLeaderAnchor(r, sx, sy); // a point the leader can connect to
       const c = toScr(ccx, ccy);
-      labels.push({ id: r.id, content: labelContent(r, p.stats.get(r.id)), color, ax: scr.x, ay: scr.y, cx: c.x, cy: c.y, reach, selected: r.id === p.selected });
+      const content = r.kind === "smart" ? smartContent(r, sd, p.smartFeed?.get(r.id)) : labelContent(r, p.stats.get(r.id));
+      const dot = r.kind === "smart" && smartChip(sd, p.smartFeed?.get(r.id)).muted ? cssVar("--muted") : color;  // smart: ROI colour only when valid
+      labels.push({ id: r.id, content, color: dot, ax: scr.x, ay: scr.y, cx: c.x, cy: c.y, reach, selected: r.id === p.selected });
       if (r.id === p.selected) for (const [vx, vy] of vertexHandles(r)) {
         const hx = (vx + 0.5) * sx, hy = (vy + 0.5) * sy;
         ctx.setLineDash([]); ctx.fillStyle = accent; ctx.strokeStyle = scrim; ctx.lineWidth = 1.5;

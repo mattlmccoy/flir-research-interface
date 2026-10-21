@@ -85,6 +85,10 @@ adapts as the powder warms. The halfway point is the default; a **sensitivity** 
 (e.g. 30–70 % of the way from surroundings to core). Exact estimators are the builder's choice as long
 as they are robust to noise and to over-range pixels.
 
+*Decision (Matt, 2026-10-21):* the hot level is the **90th percentile of the chosen region** (not
+p99/peak), so a few smoking or arcing pixels far hotter than the sample never set the edge. The
+reported `max_c` is unchanged, so those hot spots stay visible in the readout.
+
 **Fixed-temperature rule.** The edge is the user-chosen °C isotherm. Behaves more like a physical
 boundary once the whole sample is above that temperature; used when comparing dimensions to CAD.
 

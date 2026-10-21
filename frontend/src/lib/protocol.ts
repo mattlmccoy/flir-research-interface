@@ -1,5 +1,6 @@
 /** Decoder for the backend's frame message (see backend api/frames.py). */
 import type { RfNotchInfo } from "./rfNotch.ts";
+import type { SmartOverlay } from "./smartLabels.ts";
 
 export interface FrameHeader {
   type: "frame";
@@ -25,6 +26,9 @@ export interface FrameHeader {
   viz_dropped?: number;
   frames_received?: number;
   state?: string;
+  /** Live smart ROI outlines from the operator's trackers (latest result, display only; absent
+   *  when no smart ROI is tracked). See backend analysis/smart_wire.py. */
+  smart?: SmartOverlay[];
   /** Present when a display copy (RF banding removed) follows the raw counts. */
   display?: { rf_notch: RfNotchInfo; counts: boolean };
 }

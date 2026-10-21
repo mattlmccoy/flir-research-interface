@@ -70,3 +70,10 @@ in `presets.py` reads: `nodes.IRFrameRate` / `NUCMode` / `CurrentCase` / `NumCas
 `active_case.index`, `nuc_mode`, `object_parameters` (the 7 float nodes plus `EstimatedTransmission`
 and `UseWindowTemperature`, which presets leave out) and `enum_options`. The serial number
 (89903739) is left in as captured.
+
+`smart_roi_20261020.npz` — five real A70 frames of `20261020_144402_Run` (graphite/PA12 cube in
+PA12 powder, TemperatureLinear10mK) at t = 0.0, 55.0, 274.0, 549.0 and 604.0 s (frame indices 0,
+1652, 8227, 16486, 18137), cropped to the run's `freehand_sample` polygon ROI bbox + 40 px
+(origin x=89, y=157; 128×127 px of the 640×480 frame). Stored as °C (`counts × 0.01 − 273.15`,
+float32) with `origin`, `frame_shape`, `polygon` (frame coordinates), `indices` and `t_s`; no
+over-range pixels in the crops.

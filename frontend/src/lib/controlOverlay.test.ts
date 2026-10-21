@@ -59,3 +59,15 @@ test("control lines are dashed and never share a color value with an ROI preset,
   const all = [...rightAxis({ ...rf, ...caps }, "rf").traces, ...rightAxis({ ...rf, ...caps }, "caps").traces];
   assert.equal(new Set(all.map((t) => t.color)).size, 3);
 });
+
+test("size mode: offered when a smart ROI size trace exists, plotted in px from the given traces", () => {
+  const size = [{ id: -2001, label: "graphite area (px)", color: "var(--trace-1)", dash: [6, 2], t: [0, 1], v: [903, NaN] }];
+  assert.deepEqual(rightAxisOptions(rf, true), ["rf", "size"]);
+  assert.deepEqual(rightAxisOptions(null, true), ["size"]);
+  assert.deepEqual(rightAxisOptions(null, false), []);
+  const r = rightAxis(rf, "size", size);
+  assert.equal(r.units, "px");
+  assert.deepEqual(r.traces, size);
+  assert.deepEqual(rightAxis(rf, "size", []).traces, [], "no size trace, nothing on the axis");
+  assert.deepEqual(rightAxis(rf, "rf", size).traces.map((x) => x.label), ["RF power"], "other modes ignore size traces");
+});
