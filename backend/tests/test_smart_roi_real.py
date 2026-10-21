@@ -42,14 +42,21 @@ def test_real_run_tracks_sample(tmp_path: Path) -> None:
     state, t_s, area = s["state"], s["t_s"], s["area_px"]
     n_state = {k: int((state == c).sum()) for k, c in STATE_CODES.items()}
     i274, i604 = _at(t_s, 274.0), _at(t_s, 604.0)
+    at = {t: float(area[_at(t_s, t)]) for t in (274.0, 553.0, 560.0, 604.0, 625.0)}
     print(f"\nwall={wall:.1f}s frames={len(state)} states={n_state} "
-          f"area@274s={area[i274]:.0f} area@604s={area[i604]:.0f}")
+          + " ".join(f"area@{t:g}s={a:.0f}" for t, a in at.items()))
 
     assert state[0] == STATE_CODES["searching"]
     win = (t_s >= 60.0) & (t_s <= 540.0)
     assert win.any()
     assert (state[win] == STATE_CODES["locked"]).mean() >= 0.90
     assert area[i604] < area[i274]
+
+    # the outline never collapses while the sample is intact: above half the first-lock area
+    first = int(np.argmax(state == STATE_CODES["locked"]))
+    keep = (t_s <= 540.0) & np.isfinite(area)
+    keep[:first] = False
+    assert (area[keep] > 0.5 * area[first]).all(), float(np.nanmin(area[keep]))
 
     # searching rows carry no numbers: sample mean and every dims column NaN (never 0)
     searching = state == STATE_CODES["searching"]
