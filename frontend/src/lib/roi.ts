@@ -88,14 +88,7 @@ export type RoiAction =
 export function visibleRois(rois: Roi[]): Roi[] { return rois.filter((r) => !r.hidden); }
 
 /**
- * Canonical signature of one ROI for the "do the derived files still match?" check: only the
- * fields that change the exported ROI series / plot / videos — geometry, per-ROI optics, name and
- * color. Display-only state (selection, `hidden`, a default `box: 1`) is excluded, and floats are
- * compared as JS numbers so a stored `72.0` equals an on-screen `72`. Works on both the on-screen
- * `Roi` and the plain dicts returned by the API.
- */
-/**
- * The tracking settings of a smart ROI with the backend's defaults applied (smart_roi.py
+ * The tracking settings of a smart ROI with the backend's defaults applied (smart_spec.py
  * parse_smart_roi: rings 5/10/25 px, relative rule, sensitivity 0.5), so a stored ROI that omits a
  * defaulted key equals the on-screen one that carries it. `fixed_c` counts only under the fixed rule.
  * Works on both the on-screen `Roi` and the plain dicts returned by the API.
@@ -108,6 +101,13 @@ export function smartTracking(r: Record<string, unknown>): unknown[] {
   return [search, rings, rule, sens, rule === "fixed" ? Number(r.fixed_c) : null, typeof r.ring_emissivity === "number" ? r.ring_emissivity : null];
 }
 
+/**
+ * Canonical signature of one ROI for the "do the derived files still match?" check: only the
+ * fields that change the exported ROI series / plot / videos — geometry, per-ROI optics, name and
+ * color. Display-only state (selection, `hidden`, a default `box: 1`) is excluded, and floats are
+ * compared as JS numbers so a stored `72.0` equals an on-screen `72`. Works on both the on-screen
+ * `Roi` and the plain dicts returned by the API.
+ */
 function roiSignature(r: Record<string, unknown>): string {
   const g: Record<string, unknown> = { id: r.id, kind: r.kind };
   switch (r.kind) {
