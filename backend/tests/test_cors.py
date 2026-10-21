@@ -12,10 +12,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
+import pytest
 from fastapi.testclient import TestClient
 
 from flir_research_interface import __version__
 from flir_research_interface.api.app import API_VERSION, create_app
+from flir_research_interface.camera.base import Frame
+from flir_research_interface.recording.recorder import Recorder
+from flir_research_interface.visible import full_range
 
 SITE = "https://mattlmccoy.github.io"
 
@@ -91,3 +96,27 @@ def test_preflight_allows_put_for_calibration(tmp_path: Path) -> None:
         )
         assert r.status_code == 200, r.text
         assert "PUT" in r.headers["access-control-allow-methods"]
+
+
+def test_site_can_read_the_visible_range_header(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The site UI reads ``X-Visible-Range`` to say whether the shown video is range-corrected;
+    a cross-origin response hides every header CORS does not expose."""
+    monkeypatch.setattr(full_range, "resolve_ffmpeg", lambda: None)
+    rec = Recorder(None, experiments_root=tmp_path, chunk_frames=4)
+    run = rec.start(name="vis", metadata={}, camera_info={"ir_format": "TemperatureLinear10mK"})
+    rec.submit(
+        Frame(
+            frame_id=1, device_timestamp_ns=1, host_timestamp_ns=1, pixel_format="Mono16",
+            ir_format="TemperatureLinear10mK", counts=np.zeros((4, 4), dtype=np.uint16),
+            incomplete=False,
+        )
+    )
+    rec.stop()
+    (run / "visible.mp4").write_bytes(b"raw")
+    with _client(tmp_path) as c:
+        r = c.get(f"/api/experiments/{run.name}/visible.mp4", headers={"Origin": SITE})
+    assert r.headers["x-visible-range"] == "raw-untagged"
+    exposed = [h.strip().lower() for h in r.headers["access-control-expose-headers"].split(",")]
+    assert "x-visible-range" in exposed

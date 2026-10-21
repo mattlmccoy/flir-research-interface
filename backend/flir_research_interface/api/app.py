@@ -92,7 +92,7 @@ def install_cross_origin_policy(app: FastAPI, *, site_origin: str | None) -> Non
         allow_origin_regex=LOCAL_ORIGIN_RE,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["content-type", CLIENT_HEADER, "if-none-match"],
-        expose_headers=["etag", "content-disposition"],
+        expose_headers=["etag", "content-disposition", "x-visible-range"],
         allow_private_network=True,  # Chrome Local Network Access preflight
         max_age=600,
     )
