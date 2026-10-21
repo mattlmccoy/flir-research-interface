@@ -4,11 +4,12 @@ import { roiLabel, splineSamples, type Roi, type RoiInput, type RoiStats } from 
 import { roiColor, roiLeaderAnchor, type Box, vertexHandles } from "../lib/overlay.ts";
 import { layoutLabels, type LabelBox } from "../lib/labels.ts";
 import { type ChipRect, hitChip, loadOffsets, type Offsets, saveOffsets } from "../lib/labelDrag.ts";
-import type { Loop } from "../lib/smartOutline.ts";
+import { smartOutlineTokens, type Loop } from "../lib/smartOutline.ts";
 import { smartChip, type SmartReadoutEntry, type SmartState } from "../lib/smartReadout.ts";
 
 /** A smart ROI's live/playback outline from the operator (null outline = nothing located). */
-export interface SmartDraw { state: SmartState; valid: boolean; outline: { sample: Loop[]; rings: Loop[][] } | null; }
+/** `stale`: a stored playback outline whose ROI changed since it was computed (drawn muted). */
+export interface SmartDraw { state: SmartState; valid: boolean; stale?: boolean; outline: { sample: Loop[]; rings: Loop[][] } | null; }
 
 const storage = (() => { try { return typeof localStorage !== "undefined" ? localStorage : null; } catch { return null; } })();
 
@@ -108,13 +109,15 @@ function strokeLoops(ctx: CanvasRenderingContext2D, loops: Loop[], sx: number, s
   ctx.stroke();
 }
 
-/** Tracked outline: ring edges dashed (--trace-3), then the sample edge solid (--live), on top. */
+/** Tracked outline: ring edges dashed (--trace-3), then the sample edge solid (--live), on top;
+ *  both --muted when the stored outline is stale (smartOutlineTokens). */
 function drawSmartOutline(ctx: CanvasRenderingContext2D, d: SmartDraw, sx: number, sy: number, selected: boolean): void {
   if (!d.outline) return;
+  const tok = smartOutlineTokens(!!d.stale);
   ctx.save();
-  ctx.strokeStyle = cssVar("--trace-3"); ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+  ctx.strokeStyle = cssVar(tok.rings); ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
   for (const ring of d.outline.rings) strokeLoops(ctx, ring, sx, sy);
-  ctx.strokeStyle = cssVar("--live"); ctx.lineWidth = selected ? 2.5 : 1.5; ctx.setLineDash([]);
+  ctx.strokeStyle = cssVar(tok.sample); ctx.lineWidth = selected ? 2.5 : 1.5; ctx.setLineDash([]);
   strokeLoops(ctx, d.outline.sample, sx, sy);
   ctx.restore();
 }

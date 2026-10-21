@@ -102,10 +102,12 @@ export function smartFeedMap(payload: unknown): Map<number, SmartReadoutEntry> {
 }
 
 /** On-image chip text (`muted`: dot in --muted, not the ROI colour, when not valid): state from the frame's overlay (per frame), numbers from the operator's feed
- *  only when it reports the same state and is valid (the polled feed may lag the frames). */
-export function smartChip(draw: { state: SmartState; valid: boolean } | undefined, feed: SmartReadoutEntry | undefined): { value: string; range: string | null; muted: boolean } {
+ *  only when it reports the same state and is valid (the polled feed may lag the frames). A stale
+ *  stored outline (playback: the ROI changed since its series was computed) is muted, numberless. */
+export function smartChip(draw: { state: SmartState; valid: boolean; stale?: boolean } | undefined, feed: SmartReadoutEntry | undefined): { value: string; range: string | null; muted: boolean } {
   const cur = draw ?? feed;
   if (!cur) return { value: "no outline", range: null, muted: true };
+  if (draw?.stale) return { value: `${smartBadge(draw.state)} · stale`, range: null, muted: true };
   const value = cur.valid || cur.state === "searching" ? smartBadge(cur.state) : `${smartBadge(cur.state)} · not valid`;
   const s = feed && feed.valid && feed.state === cur.state && cur.valid ? feed.sample : null;
   return { value, range: s && s.mean_c !== null && s.max_c !== null ? `mean ${s.mean_c.toFixed(1)}  max ${s.max_c.toFixed(1)}` : null, muted: !cur.valid };

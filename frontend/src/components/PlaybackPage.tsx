@@ -260,6 +260,11 @@ export function PlaybackPage(p: Props) {
   const smart = useSmartSeries(p.name, smartIds, beforeCompute, onSmartError);
   // stored smart ROI outlines for this frame (none until the run's smart series is computed)
   const smartOverlays = useSmartPlaybackOverlays(p.name, smartIds, index, smart.version);
+  // ids whose stored series no longer matches the ROI (stored or on screen): outline + chip muted
+  const smartStale = useMemo(() => new Set(p.rois.rois.flatMap((r) => {
+    const st = smart.states.get(r.id);
+    return r.kind === "smart" && st?.kind === "ready" && (st.series.stale || smartEdited(r, info?.rois)) ? [r.id] : [];
+  })), [p.rois.rois, smart.states, info?.rois]);
   const smartRows = useMemo(() => {
     const m = new Map<number, SmartPlaybackRow>();
     for (const r of p.rois.rois) {
@@ -416,7 +421,7 @@ export function PlaybackPage(p: Props) {
           ) : null}
           <ThermalView frame={frame} palette={p.palette} scaleMode={p.scaleMode} manual={p.manual} onScale={setShown} setManual={p.setManual} setScaleMode={p.setScaleMode}
             rois={p.maskMode ? maskRois : p.rois.rois} statsRois={p.rois.rois} selected={p.maskMode ? p.masks.selected : p.rois.selected} selectedIds={p.maskMode ? p.masks.selectedIds : p.rois.selectedIds} tool={p.layout.tool} roisHidden={!p.maskMode && p.layout.roisHidden} labelScope={p.maskMode ? `exp.${p.name}.mask` : `exp.${p.name}`} zoom={p.layout.zoom} onRoi={p.maskMode ? maskEdit : p.roiDispatch} onStats={onStats} rad={rad} extremes={p.layout.extremes} isotherm={p.layout.isotherm} onField={setField} reference={reference} hold={p.layout.hold} flipH={p.layout.flipH} flipV={p.layout.flipV} agc={p.layout.agc} filter={p.layout.filter} units={p.layout.units} useDisplay={p.layout.rfNotch} valid={p.layout.segment.on ? { min: p.layout.segment.min, max: p.layout.segment.max } : null} mask={maskPx} maskShapes={p.masks.enabled || p.maskMode ? p.masks.shapes : []} maskMode={p.maskMode} onMask={p.maskDispatch}
-            overlay={p.layout.visibleMode === "overlay" && hasVideo ? <VisibleVideo plain name={p.name} t={t} playing={playing} speed={speed} vis={playVis} /> : undefined} overlayStyle={p.layout.overlay} overlayH={overlayH} smartOverlays={smartOverlays} />
+            overlay={p.layout.visibleMode === "overlay" && hasVideo ? <VisibleVideo plain name={p.name} t={t} playing={playing} speed={speed} vis={playVis} /> : undefined} overlayStyle={p.layout.overlay} overlayH={overlayH} smartOverlays={smartOverlays} smartStale={smartStale} />
           {p.layout.visibleMode === "side" && hasVideo && <VisibleVideo big flipH={p.layout.flipH} flipV={p.layout.flipV} name={p.name} t={t} playing={playing} speed={speed} vis={playVis} measuredFps={info?.visible?.measured_fps} />}
         </div>
       }

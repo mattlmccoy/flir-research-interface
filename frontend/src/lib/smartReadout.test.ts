@@ -120,3 +120,10 @@ test("smartChip: state from the frame's overlay, numbers only when the feed agre
   assert.deepEqual(smartChip(undefined, locked), { value: "locked", range: "mean 113.4  max 147.4", muted: false }, "no overlay: the feed alone");
   assert.deepEqual(smartChip(undefined, undefined), { value: "no outline", range: null, muted: true });
 });
+
+test("smartChip: a stale stored outline (playback) is muted and says stale, never shows numbers", () => {
+  const locked = entry(FEED_LOCKED);
+  assert.deepEqual(smartChip({ state: "locked", valid: true, stale: true }, locked), { value: "locked · stale", range: null, muted: true });
+  assert.deepEqual(smartChip({ state: "holding", valid: true, stale: true }, undefined), { value: "holding — edge lost · stale", range: null, muted: true });
+  assert.deepEqual(smartChip({ state: "locked", valid: true, stale: false }, locked).muted, false);
+});

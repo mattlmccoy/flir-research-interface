@@ -58,3 +58,9 @@ test("smartOutlines: no labels (searching) or a malformed crop gives null", () =
   assert.equal(smartOutlines({ id: 1, state: "searching", valid: false, bbox: null, labels: null }), null);
   assert.equal(smartOutlines({ id: 1, state: "locked", valid: true, bbox: [0, 0, 5, 5], labels: VECTOR }), null);
 });
+
+test("smartOutlineTokens: a stale stored outline is drawn muted (rings and sample), a current one in colour", async () => {
+  const { smartOutlineTokens } = await import("./smartOutline.ts");
+  assert.deepEqual(smartOutlineTokens(false), { rings: "--trace-3", sample: "--live" });
+  assert.deepEqual(smartOutlineTokens(true), { rings: "--muted", sample: "--muted" });
+});

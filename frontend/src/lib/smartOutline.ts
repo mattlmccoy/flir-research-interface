@@ -74,3 +74,9 @@ export function smartOutlines(o: SmartOverlay): { sample: Loop[]; rings: Loop[][
   for (let v = 2; v <= top; v++) rings.push(shift(labelContours(labels, w, h, v)));
   return { sample: shift(labelContours(labels, w, h, 1)), rings };
 }
+
+/** CSS colour tokens for a smart outline: rings dashed in --trace-3 and the sample edge in --live;
+ *  both --muted when the stored outline is stale (the ROI changed since it was computed). */
+export function smartOutlineTokens(stale: boolean): { rings: string; sample: string } {
+  return stale ? { rings: "--muted", sample: "--muted" } : { rings: "--trace-3", sample: "--live" };
+}

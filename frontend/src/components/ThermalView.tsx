@@ -98,6 +98,8 @@ interface Props {
   /** Smart ROI outlines to draw (playback: the stored per-frame overlays). Default: the live
    *  frame header's `smart` (operator trackers). */
   smartOverlays?: SmartOverlay[] | null;
+  /** Smart ROI ids whose stored outline is stale (playback): drawn and labelled muted. */
+  smartStale?: ReadonlySet<number>;
   /** The operator's smart ROI readouts (live feed) for the on-image chips. */
   smartFeed?: Map<number, SmartReadoutEntry>;
 }
@@ -127,7 +129,7 @@ export function dragShape(tool: Tool, a: Pt, b: Pt, w: number, h: number): RoiIn
 /** Renders raw counts -> °C -> palette on a canvas, with an ROI overlay layer. Data arrays are never mutated. */
 const divergingLut = buildLut("diverging");
 
-export function ThermalView({ frame, palette, scaleMode, manual, onScale, setManual, setScaleMode, rois = NO_ROIS, selected = null, selectedIds = NO_IDS, tool = "select", roisHidden = false, labelScope, zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null, hold = "off", flipH = false, flipV = false, agc = LINEAR_AGC, valid = null, filter = "off", units = "C", mask = null, maskShapes = NO_MASKS, maskMode = false, onMask, statsRois, useDisplay = false, smartOverlays, smartFeed }: Props) {
+export function ThermalView({ frame, palette, scaleMode, manual, onScale, setManual, setScaleMode, rois = NO_ROIS, selected = null, selectedIds = NO_IDS, tool = "select", roisHidden = false, labelScope, zoom = "fit", onRoi, overlay, overlayStyle, overlayH, topLayer, onStats, rad = null, extremes = true, isotherm = null, onField, reference = null, hold = "off", flipH = false, flipV = false, agc = LINEAR_AGC, valid = null, filter = "off", units = "C", mask = null, maskShapes = NO_MASKS, maskMode = false, onMask, statsRois, useDisplay = false, smartOverlays, smartStale, smartFeed }: Props) {
   const viewRef = useRef<HTMLDivElement>(null);
   const holdRef = useRef<HoldBuffer | null>(null);
   const freehand = useRef<[number, number][] | null>(null);
@@ -151,9 +153,9 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
   const smartSrc = smartOverlays === undefined ? hdr?.smart : smartOverlays;
   const smartDraw = useMemo(() => {
     const m = new Map<number, SmartDraw>();
-    for (const o of smartSrc ?? []) m.set(o.id, { state: o.state, valid: o.valid, outline: smartOutlines(o) });
+    for (const o of smartSrc ?? []) m.set(o.id, { state: o.state, valid: o.valid, stale: smartStale?.has(o.id) ?? false, outline: smartOutlines(o) });
     return m;
-  }, [smartSrc]);
+  }, [smartSrc, smartStale]);
 
   useEffect(() => { lutRef.current = buildLut(palette); }, [palette]);
   useEffect(() => { setVertices([]); setDraft(null); dragStart.current = null; }, [tool]);
