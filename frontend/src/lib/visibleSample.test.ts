@@ -106,6 +106,15 @@ test("segments timed from their first frame, or absent from the summary, add no 
   assert.ok(!visibleSampleStatusText(noSegments)!.includes("ffmpeg launch"));
 });
 
+test("an ok run with a video file that held nothing to analyse says so, apart from a missing one", () => {
+  const text = visibleSampleStatusText({ ...OK, empty: ["visible_001.mp4"] })!;
+  assert.ok(text.includes("; empty video: visible_001.mp4"), text);
+  assert.ok(!text.includes("missing video"), text);
+  const both = visibleSampleStatusText({ ...OK, missing: ["visible_002.mp4"], empty: ["visible_001.mp4"] })!;
+  assert.ok(both.includes("missing video: visible_002.mp4") && both.includes("empty video: visible_001.mp4"), both);
+  assert.ok(!visibleSampleStatusText({ ...OK, empty: [] })!.includes("empty video"));
+});
+
 test("an ok run whose plot was not drawn does not read as fully successful", () => {
   const text = visibleSampleStatusText({ ...OK, plot_error: "OSError: disk full" })!;
   assert.ok(text.includes("plot not drawn (OSError: disk full)"), text);
@@ -172,6 +181,11 @@ test("zero analysed frames still reports a missing video segment", () => {
   const text = visibleSampleStatusText({ ...OK, coverage: NO_FRAMES, events: [], missing: ["visible_000.mp4"] })!;
   assert.ok(text.startsWith(NOTHING_TO_MEASURE), text);
   assert.ok(text.includes("missing video: visible_000.mp4"), text);
+});
+
+test("zero analysed frames still reports an empty video segment", () => {
+  const text = visibleSampleStatusText({ ...OK, coverage: NO_FRAMES, events: [], empty: ["visible.mp4"] })!;
+  assert.ok(text.startsWith(NOTHING_TO_MEASURE) && text.includes("empty video: visible.mp4"), text);
 });
 
 test("a summary with no status is unreadable, not an ok run", () => {

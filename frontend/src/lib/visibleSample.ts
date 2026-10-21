@@ -39,7 +39,11 @@ export interface VisibleSampleSummary {
   coverage?: { frames_analysed: number; t_first_s: number | null; t_last_s: number | null; gaps_over_300ms: number };
   events?: VisibleSampleEvent[];
   segments?: VisibleSampleSegment[];
+  /** Segment files visible.json lists that are not on disk. */
   missing?: string[];
+  /** Segment files on disk with nothing to analyse: no video packet, or every frame inside the
+   *  start-up skip. They are not in `segments` and get no close-up. */
+  empty?: string[];
   plot_error?: string | null;
 }
 
@@ -92,13 +96,15 @@ function describe(vs: VisibleSampleSummary): StatusLine {
     text += "; visible times from ffmpeg launch (~1 s early)";
   }
   if (vs.missing && vs.missing.length > 0) text += `; missing video: ${vs.missing.join(", ")}`;
+  if (vs.empty && vs.empty.length > 0) text += `; empty video: ${vs.empty.join(", ")}`;
   if (vs.plot_error != null) text += `; plot not drawn (${vs.plot_error})`;
   return { text, error: false };
 }
 
 /** The one-line outcome of the analysis, or null when no result file exists. A run that was not
- *  analysed says why, and an analysed run says what it did not cover (no frames, missing video, no
- *  plot), so "0 flashes" is never shown for a run that did not look. */
+ *  analysed says why, and an analysed run says what it did not cover (no frames, missing or empty
+ *  video, no plot) and how its times were anchored, so "0 flashes" is never shown for a run that did
+ *  not look. */
 export function visibleSampleStatusText(vs: VisibleSampleSummary | null | undefined): string | null {
   return vs ? describe(vs).text : null;
 }

@@ -14,14 +14,18 @@ from typing import Any
 import pytest
 
 from flir_research_interface.analysis import visible_sample_run as vsr
+from flir_research_interface.playback.visible_timing import FRAME0_SKIP_S
 from tests import visible_sample_helpers as vh
 from tests.visible_sample_helpers import (
+    FIXTURES,
     T_START_S,
     csv_rows,
     experiment,
     exported,
     needs_ffmpeg,
+    packet_times,
     run_analysis,
+    synthetic_clip,
 )
 
 # The shared fixtures, bound here so that pytest finds them in this module (importing them by name
@@ -198,3 +202,75 @@ def test_runner_reports_how_each_segment_was_anchored(
         [T_START_S, T_START_S + 50.0 - 1.0]
     )
     assert json.loads((d / "exports" / "visible_sample.json").read_text()) == out
+
+
+# -- empty segments: a file with nothing to analyse is reported, not fatal ---------------------
+
+# The 352 bytes the recorder left in visible_001.mp4 of 20261015_141905_Run and in visible.mp4 of
+# 20261015_141026_Run (byte-identical): an mp4 with no track and no packet. ffprobe lists it with
+# rc 0 and empty "packets" and "streams" (tests/fixtures/README.md).
+EMPTY_SEGMENT = FIXTURES / "visible_empty_segment.mp4"
+
+
+@needs_ffmpeg
+def test_runner_reports_a_segment_without_video_packets_and_analyses_the_rest(
+    tmp_path: Path,
+    real: dict[str, Any],
+    short_clip: Path,
+    fixed_threshold: None,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    d = experiment(tmp_path, real, [short_clip, EMPTY_SEGMENT])
+    with caplog.at_level("WARNING", logger=vsr.logger.name):
+        out = run_analysis(d)
+    assert out["status"] == "ok", out
+    assert out["empty"] == ["visible_001.mp4"] and out["missing"] == []
+    assert [g["index"] for g in out["segments"]] == [0]
+    rows = csv_rows(d)
+    assert out["coverage"]["frames_analysed"] == len(rows) > 0
+    assert {int(r["segment"]) for r in rows} == {0}
+    assert out["files"] == [
+        "visible_sample.csv", "visible_sample_closeup.mp4", "visible_sample_plot.png",
+        "visible_sample.json",
+    ]  # fmt: skip
+    assert exported(d) == sorted(out["files"])  # no close-up for the empty segment
+    assert any("visible_001.mp4" in r.getMessage() for r in caplog.records)
+    assert json.loads((d / "exports" / "visible_sample.json").read_text()) == out
+
+
+@pytest.fixture(scope="module")
+def brief_clip(tmp_path_factory: pytest.TempPathFactory, real: dict[str, Any]) -> Path:
+    """synthetic: 0.2 s at 10 fps, two frames, both inside the 0.25 s start-up skip."""
+    path = synthetic_clip(tmp_path_factory.mktemp("brief") / "b.mp4", real, 0.2, 0.0)
+    assert all(t < FRAME0_SKIP_S for t in packet_times(path)) and len(packet_times(path)) == 2
+    return path
+
+
+@needs_ffmpeg
+def test_runner_reports_a_segment_inside_the_startup_skip_and_encodes_nothing_for_it(
+    tmp_path: Path,
+    real: dict[str, Any],
+    short_clip: Path,
+    brief_clip: Path,
+    fixed_threshold: None,
+) -> None:
+    """Its frames are all skipped, so it has nothing to analyse; encoding it would write a close-up
+    with no stream (about 260 bytes) and list it in ``files``."""
+    d = experiment(tmp_path, real, [short_clip, brief_clip])
+    out = run_analysis(d)
+    assert out["status"] == "ok", out
+    assert out["empty"] == ["visible_001.mp4"]
+    assert [g["index"] for g in out["segments"]] == [0]
+    assert "visible_sample_closeup_001.mp4" not in out["files"]
+    assert not (d / "exports" / "visible_sample_closeup_001.mp4").exists()
+    assert exported(d) == sorted(out["files"])
+
+
+@needs_ffmpeg
+@pytest.mark.parametrize("which", ["no packets", "inside the skip"])
+def test_runner_skips_when_no_segment_has_a_frame_to_analyse(
+    tmp_path: Path, real: dict[str, Any], brief_clip: Path, which: str
+) -> None:
+    clips = [EMPTY_SEGMENT, EMPTY_SEGMENT] if which == "no packets" else [brief_clip]
+    d = experiment(tmp_path, real, clips)
+    _assert_skipped(run_analysis(d), d, "no visible video")

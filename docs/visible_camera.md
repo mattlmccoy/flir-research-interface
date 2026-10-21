@@ -211,7 +211,7 @@ blocks Stop.
 
 | File | Content |
 |---|---|
-| `visible_sample.json` | Always written. `status` (`ok`, `skipped`, `failed`) and `reason`; for `ok` also the inputs (sample and bed ROI, alignment `saved_utc` / `rmsPx`, `threshold`, `dark_rule`, `margin_px`, flash rule and `flash_threshold`), `coverage`, `events`, `files`. A skipped or failed run keeps only `status`, `reason`, `software`, `files`: nothing was analysed, so there is no coverage block to misread. |
+| `visible_sample.json` | Always written. `status` (`ok`, `skipped`, `failed`) and `reason`; for `ok` also the inputs (sample and bed ROI, alignment `saved_utc` / `rmsPx`, `threshold`, `dark_rule`, `margin_px`, flash rule and `flash_threshold`), `coverage`, `segments` (per file: `t_start_s`, `anchor`, `frames_analysed`), `missing`, `empty`, `events`, `files`. A skipped or failed run keeps only `status`, `reason`, `software`, `files`: nothing was analysed, so there is no coverage block to misread. |
 | `visible_sample.csv` | One row per analysed frame: `t_s` (thermal clock), `segment`, `frame` (index in its file), `keyframe`, `sample_dark_px`, `sample_mean_luma`, `bed_clipped_frac`, `brightening` (empty on keyframes). |
 | `visible_sample_plot.png` | Four panels on the thermal time axis: RF forward power; sample ROI max and mean (°C, with the 250 °C case limit); `sample_dark_px` with a 31-frame rolling median; `brightening`. Flash events are drawn as vertical lines labelled with the peak value. |
 | `visible_sample_closeup.mp4` | A 3x crop around the sample with one fixed contrast stretch (luma 58-250 on the reference run). It holds every analysed frame at its time in `visible.mp4` (so it starts at the first analysed frame, not at 0), without B-frames. Later segments get `_001`, `_002`, ... |
@@ -219,6 +219,16 @@ blocks Stop.
 The sample is the ROI whose name contains "sample" (smallest wins). Reasons for `skipped`: `no visible
 video`, `no visible alignment`, `no sample ROI (name containing 'sample')`, `ffmpeg not found`,
 `ffprobe not found`, `visible alignment is invalid`, `sample ROI maps outside the visible frame`.
+Segment files that cannot be read are listed and the other segments analysed: `missing` names the
+files `visible.json` lists that are not on disk; `empty` names files on disk with nothing to analyse,
+either no video packet (the recorder leaves a 352-byte mp4 with no track when the camera never
+delivered a frame: `20261015_141026_Run/visible.mp4`, `20261015_141905_Run/visible_001.mp4`) or every
+frame inside the 0.25 s start-up skip. Neither kind gets a close-up. When no segment has a frame to
+analyse the run is `skipped` with `no visible video`. Each segment's `anchor` says what its
+`t_start_s` is measured from: `first_frame` (the arrival of its first frame), `launch` (the ffmpeg
+launch, for recordings made before 2026-09-30; it precedes the first frame by the RTSP connect time,
+so the visible times run about 1.1-1.5 s early on the thermal axis) or `relative` (no thermal frame to
+anchor to). The status line under the exports says so when any segment is not `first_frame`.
 `GET /api/experiments/{name}` returns the JSON as `visible_sample`; playback draws the flash events
 as marks on the timeline, reachable with the existing ◆◀ / ▶◆ buttons, and shows `status` and `reason`
 beside the export files. Events are not written into `events.json`.

@@ -37,3 +37,11 @@ video by a one-off capture script**, not stored by the camera: frame *i*'s 99.5t
 mask pixels, where the previous frame is the previous *analysed* frame (index 3 or later). It is
 NaN for frames 0–3 (frames 0–2 are skipped, frame 3 has no analysed predecessor) and is computed
 for keyframes too. Check values: frames 6141, 6142, 6143 give 5, 97, 27; the region has 13,543 px.
+
+`visible_empty_segment.mp4` — the 352 bytes the visible recorder left as `visible_001.mp4` of
+`20261015_141905_Run` and as `visible.mp4` of `20261015_141026_Run` (the two files are
+byte-identical, sha256 `b3ab86b6…eaffc2`), copied unchanged. It is an mp4 container (`ftyp`,
+`moov` with no track, an empty `mdat`) with no video stream. `ffprobe -select_streams v:0
+-show_entries packet=pts_time,flags:stream=width,height -of json` exits 0 and prints empty
+`packets` and `streams`, which is what `_probe` in `analysis/visible_sample_run.py` reads as "no
+video packets". No pixel data.

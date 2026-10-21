@@ -79,6 +79,10 @@ class _Skip(Exception):  # noqa: N818 - a control-flow signal, not an error
         self.reason = reason
 
 
+class _NoPacketsError(ValueError):
+    """A video file that ffprobe reads without error but that holds no video packet."""
+
+
 @dataclass(frozen=True)
 class _Packets:
     """What ffprobe says about one video file: frame size and per-packet time and keyframe flag."""
@@ -115,7 +119,8 @@ class _Plan:
     ``box`` is the sample region in the frame (x0, y0, w, h) and ``mask`` its pixels; ``crop`` is
     what is decoded: the union of that and the bed region. ``region`` and ``bed_mask`` are the two
     masks in the shape of the crop. ``missing`` names the files visible.json lists that are not on
-    disk; ``alignment`` says which saved alignment mapped the ROI.
+    disk; ``empty`` the files that are on disk but have no frame to analyse; ``alignment`` says
+    which saved alignment mapped the ROI.
     """
 
     ffmpeg: str
@@ -129,6 +134,7 @@ class _Plan:
     region: np.ndarray
     bed_mask: np.ndarray | None
     missing: list[str]
+    empty: list[str]
     alignment: dict[str, Any]
 
 
@@ -139,7 +145,9 @@ def _probe(ffprobe: str, path: Path) -> _Packets:
     """Frame size and the display time and keyframe flag of every packet of ``path``.
 
     The recorder's stream is Baseline H.264 (no B-frames), so packet order is display order; a file
-    where times go backwards is refused rather than analysed on a wrong time axis.
+    where times go backwards is refused rather than analysed on a wrong time axis. A file with no
+    video packet (the recorder leaves one when the camera never delivered a frame) raises
+    ``_NoPacketsError``.
     """
     cmd = [ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries"]
     cmd += ["packet=pts_time,flags:stream=width,height", "-of", "json", str(path)]
@@ -149,12 +157,18 @@ def _probe(ffprobe: str, path: Path) -> _Packets:
     doc = json.loads(run.stdout)
     packets, streams = doc.get("packets") or [], doc.get("streams") or []
     if not packets or not streams:
-        raise ValueError(f"{path.name} has no video packets")
+        raise _NoPacketsError(f"{path.name} has no video packets")
     pts = np.array([float(p["pts_time"]) for p in packets])
     if np.any(np.diff(pts) < 0):
         raise ValueError(f"packet times in {path.name} are not in display order")
     key = np.array(["K" in str(p.get("flags", "")) for p in packets], dtype=bool)
     return _Packets(int(streams[0]["width"]), int(streams[0]["height"]), pts, key)
+
+
+def _has_analysed_frame(pts_s: np.ndarray) -> bool:
+    """Whether any frame falls after the start-up skip, which ``_analysed`` drops by the same
+    rule; a file where none does has nothing to measure."""
+    return bool(np.any(pts_s - pts_s[0] >= FRAME0_SKIP_S))
 
 
 def _decode_luma(
@@ -301,9 +315,15 @@ def _plan(reader: ExperimentReader, ffmpeg: str | None, ffprobe: str | None) -> 
     ffprobe_exe = shutil.which(ffprobe) if ffprobe else find_ffprobe()
     if not ffprobe_exe:
         raise _Skip("ffprobe not found")
-    segments, sizes = [], set()
+    segments, sizes, empty = [], set(), []
     for s in files:
-        packets = _probe(ffprobe_exe, reader.path / s["file"])
+        try:
+            packets = _probe(ffprobe_exe, reader.path / s["file"])
+        except _NoPacketsError:
+            packets = None
+        if packets is None or not _has_analysed_frame(packets.pts_s):
+            empty.append(str(s["file"]))
+            continue
         sizes.add((packets.width, packets.height))
         segments.append(
             _Seg(
@@ -316,6 +336,10 @@ def _plan(reader: ExperimentReader, ffmpeg: str | None, ffprobe: str | None) -> 
                 packets.keyframe,
             )
         )
+    if empty:
+        logger.warning("visible segments with no frame to analyse: %s", ", ".join(empty))
+    if not segments:
+        raise _Skip("no visible video")
     if len(sizes) != 1:
         raise ValueError(f"visible segments differ in frame size: {sorted(sizes)}")
     vis_size = sizes.pop()
@@ -350,6 +374,7 @@ def _plan(reader: ExperimentReader, ffmpeg: str | None, ffprobe: str | None) -> 
         if bed_region
         else None,
         missing=missing,
+        empty=empty,
         alignment={
             "saved_utc": saved.get("saved_utc"),
             "rmsPx": saved.get("rmsPx"),
@@ -546,6 +571,7 @@ def _summary(
         "coverage": coverage(t),
         "segments": segments,
         "missing": plan.missing,
+        "empty": plan.empty,
         "events": events,
         "stretch": {"lo": lo, "hi": STRETCH_HI},
         "plot_error": None,
@@ -654,6 +680,9 @@ def analyse_visible_sample(
     ``"<ExceptionType>: <message>"``). Never raises. An analysed run gets ``visible_sample.csv``
     (one row per analysed frame), a close-up video per segment (unless ``closeup`` is false) and the
     JSON, all moved into place together; any other run has the JSON only, and no older result.
+    A segment file that visible.json lists but that is not on disk is named in ``missing``, one
+    on disk with no frame to analyse in ``empty``; the other segments are analysed, and neither
+    kind gets a close-up. With no segment left, the run is ``skipped`` ("no visible video").
     ``ffmpeg`` and ``ffprobe`` are executables; unset, they are looked for.
     """
     folder = reader.path / "exports"
