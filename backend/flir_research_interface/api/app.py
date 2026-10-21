@@ -415,6 +415,21 @@ def create_app(
         if reader.n_frames:
             logger.info("peak frames: %s", write_annotated_frames(reader))
 
+    def _analyse_visible_sample(exp_dir: Path) -> None:
+        """exports/visible_sample.* from the visible video around the sample (derived).
+
+        ``analyse_visible_sample`` reports its problems in the summary instead of raising, so a
+        ``failed`` status, or a plot that could not be drawn, is logged here by run name."""
+        from flir_research_interface.analysis.visible_sample_run import analyse_visible_sample
+
+        summary = analyse_visible_sample(ExperimentReader(exp_dir))
+        if summary.get("status") == "failed":
+            logger.warning("visible sample analysis failed for %s: %s", exp_dir.name,
+                           summary.get("reason"))
+        if summary.get("plot_error"):
+            logger.warning("visible sample plot not drawn for %s: %s", exp_dir.name,
+                           summary["plot_error"])
+
     app.state.render_tasks = set()
     app.state.finalizing = set()  # recorders a _finalize_recording is stopping right now
     app.state.derived_jobs = {}  # experiment name -> progress record for on-demand regenerate
@@ -435,15 +450,17 @@ def create_app(
             render_thermal_video(reader, with_rois=True)
 
     def _schedule_post_stop_exports(exp_dir: Path) -> None:
-        """ROI series, run summary, then the thermal video, without holding the stop: on a long
-        run these take minutes (19k frames: ~7 min), and a Stop/Disconnect that hangs that long
-        invites repeat clicks. All are derived and regenerable from the run's store."""
+        """ROI series, run summary, visible sample analysis, then the thermal video, without
+        holding the stop: on a long run these take minutes (19k frames: ~7 min), and a
+        Stop/Disconnect that hangs that long invites repeat clicks. All are derived and
+        regenerable from the run's store."""
 
         async def _job() -> None:
             async with app.state.render_locks.get(exp_dir.name):
                 for step, fn in (
                     ("automatic ROI series export", _export_roi_series),
                     ("run summary", _write_run_summary),
+                    ("visible sample analysis", _analyse_visible_sample),
                     ("thermal preview video render", _render_thermal_video),
                 ):
                     try:
@@ -1478,6 +1495,15 @@ def create_app(
     def reveal_experiment(name: str) -> dict[str, Any]:
         return _reveal(_exp_dir(name))
 
+    def _visible_sample_json(run: Path) -> dict[str, Any] | None:
+        """The parsed exports/visible_sample.json; None if absent, unreadable or not an object
+        (a half-written or hand-edited file must never break the info endpoint)."""
+        try:
+            data = json.loads((run / "exports" / "visible_sample.json").read_text())
+        except (OSError, ValueError):  # missing, unreadable, not UTF-8 or not JSON
+            return None
+        return data if isinstance(data, dict) else None
+
     @app.get("/api/experiments/{name}")
     def experiment_info(name: str) -> dict[str, Any]:
         r = _open(name)
@@ -1499,6 +1525,7 @@ def create_app(
             else []
         )
         info["events"] = r.events
+        info["visible_sample"] = _visible_sample_json(r.path)
         return info
 
     @app.get("/api/experiments/{name}/timeline")
@@ -1575,8 +1602,10 @@ def create_app(
         roi_series.csv, README/roi_plot/peak-frame images and (unless ``video=false``) the
         ROI-annotated thermal video — from the recording's stored ROIs. ``video=false`` is the
         quick option: plot + CSV + images only, skipping the slow video encode. The clean thermal
-        video never depends on the ROIs and is not re-rendered here. Returns a job record
-        immediately; poll ``/export/derived/status``. Pair with ``PUT /rois`` after editing.
+        video never depends on the ROIs and is not re-rendered here. The visible sample analysis
+        (``exports/visible_sample.*``, close-up videos included) is rerun either way. Returns a
+        job record immediately; poll ``/export/derived/status``. Pair with ``PUT /rois`` after
+        editing.
         """
         from flir_research_interface.analysis.thermal_video import render_thermal_video
 
@@ -1594,6 +1623,11 @@ def create_app(
             _export_roi_series(exp_dir)
             job["step"] = "images"
             _write_run_summary(exp_dir)
+            job["step"] = "visible sample"
+            try:  # regardless of `video`; optional, so it never costs the ROI video below
+                _analyse_visible_sample(exp_dir)
+            except Exception:  # noqa: BLE001 - it reports problems itself; this is a backstop
+                logger.exception("visible sample analysis failed for %s", exp_dir)
             reader = ExperimentReader(exp_dir)
             if video and reader.metadata.get("rois"):
                 job["step"] = "roi video"
