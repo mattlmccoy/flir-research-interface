@@ -28,11 +28,8 @@ import { roiColor } from "../lib/overlay.ts";
 import { eventsToMarkers, markColor, nearestIndex, nextMarkerTime } from "../lib/events.ts";
 import { fmtAny, fmtCelsius } from "../lib/format.ts";
 import { ThermalView, type StatsMap } from "./ThermalView.tsx";
-import { useSmartPlaybackOverlays } from "../lib/useSmartPlaybackOverlays.ts";
-import { useSmartSeries } from "../lib/useSmartSeries.ts";
-import { smartComputeAction, smartEdited, smartJobText, smartPlaybackRow, upsertStoredRoi } from "../lib/smartSeries.ts";
-import { plotEmptyText, smartTraces, type SmartDimChoice } from "../lib/smartTraces.ts";
-import type { SmartPlaybackRow } from "./RoiRows.tsx";
+import { useSmartPlayback } from "../lib/useSmartPlayback.ts";
+import { plotEmptyText, type SmartDimChoice } from "../lib/smartTraces.ts";
 import { DisplayControls } from "./DisplayControls.tsx";
 import { RoiRows } from "./RoiRows.tsx";
 import { ExportSection } from "./ExportSection.tsx";
@@ -242,53 +239,9 @@ export function PlaybackPage(p: Props) {
   }, [n]);
 
   const t = tl ? tl.t_s[index] : 0;
-  const smartIds = useMemo(() => p.rois.rois.filter((r) => r.kind === "smart").map((r) => r.id), [p.rois.rois]);
-  // A compute reads the ROI stored with the run, so an unsaved or edited smart ROI is saved first:
-  // only that ROI is written into the run's stored set (same id replaced, else appended).
-  const beforeCompute = useCallback(async (id: number): Promise<boolean> => {
-    const r = p.rois.rois.find((x) => x.id === id);
-    if (!info) { setErr("run info not loaded yet; try again"); return false; }
-    if (!r || r.kind !== "smart") return false;
-    if (!smartEdited(r, info.rois)) return true;
-    if (!window.confirm(`Save ${roiLabel(r)}'s current outline and settings into this run (its other stored ROIs are unchanged), then compute it over every frame?`)) return false;
-    // info.rois is null when the run has no stored ROIs (reader.py "rois": metadata.get("rois"))
-    await api.putRois(p.name, upsertStoredRoi(info.rois ?? [], r));
-    api.experiment(p.name).then(setInfo).catch(() => undefined);
-    return true;
-  }, [p.name, p.rois.rois, info]);
-  const onSmartError = useCallback((m: string) => setErr(m), []);
-  const smart = useSmartSeries(p.name, smartIds, beforeCompute, onSmartError);
-  // stored smart ROI outlines for this frame (none until the run's smart series is computed)
-  const smartOverlays = useSmartPlaybackOverlays(p.name, smartIds, index, smart.version);
-  // ids whose stored series no longer matches the ROI (stored or on screen): outline + chip muted
-  const smartStale = useMemo(() => new Set(p.rois.rois.flatMap((r) => {
-    const st = smart.states.get(r.id);
-    return r.kind === "smart" && st?.kind === "ready" && (st.series.stale || smartEdited(r, info?.rois)) ? [r.id] : [];
-  })), [p.rois.rois, smart.states, info?.rois]);
-  const smartRows = useMemo(() => {
-    const m = new Map<number, SmartPlaybackRow>();
-    for (const r of p.rois.rois) {
-      if (r.kind !== "smart") continue;
-      const st = smart.states.get(r.id) ?? { kind: "loading" as const };
-      const job = smart.jobs.get(r.id) ?? null;
-      const edited = smartEdited(r, info?.rois);
-      const act = smartComputeAction(st, job, edited);
-      const text = smartJobText(job);
-      m.set(r.id, {
-        // the exact frame's stored state (overlay) gates the number when the series is downsampled
-        view: smartPlaybackRow(st, index, { edited, overlay: smartOverlays.find((o) => o.id === r.id) ?? null }),
-        action: act || text ? (
-          <div className="smart-compute">
-            {act && <button className="secondary" type="button" disabled={act.disabled} onClick={() => (act.kind === "reload" ? smart.reload(r.id) : smart.compute(r.id))}
-              title="Track this smart ROI over every frame of the run (full rate) and store the result with the run">{act.label}</button>}
-            {job?.state === "running" && job.total > 0 && <progress max={job.total} value={job.done} aria-label={`computing ${roiLabel(r)}`} />}
-            {text && <span className={job?.state === "error" ? "smart-error" : "hint"}>{text}</span>}
-          </div>
-        ) : null,
-      });
-    }
-    return m;
-  }, [p.rois.rois, smart.states, smart.jobs, smart.compute, smart.reload, index, info?.rois, smartOverlays]);
+  const { smartIds, smart, overlays: smartOverlays, stale: smartStale, rows: smartRows, plot: smartPlot } = useSmartPlayback({
+    name: p.name, rois: p.rois.rois, info, setInfo, setErr, index, show: smartShow, sizeDim,
+  });
   const hdr = frame?.header;
   const exp = (info?.experiment ?? {}) as Record<string, unknown>;
   const cam = (info?.camera ?? {}) as Record<string, unknown>;
@@ -308,13 +261,6 @@ export function PlaybackPage(p: Props) {
   const playVis = info ? visibleForPlayback(info) : null; // segments on the thermal clock
   const recordedH = info?.visible_alignment ? parseAlignment(info.visible_alignment).H : null;
   const overlayH = recordedH ?? loadAlignment(typeof localStorage !== "undefined" ? localStorage : null).H;
-  // smart ROIs plot from their stored series (the strided series path skips them)
-  const smartPlot = p.rois.rois.flatMap((r, i) => {
-    const st = smart.states.get(r.id);
-    if (r.kind !== "smart" || r.hidden || st?.kind !== "ready") return [];
-    const stale = st.series.stale || smartEdited(r, info?.rois);
-    return smartTraces(st.series, { ...smartShow, dims: sizeDim }, { id: r.id, label: roiLabel(r), color: roiColor(r, i), stale });
-  });
   const traces = [...seriesTraces(series, p.rois), ...smartPlot.filter((x) => x.axis === "temp")];
   // Secondary (right) axis, frame-aligned to the temperature trace: RF forward power (W), the AIT
   // tune/load capacitor positions (%) or a smart ROI dimension (px). One unit per axis.
