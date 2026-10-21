@@ -31,7 +31,9 @@ export function decodeLabels(b64: string, w: number, h: number): Uint8Array {
 }
 
 /** Edge pixels: a labelled pixel with a 4-neighbour that is unlabelled (0) or has a higher label,
- * i.e. the inner side of each boundary (value = its own label). Outside the crop is not a label. */
+ * i.e. the inner side of each boundary (value = its own label). A neighbour outside the crop
+ * counts as 0, so labelled pixels on the crop border are edges (the crop is the bbox of labels>0,
+ * so the outermost ring sits on the border). */
 export function labelEdges(
   labels: Uint8Array,
   w: number,
@@ -45,10 +47,9 @@ export function labelEdges(
       const v = labels[i];
       if (v === 0) continue;
       if (
-        (x > 0 && outer(v, labels[i - 1])) ||
-        (x < w - 1 && outer(v, labels[i + 1])) ||
-        (y > 0 && outer(v, labels[i - w])) ||
-        (y < h - 1 && outer(v, labels[i + w]))
+        x === 0 || x === w - 1 || y === 0 || y === h - 1 ||
+        outer(v, labels[i - 1]) || outer(v, labels[i + 1]) ||
+        outer(v, labels[i - w]) || outer(v, labels[i + w])
       ) {
         edges.push({ value: v, idx: i });
       }
