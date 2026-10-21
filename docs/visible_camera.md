@@ -352,9 +352,23 @@ Playback serves `exports/visible_full_range.mp4` (`visible_001_full_range.mp4`, 
 the first time the video is requested by `ffmpeg -c copy -bsf:v h264_metadata=video_full_range_flag=1`
 (`visible/full_range.py`, `full_range_copy`). It is a stream copy, so the picture is not re-encoded.
 The response carries `X-Visible-Range`: `full` for the copy, `raw-untagged` when ffmpeg is missing or
-the build failed; in that case the raw file is played and the panel says "visible video shown without
-range correction", never silently looking fixed. The copy is rebuilt when it is older than its
+the build failed; in that case the raw file is played. The copy is rebuilt when it is older than its
 source and can be deleted at any time.
+
+The range note has three states, shown in the visible panel and as a tag on every visible view
+(in the rail, side by side, and over the IR image):
+
+| `X-Visible-Range` | Note |
+|---|---|
+| `full` | none |
+| `raw-untagged` | "visible video shown without range correction" |
+| absent, unreadable, or the request failed (e.g. an operator older than API 1.1) | "range correction not confirmed" |
+
+The experiment info's `visible_range` (a prediction) is used only while the header request is still
+pending; once it is answered, the header decides, so an unknown range never reads as corrected. A
+good header read is kept per video URL; a failed one is asked again the next time the run or segment
+is shown. The operator and UI handshake versions are 1.1; a 1.0 operator gets the "some features
+may be missing" warning.
 
 Measured on the reference run with ffmpeg 6 (2026-10-21):
 
@@ -382,6 +396,13 @@ regenerate (`/export/derived?visible_adjusted=true`). The post-stop automatic an
 * **Files:** `exports/visible_sample_adjusted.{csv,json,png}` and
   `visible_sample_adjusted_closeup.mp4` (`_closeup_001.mp4`, ... per segment). The raw files are
   never touched by it, and a regenerate without the box ticked does not remove the adjusted ones.
+  The adjusted plot's title says "(adjusted: exposure ... EV, brightness ..., contrast ...)".
+* **Close-ups are tagged full range.** Both close-ups (raw and adjusted) stretch luma to 0-255, so
+  their encode adds `-bsf:v h264_metadata=video_full_range_flag=1`, as the playback copy does.
+  Before, they came out `color_range` unknown and players clipped 235 and up to white. Re-probed
+  2026-10-21 on a scratch copy of the reference run (raw analysis re-run, `visible.mp4` read through
+  a link, writes in the scratch `exports/`): `visible_sample_closeup.mp4` is `color_range=pc`,
+  `pix_fmt=yuvj420p`, 6,189 frames (`-count_frames`), the same count as the frames analysed.
 * **What is adjusted:** the luma is mapped before the threshold, `sample_dark_px`,
   `sample_mean_luma`, `brightening` and the close-up. `bed_clipped_frac` always uses raw luma: it
   reports what the camera clipped, which an exposure cut would otherwise hide.
@@ -411,6 +432,11 @@ Reference run, `{exposure_ev: -1, brightness: 0, contrast: 1.4}` (slope 0.7, int
 | Close-up | 378 x 378, 6,189 frames | 378 x 378, 6,189 frames |
 | Run time (Apple M2 Pro) | 15.8 s | 34.8 s (close-up encode 5.2 s; the plot, which re-reads the thermal store from the SSD, 25.9 s, against 9.4 s for the raw run) |
 
+The reference run's `exports/visible_sample_adjusted.*` were written by this real-data check, with
+`adjust.source = "real-data gate"`; the run has no `visible_adjust.json`, so its sliders show the
+neutral values and the adjusted status line ends "; sliders changed since" until the operator
+regenerates the adjusted analysis or deletes those files.
+
 The dark count does not change because the map is monotonic and the threshold moves with it. The
 small events were two frames long and only 4-5 levels above the floor in raw luma, so a slope of 0.7
 loses them; the 627.77 s event survives. Read an adjusted result as "what the picture on screen
@@ -437,7 +463,8 @@ display settings (palette and range).
   `POST /api/camera/parameters`, one node per request with `CurrentCase` last, and lists what was
   written and what was not (the writes are not atomic). The confirmation warns that changing the
   measurement case triggers a NUC and a range switch. A node the camera no longer offers or an enum
-  value outside its `enum_options` is refused with a reason and nothing is written.
+  value outside its `enum_options`: that node is skipped with a reason; the other values are still
+  written. (Saving a preset refuses a node that is not a writable camera parameter.)
 * **Never automatic:** camera settings are written only when the operator clicks apply, never at
   start-up (a browser with nothing stored starts from the last applied preset's visible and display
   parts only), and never while a recording runs: then only the visible and display parts are applied
@@ -445,6 +472,20 @@ display settings (palette and range).
   them (the operator answers 409).
 * **Apply look (playback):** writes the preset's visible part into this run's `visible_adjust.json`
   and sets the display. It never touches the camera and playback cannot save presets.
+
+### Browser gate (2026-10-21)
+
+Run in Chromium (the Claude desktop app's browser pane) against a camera-free operator
+(`--backend simulated`, no auto-connect) serving a scratch copy of the reference run:
+
+* Range: two pixels read from the played copy keep their difference. Raw Y 245 at (345, 346) shows
+  as RGB (239, 244, 255) and raw Y 255 at (400, 334) as (250, 255, 255), where a limited-range
+  reading would show both as white.
+* Sliders, "reset to as-recorded", apply look and the export clip: passed. Frame 30 of an exported
+  clip has mean luma 46 with the adjustment against 137 neutral; the model predicts 45.
+* The adjusted status line: passed.
+
+Not tested: Safari and Firefox.
 
 ### Not tested on hardware
 
