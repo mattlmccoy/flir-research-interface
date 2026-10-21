@@ -136,6 +136,15 @@ function drawShape(ctx: CanvasRenderingContext2D, r: RoiInput, sx: number, sy: n
       const [fx, fy] = r.points[0];
       return [(fx + 0.5) * sx, (fy + 0.5) * sy - 6];
     }
+    case "smart": {  // the user's search outline, dashed; the tracked outline and rings are drawn by the smart overlay
+      ctx.save(); ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      r.search.forEach(([px, py], i) => { const x = (px + 0.5) * sx, y = (py + 0.5) * sy; if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
+      ctx.closePath(); ctx.stroke();
+      ctx.restore();
+      const [fx, fy] = r.search[0];
+      return [(fx + 0.5) * sx, (fy + 0.5) * sy - 6];
+    }
   }
 }
 

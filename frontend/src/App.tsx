@@ -298,7 +298,7 @@ export function App() {
 
   const nowT = hdr && t0Ref.current !== null ? (hdr.device_timestamp_ns - t0Ref.current) / 1e9 : 0;
   const traces: Trace[] = rois.rois.flatMap((r, i) => {
-    if (r.hidden) return []; // hidden on the image = hidden on the plot (still measured + recorded)
+    if (r.hidden || r.kind === "smart") return []; // hidden on the image = hidden on the plot (still measured + recorded); smart ROIs have no client-side series (Task 8 plots the operator values)
     const b = buffers.current.get(r.id);
     return [{ id: r.id, label: roiLabel(r), color: roiColor(r, i), t: b?.t ?? [], v: b?.v ?? [] }];
   });

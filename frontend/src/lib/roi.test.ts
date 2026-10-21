@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  normalizeRect,
+  normalizeRect, newSmart,
   roiLabel,
   roiReducer,
   roiStats,
@@ -468,4 +468,61 @@ test("roiStats re-corrects for a reflected temperature even without a per-ROI em
   assert.ok(Math.abs(got - recorrectCelsius(100, rad, 0.95, 353.15)) < 1e-9);
   assert.notEqual(Math.round(got * 100), 10000, "a hotter reflected source lowers the reading");
   assert.equal(roiStats(field, 1, 1, { id: 2, kind: "spot", x: 0, y: 0 }, rad).mean, 100, "no optics: unchanged");
+});
+
+const mkStore = () => {
+  const store = new Map<string, string>();
+  const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); } } as unknown as Storage;
+  return { store, storage };
+};
+
+test("smart ROI round-trips through save/load with the wire keys and normalised defaults", () => {
+  const { storage } = mkStore();
+  const smart = { id: 1, kind: "smart", search: [[0, 0], [8, 0], [8, 8], [0, 8]], rings_px: [5, 10, 25], rule: "relative", sensitivity: 0.5, name: "s" } as unknown as Roi;
+  saveRois(storage, { rois: [smart], selected: null, selectedIds: [], nextId: 2 });
+  const got = loadRois(storage).rois;
+  assert.equal(got.length, 1);
+  assert.deepEqual(got[0], smart);
+});
+
+test("loadRois fills smart defaults and rejects invalid smart ROIs", () => {
+  const { store, storage } = mkStore();
+  const pts = [[0, 0], [8, 0], [8, 8]];
+  store.set("fri.rois.v1", JSON.stringify({ rois: [
+    { id: 1, kind: "smart", search: pts },
+    { id: 2, kind: "smart", search: [[0, 0], [8, 0]] },
+    { id: 3, kind: "smart", search: pts, rings_px: [10, 5] },
+    { id: 4, kind: "smart", search: pts, rule: "fixed" },
+    { id: 5, kind: "smart", search: pts, rule: "fixed", fixed_c: 120, sensitivity: 0.4, ring_emissivity: 0.9 },
+    { id: 6, kind: "smart", search: pts, sensitivity: 0.9 },
+    { id: 7, kind: "smart", search: pts, ring_emissivity: 2 },
+  ], nextId: 8 }));
+  const got = loadRois(storage).rois as unknown as Record<string, unknown>[];
+  assert.deepEqual(got.map((r) => r.id), [1, 5]);
+  assert.deepEqual(got[0].rings_px, [5, 10, 25]);
+  assert.equal(got[0].rule, "relative");
+  assert.equal(got[0].sensitivity, 0.5);
+  assert.equal(got[1].fixed_c, 120);
+  assert.equal(got[1].ring_emissivity, 0.9);
+});
+
+test("roiStats for a smart ROI is all-null (the operator is authoritative)", () => {
+  const smart = { id: 1, kind: "smart", search: [[0, 0], [3, 0], [3, 2]], rings_px: [5, 10, 25], rule: "relative", sensitivity: 0.5 } as unknown as Roi;
+  const s = roiStats(FIELD, W, H, smart);
+  assert.deepEqual(s, { n: 0, nan: 0, min: null, max: null, mean: null });
+});
+
+test("roiLabel prefix for smart is M and it is an area ROI that moves with its search outline", () => {
+  const smart = { id: 3, kind: "smart", search: [[1, 1], [4, 1], [4, 4]], rings_px: [5, 10, 25], rule: "relative", sensitivity: 0.5 } as unknown as Roi;
+  assert.equal(roiLabel(smart), "M3");
+  assert.equal(isArea(smart), true);
+  const moved = moveRoi(smart, 2, 3) as unknown as { search: number[][] };
+  assert.deepEqual(moved.search, [[3, 4], [6, 4], [6, 7]]);
+});
+
+test("newSmart makes a smart ROI with the v1 defaults and adds through the reducer", () => {
+  const draft = newSmart([[0, 0], [9, 0], [9, 9]]);
+  assert.deepEqual(draft, { kind: "smart", search: [[0, 0], [9, 0], [9, 9]], rings_px: [5, 10, 25], rule: "relative", sensitivity: 0.5 });
+  const s = roiReducer(EMPTY, { type: "add", roi: draft });
+  assert.equal(s.rois[0].kind, "smart"); assert.equal(s.rois[0].id, 1);
 });

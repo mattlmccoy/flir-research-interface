@@ -16,7 +16,7 @@ import { countsToCelsius } from "../lib/radiometry.ts";
 import { overRangeMask } from "../lib/overrange.ts";
 import { buildLut, mapToRgba, type PaletteName } from "../lib/palette.ts";
 import { autoScale, resolveScale, type Range, type ScaleMode } from "../lib/scale.ts";
-import { normalizeRect, roiStats, type Roi, type RoiAction, type RoiInput, type RoiStats, visibleRois } from "../lib/roi.ts";
+import { newSmart, normalizeRect, roiStats, type Roi, type RoiAction, type RoiInput, type RoiStats, visibleRois } from "../lib/roi.ts";
 import { clientToImage, hitTestAll, pickHit, roiForDigit, vertexHit, type Box, type VertexHit } from "../lib/overlay.ts";
 import type { Tool } from "../lib/layout.ts";
 import { RoiOverlay, type Draft } from "./RoiOverlay.tsx";
@@ -271,7 +271,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
       setDraft(next.length >= 2 ? { kind: tool, points: next } : null);
       return;
     }
-    if (tool === "freehand") {
+    if (tool === "freehand" || tool === "smart") {
       freehand.current = [[p.x, p.y]];
       try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
       return;
@@ -326,7 +326,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
     const s = dragStart.current;
     if (s && (tool === "rect" || tool === "circle" || tool === "ellipse" || tool === "line")) setDraft(dragShape(tool, s, p, hdr.width, hdr.height));
     else if ((tool === "polygon" || tool === "polyline") && vertices.length >= 1) setDraft({ kind: tool, points: [...vertices, [p.x, p.y]] });
-    else if (tool === "freehand" && freehand.current) {
+    else if ((tool === "freehand" || tool === "smart") && freehand.current) {
       const fh = freehand.current, last = fh[fh.length - 1];
       if (Math.abs(last[0] - p.x) + Math.abs(last[1] - p.y) >= 1) { fh.push([p.x, p.y]); setDraft(fh.length >= 2 ? { kind: "polygon", points: fh.slice() } : null); }
     }
@@ -336,7 +336,10 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
     if (freehand.current) {
       const pts = simplifyPath(freehand.current, 1.0);
       freehand.current = null; setDraft(null);
-      if (pts.length >= 3) addShape({ kind: "polygon", points: pts });
+      if (pts.length >= 3) {
+        if (tool === "smart") { if (!maskMode) onRoi?.({ type: "add", roi: newSmart(pts) }); }
+        else addShape({ kind: "polygon", points: pts });
+      }
       return;
     }
     if (editing.current) { editing.current = null; onRoi?.({ type: "commit" }); return; }

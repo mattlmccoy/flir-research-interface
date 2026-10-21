@@ -24,6 +24,7 @@ const TOOL_META: Record<Tool, { glyph: ReactNode; title: string; enabled: boolea
   ellipse: { glyph: "⬭", title: "Ellipse: drag the bounding box corner to corner", enabled: true },
   polyline: { glyph: "⌇", title: "Spline: click each vertex; double-click or Enter ends it", enabled: true },
   freehand: { glyph: "✎", title: "Freehand: hold and draw; releasing closes the shape", enabled: true },
+  smart: { glyph: "◎", title: "Smart ROI: hold and draw a generous outline around the sample; the operator tracks its thermal edge", enabled: true },
   line: { glyph: "╱", title: "Line: drag from one end to the other (pixels along the segment)", enabled: true },
   polygon: { glyph: "⬠", title: "Polygon: click each vertex; double-click places the last one and closes the shape (Enter closes, Esc cancels)", enabled: true },
 };

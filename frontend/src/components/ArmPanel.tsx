@@ -18,7 +18,7 @@ export function ArmPanel({ rois, armed, recording, disabled, busy, onArm, onDisa
   const rfEngaged = !!useControlStatus()?.engaged;  // is an RF generator actually linked right now?
   const upd = (patch: Partial<TriggerForm>) => setF({ ...f, ...patch });
   const spec = triggerFromForm(f);
-  const area = rois.filter((r) => r.kind !== "line");
+  const area = rois.filter((r) => r.kind !== "line" && r.kind !== "smart")  // the operator rejects a smart ROI as a trigger (400);
   const roiSel = (value: number | null, onChange: (id: number | null) => void, label: string) => (
     <select value={value ?? ""} aria-label={label} onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}>
       {area.length === 0 && <option value="">(draw an ROI first)</option>}

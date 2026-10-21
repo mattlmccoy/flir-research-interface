@@ -42,6 +42,7 @@ function where(r: Roi): string {
     case "line": return `line (${r.x0}, ${r.y0}) → (${r.x1}, ${r.y1})`;
     case "polygon": return `polygon with ${r.points.length} vertices`;
     case "polyline": return `spline with ${r.points.length} vertices`;
+    case "smart": return `smart ROI, search outline of ${r.search.length} vertices`;
   }
 }
 
