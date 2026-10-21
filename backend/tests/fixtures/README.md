@@ -52,3 +52,13 @@ RF generator at 0 W), `pre_riser_rf_on` (frame 212 of the same run, heavy diagon
 `riser_rf_on` (frame 1986 of `20261019_131145_Run`, camera on the riser) and `strap_weak_banding`
 (frame 1065 of `20261019_182233_Run` at 150 W after the coax strap: banding ~9 mK, under the
 ~28 mK camera noise). Copied from `thermal.zarr` unchanged (`ir_format` stored alongside).
+
+`visible_adjust_parity.json` — the table that holds the Python (`analysis/visible_adjust.py`) and TypeScript
+(`frontend/src/lib/visibleAdjust.ts`) adjustment functions to one result. `luma` is **captured**: one 126-pixel
+row (crop row 62, frame row y 437, x 316–441) of `crops[1]`, frame 6141, in
+`visible_sample_20261020_144402.npz` (decoded luma, unchanged). `cases` are nine settings (neutral,
+each of exposure/brightness/contrast at both limits, and two mixed) with `slope`, `intercept` and the
+uint8 `expected` output for the row. Those numbers are **not captured from any device: they follow the
+spec formula** (`slope = contrast * 2**exposure_ev`, `intercept = 0.5 - 0.5 * contrast + brightness`,
+`out = floor(clip(slope * u/255 + intercept, 0, 1) * 255 + 0.5)`), computed once with plain Python
+`math`, so the tests check both implementations against the written rule and against each other.
