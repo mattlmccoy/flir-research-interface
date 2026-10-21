@@ -91,12 +91,19 @@ class _Packets:
 
 @dataclass(frozen=True)
 class _Seg:
-    """One video file on the thermal time axis: ``t_start_s`` is where its first packet falls."""
+    """One video file on the thermal time axis: ``t_start_s`` is where its first packet falls.
+
+    ``anchor`` says what ``t_start_s`` was measured from (see ``thermal_segments``): the arrival of
+    the first frame (``"first_frame"``), the ffmpeg launch (``"launch"``, which precedes the first
+    frame by the RTSP connect time) or, with no thermal frame to anchor to, the offset from the
+    first segment (``"relative"``).
+    """
 
     index: int
     name: str
     path: Path
     t_start_s: float
+    anchor: str
     pts_s: np.ndarray
     keyframe: np.ndarray
 
@@ -304,6 +311,7 @@ def _plan(reader: ExperimentReader, ffmpeg: str | None, ffprobe: str | None) -> 
                 str(s["file"]),
                 reader.path / s["file"],
                 float(s["t_start_s"]),
+                str(s["anchor"]),
                 packets.pts_s,
                 packets.keyframe,
             )
@@ -516,6 +524,7 @@ def _summary(
             "index": seg.index,
             "file": seg.name,
             "t_start_s": round(seg.t_start_s, 6),
+            "anchor": seg.anchor,
             "frames_analysed": per_segment[seg.index],
         }
         for seg in plan.segments

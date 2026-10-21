@@ -3,17 +3,20 @@ import assert from "node:assert/strict";
 import { markColor, markerLegend, nextMarkerIndex } from "./events.ts";
 import { markersWithFlashes, visibleFlashMarkers, visibleSampleIsError, visibleSampleStatusText, type VisibleSampleSummary } from "./visibleSample.ts";
 
-// Event times, peaks and coverage are the values measured on the real run 20261020_144402_Run
-// (task-3 report, `merge_s=1.0`); the surrounding keys follow `_summary` in visible_sample_run.py.
+// Event times, peaks, coverage and the segment's start are the values measured on the real run
+// 20261020_144402_Run (task-3 report, `merge_s=1.0`; its exports/visible_sample.json). That file was
+// written before `anchor` existed; "first_frame" is what thermal_segments gives that run (its segment
+// has first_frame_host_ns). The surrounding keys follow `_summary` in visible_sample_run.py.
 const OK: VisibleSampleSummary = {
   status: "ok",
   reason: null,
   coverage: { frames_analysed: 6189, t_first_s: 26.483, t_last_s: 632.572, gaps_over_300ms: 61 },
   events: [
-    { t_start_s: 553.951, t_peak_s: 554.057, t_end_s: 554.057, peak_brightening: 20.0, n_frames: 2, peak_frame: 5303 },
-    { t_start_s: 615.664, t_peak_s: 615.664, t_end_s: 615.846, peak_brightening: 19.0, n_frames: 2, peak_frame: 6005 },
-    { t_start_s: 627.769, t_peak_s: 627.769, t_end_s: 629.411, peak_brightening: 97.0, n_frames: 7, peak_frame: 6142 },
+    { t_start_s: 553.951, t_peak_s: 554.057, t_end_s: 554.057, peak_brightening: 20.0, n_frames: 2, peak_frame: 5303, segment: 0 },
+    { t_start_s: 615.664, t_peak_s: 615.664, t_end_s: 615.846, peak_brightening: 19.0, n_frames: 2, peak_frame: 6005, segment: 0 },
+    { t_start_s: 627.769, t_peak_s: 627.769, t_end_s: 629.411, peak_brightening: 97.0, n_frames: 7, peak_frame: 6142, segment: 0 },
   ],
+  segments: [{ index: 0, file: "visible.mp4", t_start_s: 25.996, anchor: "first_frame", frames_analysed: 6189 }],
   missing: [],
   plot_error: null,
 };
@@ -80,6 +83,27 @@ test("an ok run that is missing a video segment says so", () => {
   assert.ok(text.includes("missing video: visible_001.mp4"), text);
   const two = visibleSampleStatusText({ ...OK, missing: ["visible_001.mp4", "visible_002.mp4"] })!;
   assert.ok(two.includes("missing video: visible_001.mp4, visible_002.mp4"), two);
+});
+
+test("a segment timed from the ffmpeg launch says the visible times run about a second early", () => {
+  const segments = [{ ...OK.segments![0], anchor: "launch" as const }];
+  const text = visibleSampleStatusText({ ...OK, segments })!;
+  assert.equal(
+    text,
+    "Visible sample: 3 flashes at the sample, 26.5–632.6 s analysed (61 gaps > 0.3 s); visible times from ffmpeg launch (~1 s early)",
+  );
+});
+
+test("one launch-anchored segment among first-frame ones is enough to say so", () => {
+  const second = { ...OK.segments![0], index: 1, file: "visible_001.mp4", anchor: "launch" as const };
+  const text = visibleSampleStatusText({ ...OK, segments: [OK.segments![0], second] })!;
+  assert.ok(text.includes("; visible times from ffmpeg launch (~1 s early)"), text);
+});
+
+test("segments timed from their first frame, or absent from the summary, add no timing note", () => {
+  assert.ok(!visibleSampleStatusText(OK)!.includes("ffmpeg launch"));
+  const { segments: _segments, ...noSegments } = OK;
+  assert.ok(!visibleSampleStatusText(noSegments)!.includes("ffmpeg launch"));
 });
 
 test("an ok run whose plot was not drawn does not read as fully successful", () => {

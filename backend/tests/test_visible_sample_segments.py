@@ -121,6 +121,7 @@ def test_runner_reports_a_missing_segment_and_what_it_analysed(
             "index": 0,
             "file": "visible.mp4",
             "t_start_s": pytest.approx(T_START_S),
+            "anchor": "first_frame",
             "frames_analysed": len(csv_rows(d)),
         }
     ]
@@ -170,3 +171,30 @@ def test_runner_fails_when_segments_are_out_of_time_order(
     assert out["status"] == "failed"
     assert "time order" in out["reason"]
     assert exported(d) == ["visible_sample.json"]
+
+
+def _drop_first_frame_anchor(d: Path, index: int) -> None:
+    """Rewrite visible.json as a recording from before 2026-09-30 wrote it: that segment has only
+    the ffmpeg launch time (``started_host_ns``), not the arrival of its first frame."""
+    path = d / "visible.json"
+    doc = json.loads(path.read_text())
+    del doc["segments"][index]["first_frame_host_ns"]
+    path.write_text(json.dumps(doc))
+
+
+@needs_ffmpeg
+def test_runner_reports_how_each_segment_was_anchored(
+    tmp_path: Path, real: dict[str, Any], short_clip: Path, fixed_threshold: None
+) -> None:
+    """A segment with only the ffmpeg launch time sits ~1 s early on the thermal axis (the launch
+    precedes the first frame by the RTSP connect time); the summary says which anchor each used."""
+    d = experiment(tmp_path, real, [short_clip, short_clip], gap_s=50.0)
+    _drop_first_frame_anchor(d, 1)  # the helper puts the launch 1 s before the first frame
+    out = run_analysis(d, closeup=False)
+    assert out["status"] == "ok", out
+    anchors = [(g["index"], g["anchor"]) for g in out["segments"]]
+    assert anchors == [(0, "first_frame"), (1, "launch")]
+    assert [g["t_start_s"] for g in out["segments"]] == pytest.approx(
+        [T_START_S, T_START_S + 50.0 - 1.0]
+    )
+    assert json.loads((d / "exports" / "visible_sample.json").read_text()) == out

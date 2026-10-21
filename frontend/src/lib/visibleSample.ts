@@ -10,7 +10,24 @@ export interface VisibleSampleEvent {
   t_end_s: number;
   peak_brightening: number;
   n_frames: number;
+  /** Frame index within the file of segment `segment` (not an index into the analysed frames, and
+   *  not comparable across segments); `visible_sample.csv` has the same `segment` and `frame`. */
   peak_frame: number;
+  /** Index of the visible segment (`segments[].index`) the peak frame is in. */
+  segment: number;
+}
+
+/** One visible video file the analysis read. `t_start_s` is where its first packet falls on the
+ *  thermal clock, measured from `anchor`: the arrival of its first frame ("first_frame"), the ffmpeg
+ *  launch ("launch": runs recorded before 2026-09-30 have only that, which precedes the first frame
+ *  by the RTSP connect time, so their visible times run ~1.1-1.5 s early), or the offset from the
+ *  first segment ("relative", with no thermal frame to anchor to). See playback/visible_timing.py. */
+export interface VisibleSampleSegment {
+  index: number;
+  file: string;
+  t_start_s: number;
+  anchor: "first_frame" | "launch" | "relative";
+  frames_analysed: number;
 }
 
 /** The parsed visible_sample.json as served in ExperimentInfo. Only the keys the UI reads: a
@@ -21,6 +38,7 @@ export interface VisibleSampleSummary {
   /** `t_first_s` / `t_last_s` are null when no frame was analysed (`coverage()` in visible_sample.py). */
   coverage?: { frames_analysed: number; t_first_s: number | null; t_last_s: number | null; gaps_over_300ms: number };
   events?: VisibleSampleEvent[];
+  segments?: VisibleSampleSegment[];
   missing?: string[];
   plot_error?: string | null;
 }
@@ -69,6 +87,9 @@ function describe(vs: VisibleSampleSummary): StatusLine {
       ? `${c.t_first_s!.toFixed(1)}–${c.t_last_s!.toFixed(1)} s analysed (${c.gaps_over_300ms} gaps > 0.3 s)`
       : "coverage unknown";
     text = `Visible sample: ${n} ${n === 1 ? "flash" : "flashes"} at the sample, ${span}`;
+  }
+  if (Array.isArray(vs.segments) && vs.segments.some((s) => s.anchor !== "first_frame")) {
+    text += "; visible times from ffmpeg launch (~1 s early)";
   }
   if (vs.missing && vs.missing.length > 0) text += `; missing video: ${vs.missing.join(", ")}`;
   if (vs.plot_error != null) text += `; plot not drawn (${vs.plot_error})`;
