@@ -177,7 +177,7 @@ def _closeup_command(
     """
     x, y, side = crop
     val = "val"
-    if adjust is not None:
+    if adjust is not None:  # unrounded here; the analysis rounds half up: <= 1 grey level apart
         slope, intercept = adjust_linear(adjust)
         val = f"(clip({slope:.9g}*val+({intercept * 255:.9g}),0,255))"
     ramp = f"clip(({val}-{lo:g})*255/({STRETCH_HI}-{lo:g}),0,255)"
@@ -715,7 +715,10 @@ def analyse_visible_sample(
         summary["files"] = [*files, fam.json]
         _write_json(staged.part(fam.json), summary)
         staged.commit()
-        _remove_stale(folder, fam, summary["files"])
+        try:  # the result is in place: failing to tidy up must not send it to the failure path
+            _remove_stale(folder, fam, summary["files"])
+        except OSError:
+            logger.warning("could not remove stale %s files", fam.stem, exc_info=True)
         logger.info("%s: %d frames, %d events", fam.stem, len(rows), len(summary["events"]))
         return summary
     except _Skip as skip:

@@ -13,6 +13,7 @@ from __future__ import annotations
 import csv
 import json
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -358,3 +359,68 @@ def test_derived_route_without_the_flag_runs_raw_only_and_adjusted_failure_is_se
     reason = "RuntimeError: adjusted exploded"
     assert job["visible_adjusted"] == {"status": "failed", "reason": reason}
     assert seen == [None, None, {**NEUTRAL, "source": "neutral"}]  # raw first, then adjusted
+
+
+@needs_ffmpeg
+def test_a_stale_cleanup_error_after_commit_keeps_the_result(
+    tmp_path: Path, real: dict[str, Any], real_clip: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The result is already in place when the old files are removed: failing to remove them must
+    not send a good result into the failure path, which would delete it."""
+
+    def broken(*_a: Any, **_kw: Any) -> None:
+        raise OSError("exports went away")
+
+    d = experiment(tmp_path, real, [real_clip])
+    monkeypatch.setattr(vsr, "_remove_stale", broken)
+    out = run_analysis(d, adjust=DARKER, closeup=False)
+    assert out["status"] == "ok", out
+    assert set(out["files"]) <= set(exported(d))
+    assert _json(d, "visible_sample_adjusted.json") == out
+
+
+class _Blocking:
+    """A stub analysis that holds the derived job in its raw step until ``release``."""
+
+    def __init__(self) -> None:
+        self.entered, self.go = threading.Event(), threading.Event()
+
+    def __call__(self, reader: Any, ffmpeg: Any = None, ffprobe: Any = None,
+                 closeup: bool = True, adjust: Any = None) -> dict[str, Any]:
+        if adjust is None:
+            self.entered.set()
+            assert self.go.wait(30)
+        return {"status": "ok", "reason": None, "files": []}
+
+
+@pytest.mark.parametrize("first_flag", [False, True])
+def test_an_adjusted_request_while_a_regenerate_runs(
+    tmp_path: Path, real: dict[str, Any], monkeypatch: pytest.MonkeyPatch, first_flag: bool
+) -> None:
+    """A running job without the adjusted analysis refuses an adjusted request (409) rather than
+    dropping it silently; one that already includes it is returned as it is."""
+    stub = _Blocking()
+    monkeypatch.setattr(vsr, "analyse_visible_sample", stub)
+    d = experiment(tmp_path, real)
+    base = f"/api/experiments/{d.name}/export/derived?video=false"
+    with TestClient(_app(tmp_path)) as c:
+        try:
+            first = c.post(base + ("&visible_adjusted=true" if first_flag else ""))
+            assert first.status_code == 200 and first.json()["state"] == "running"
+            assert stub.entered.wait(30)
+            again = c.post(base + "&visible_adjusted=true")
+            if first_flag:
+                assert again.status_code == 200 and again.json()["state"] == "running"
+                assert again.json()["visible_adjusted_requested"] is True
+            else:
+                assert again.status_code == 409
+                assert again.json()["detail"] == (
+                    "a derived regenerate without the adjusted analysis is running; "
+                    "retry when it is done"
+                )
+            assert c.post(base).status_code == 200  # a raw-only request is still deduplicated
+        finally:
+            stub.go.set()
+        job = _wait_derived(c, d.name)
+    assert job["state"] == "done", job
+    assert (job["visible_adjusted"] is not None) == first_flag

@@ -1668,7 +1668,8 @@ def create_app(
         ``visible_adjusted=true`` then also runs the same analysis on the adjusted video (the
         run's effective visible adjustment) into ``exports/visible_sample_adjusted.*``; the job's
         ``visible_adjusted`` says how it went (``{"status", "reason"}``, ``None`` when not asked),
-        and its failure fails neither the raw result nor the job.
+        and its failure fails neither the raw result nor the job. While a job runs, a repeat POST
+        returns it, except that an adjusted request to a job started without one gets 409.
         Returns a job record immediately; poll ``/export/derived/status``. Pair with
         ``PUT /rois`` after editing.
         """
@@ -1677,9 +1678,13 @@ def create_app(
         _exp_dir(name)  # 404 early if the run is gone
         existing: dict[str, Any] | None = app.state.derived_jobs.get(name)
         if existing is not None and existing["state"] == "running":
+            if visible_adjusted and not existing.get("visible_adjusted_requested"):
+                raise HTTPException(409, "a derived regenerate without the adjusted analysis is "
+                                         "running; retry when it is done")
             return existing
         job: dict[str, Any] = {"state": "running", "step": "starting", "done": 0, "total": 0,
-                               "exports": None, "error": None, "visible_adjusted": None}
+                               "exports": None, "error": None, "visible_adjusted": None,
+                               "visible_adjusted_requested": visible_adjusted}
         app.state.derived_jobs[name] = job
 
         def _work() -> None:
