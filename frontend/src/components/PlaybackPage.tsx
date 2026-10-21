@@ -30,7 +30,7 @@ import { ThermalView, type StatsMap } from "./ThermalView.tsx";
 import { DisplayControls } from "./DisplayControls.tsx";
 import { RoiRows } from "./RoiRows.tsx";
 import { ExportSection } from "./ExportSection.tsx";
-import { visibleFlashMarkers } from "../lib/visibleSample.ts";
+import { markersWithFlashes } from "../lib/visibleSample.ts";
 import { MediaExportEditor } from "./MediaExportEditor.tsx";
 import { MetadataEditor } from "./MetadataEditor.tsx";
 import { VisiblePanel, VisibleVideo } from "./VisiblePanel.tsx";
@@ -245,9 +245,7 @@ export function PlaybackPage(p: Props) {
   const [reference, setReference] = useState<Float32Array | null>(null);
   const rad = useMemo(() => radiometryFromCamera(info?.camera), [info]);
   const active = cam.active_case as { low_c?: number; high_c?: number } | undefined;
-  const markers = info && tl
-    ? [...eventsToMarkers(info.events ?? [], tl, info.started_utc), ...visibleFlashMarkers(info.visible_sample)].sort((a, b) => a.t - b.t)
-    : [];
+  const markers = info && tl ? markersWithFlashes(eventsToMarkers(info.events ?? [], tl, info.started_utc), info.visible_sample, tl.t_s) : [];
   const hasVideo = !!info?.visible?.file;
   const playVis = info ? visibleForPlayback(info) : null; // segments on the thermal clock
   const recordedH = info?.visible_alignment ? parseAlignment(info.visible_alignment).H : null;

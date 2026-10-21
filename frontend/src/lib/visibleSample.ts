@@ -1,6 +1,7 @@
 /** The post-run visible-camera analysis around the sample (exports/visible_sample.json): the flash
  *  marks on the playback scrubber and the one-line status shown in the exports block. */
 import type { Marker } from "../components/TimePlot.tsx";
+import { nearestIndex } from "./events.ts";
 
 /** One flash at the sample: when it started, peaked and ended on the thermal clock (s). */
 export interface VisibleSampleEvent {
@@ -24,11 +25,24 @@ export interface VisibleSampleSummary {
   plot_error?: string | null;
 }
 
-/** One playback mark per flash, at its peak, labelled with the rounded peak brightening. Empty
- *  unless the run was analysed. */
-export function visibleFlashMarkers(vs: VisibleSampleSummary | null | undefined): Marker[] {
-  if (!vs || vs.status !== "ok" || !Array.isArray(vs.events)) return [];
-  return vs.events.map((ev) => ({ t: ev.t_peak_s, label: `visible flash +${Math.round(ev.peak_brightening)}` }));
+/** One playback mark per flash, labelled with the rounded peak brightening. Empty unless the run
+ *  was analysed.
+ *
+ *  Each mark sits on the thermal frame nearest the flash peak (`tS` is the recording's frame times),
+ *  like the marks eventsToMarkers places. The raw peak time usually falls between two frames, and the
+ *  player snaps a jump to the nearest frame: a mark just after a frame would snap back to it and
+ *  "next mark" would stay on that frame forever. Peaks that are not finite, or outside
+ *  [tS[0], tS[last]], are dropped, as eventsToMarkers drops its out-of-recording events. */
+export function visibleFlashMarkers(vs: VisibleSampleSummary | null | undefined, tS: ArrayLike<number>): Marker[] {
+  if (!vs || vs.status !== "ok" || !Array.isArray(vs.events) || tS.length === 0) return [];
+  const first = tS[0], last = tS[tS.length - 1];
+  const out: Marker[] = [];
+  for (const ev of vs.events) {
+    const t = ev.t_peak_s;
+    if (!Number.isFinite(t) || t < first || t > last) continue;
+    out.push({ t: tS[nearestIndex(tS, t)], label: `visible flash +${Math.round(ev.peak_brightening)}` });
+  }
+  return out;
 }
 
 interface StatusLine { text: string; error: boolean; }
@@ -72,4 +86,9 @@ export function visibleSampleStatusText(vs: VisibleSampleSummary | null | undefi
  *  be read. A skipped run or an analysed run with warnings is not. */
 export function visibleSampleIsError(vs: VisibleSampleSummary | null | undefined): boolean {
   return vs ? describe(vs).error : false;
+}
+
+/** `base` (the recorder's event marks) plus the visible flash marks, in time order. */
+export function markersWithFlashes(base: Marker[], vs: VisibleSampleSummary | null | undefined, tS: ArrayLike<number>): Marker[] {
+  return [...base, ...visibleFlashMarkers(vs, tS)].sort((a, b) => a.t - b.t);
 }

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { markColor, markerLegend } from "./events.ts";
-import { visibleFlashMarkers, visibleSampleIsError, visibleSampleStatusText, type VisibleSampleSummary } from "./visibleSample.ts";
+import { markColor, markerLegend, nearestIndex, nextMarkerTime } from "./events.ts";
+import { markersWithFlashes, visibleFlashMarkers, visibleSampleIsError, visibleSampleStatusText, type VisibleSampleSummary } from "./visibleSample.ts";
 
 // Event times, peaks and coverage are the values measured on the real run 20261020_144402_Run
 // (task-3 report, `merge_s=1.0`); the surrounding keys follow `_summary` in visible_sample_run.py.
@@ -17,32 +17,41 @@ const OK: VisibleSampleSummary = {
   missing: [],
   plot_error: null,
 };
+// Thermal frame times around each flash, captured from the real run's exports/roi_series.csv, plus the
+// two marks that eventsToMarkers already places exactly on a frame (RF ON at 4.0 s, the gap at 261.054 s).
+const TS = [
+  4.0, 261.054,
+  554.009, 554.042, 554.075, 554.108,
+  615.61, 615.643, 615.676, 615.709,
+  627.73, 627.763, 627.797, 627.83,
+];
 const SKIPPED: VisibleSampleSummary = { status: "skipped", reason: "no sample ROI is drawn" };
 const FAILED: VisibleSampleSummary = { status: "failed", reason: "ValueError: visible segments are not in time order" };
 
-test("one marker per event at its peak time, labelled with the rounded peak", () => {
-  assert.deepEqual(visibleFlashMarkers(OK), [
-    { t: 554.057, label: "visible flash +20" },
-    { t: 615.664, label: "visible flash +19" },
-    { t: 627.769, label: "visible flash +97" },
+test("one marker per event on the thermal frame nearest its peak, labelled with the rounded peak", () => {
+  // peaks 554.057 -> frame 554.042, 615.664 -> 615.676, 627.769 -> 627.763
+  assert.deepEqual(visibleFlashMarkers(OK, TS), [
+    { t: 554.042, label: "visible flash +20" },
+    { t: 615.676, label: "visible flash +19" },
+    { t: 627.763, label: "visible flash +97" },
   ]);
 });
 
 test("the marker label rounds a fractional peak", () => {
   const vs: VisibleSampleSummary = { ...OK, events: [{ ...OK.events![0], peak_brightening: 19.6 }] };
-  assert.equal(visibleFlashMarkers(vs)[0].label, "visible flash +20");
+  assert.equal(visibleFlashMarkers(vs, TS)[0].label, "visible flash +20");
 });
 
 test("a skipped, failed or absent run has no markers", () => {
-  assert.deepEqual(visibleFlashMarkers(SKIPPED), []);
-  assert.deepEqual(visibleFlashMarkers(FAILED), []);
-  assert.deepEqual(visibleFlashMarkers(null), []);
-  assert.deepEqual(visibleFlashMarkers(undefined), []);
+  assert.deepEqual(visibleFlashMarkers(SKIPPED, TS), []);
+  assert.deepEqual(visibleFlashMarkers(FAILED, TS), []);
+  assert.deepEqual(visibleFlashMarkers(null, TS), []);
+  assert.deepEqual(visibleFlashMarkers(undefined, TS), []);
 });
 
 test("visible flash marks are coloured --trace-5 and get their own legend entry", () => {
   assert.equal(markColor("visible flash +97"), "var(--trace-5)");
-  const legend = markerLegend(visibleFlashMarkers(OK));
+  const legend = markerLegend(visibleFlashMarkers(OK, TS));
   assert.deepEqual(legend, [{ label: "visible flash", color: "var(--trace-5)" }]);
 });
 
@@ -158,9 +167,9 @@ test("an ok summary without an events list is unreadable, not '0 flashes'", () =
 });
 
 test("no markers come from an unknown status or a malformed events list", () => {
-  assert.deepEqual(visibleFlashMarkers({ ...OK, status: "running" } as unknown as VisibleSampleSummary), []);
-  assert.deepEqual(visibleFlashMarkers({} as unknown as VisibleSampleSummary), []);
-  assert.deepEqual(visibleFlashMarkers({ ...OK, events: {} } as unknown as VisibleSampleSummary), []);
+  assert.deepEqual(visibleFlashMarkers({ ...OK, status: "running" } as unknown as VisibleSampleSummary, TS), []);
+  assert.deepEqual(visibleFlashMarkers({} as unknown as VisibleSampleSummary, TS), []);
+  assert.deepEqual(visibleFlashMarkers({ ...OK, events: {} } as unknown as VisibleSampleSummary, TS), []);
 });
 
 test("failed and unreadable summaries are styled as errors; skipped, ok, empty and absent are not", () => {
@@ -174,4 +183,81 @@ test("failed and unreadable summaries are styled as errors; skipped, ok, empty a
   assert.equal(visibleSampleIsError({ ...OK, coverage: NO_FRAMES, events: [] }), false);
   assert.equal(visibleSampleIsError(null), false);
   assert.equal(visibleSampleIsError(undefined), false);
+});
+
+// -- placement on the thermal timeline ------------------------------------------------------------
+
+/** What the playback page does for "next mark": jump to the marker time, which the player snaps to
+ *  the nearest thermal frame; the cursor time is then that frame's time. */
+function nextMarkClicks(markers: { t: number; label: string }[], tS: number[], from: number, maxClicks = 10): number[] {
+  const visited: number[] = [];
+  let t = from;
+  for (let i = 0; i < maxClicks; i++) {
+    const mt = nextMarkerTime(markers, t, 1);
+    if (mt === null) break;
+    t = tS[nearestIndex(tS, mt)];
+    visited.push(t);
+  }
+  return visited;
+}
+
+test("next-mark advances through every flash instead of sticking on the first", () => {
+  // the marks eventsToMarkers produced for this run: RF ON and the gap sit exactly on a frame
+  const base = [{ t: 4.0, label: "RF ON" }, { t: 261.054, label: "gap 3" }];
+  const markers = markersWithFlashes(base, OK, TS);
+  // from the gap at 261.054: each click must land on the next flash's frame, then run out
+  assert.deepEqual(nextMarkClicks(markers, TS, 261.054), [554.042, 615.676, 627.763]);
+});
+
+test("a flash mark that was not snapped to a frame would stick (documents the failure)", () => {
+  const raw = OK.events!.map((ev) => ({ t: ev.t_peak_s, label: "visible flash" }));
+  const clicks = nextMarkClicks(raw, TS, 261.054, 4);
+  assert.deepEqual(clicks, [554.042, 554.042, 554.042, 554.042]);
+});
+
+test("a non-finite peak time is dropped, not placed", () => {
+  const events = [
+    { ...OK.events![0], t_peak_s: NaN },
+    { ...OK.events![1], t_peak_s: Infinity },
+    { ...OK.events![2], t_peak_s: -Infinity },
+    OK.events![2],
+  ];
+  assert.deepEqual(visibleFlashMarkers({ ...OK, events }, TS), [{ t: 627.763, label: "visible flash +97" }]);
+});
+
+test("a peak outside the recording's time span is dropped", () => {
+  const events = [
+    { ...OK.events![0], t_peak_s: 3.9 },    // before the first frame
+    { ...OK.events![1], t_peak_s: 700.0 },  // after the last frame
+    OK.events![2],
+  ];
+  assert.deepEqual(visibleFlashMarkers({ ...OK, events }, TS), [{ t: 627.763, label: "visible flash +97" }]);
+});
+
+test("a peak exactly on the first or last frame time is kept", () => {
+  const events = [{ ...OK.events![0], t_peak_s: 4.0 }, { ...OK.events![2], t_peak_s: 627.83 }];
+  assert.deepEqual(visibleFlashMarkers({ ...OK, events }, TS).map((m) => m.t), [4.0, 627.83]);
+});
+
+test("an empty timeline has nowhere to place a flash", () => {
+  assert.deepEqual(visibleFlashMarkers(OK, []), []);
+});
+
+test("markersWithFlashes merges the flash marks into the event marks in time order", () => {
+  const base = [{ t: 261.054, label: "gap 3" }, { t: 4.0, label: "RF ON" }, { t: 620.0, label: "RF OFF" }];
+  assert.deepEqual(markersWithFlashes(base, OK, TS), [
+    { t: 4.0, label: "RF ON" },
+    { t: 261.054, label: "gap 3" },
+    { t: 554.042, label: "visible flash +20" },
+    { t: 615.676, label: "visible flash +19" },
+    { t: 620.0, label: "RF OFF" },
+    { t: 627.763, label: "visible flash +97" },
+  ]);
+});
+
+test("markersWithFlashes leaves the event marks alone when there is nothing to add", () => {
+  const base = [{ t: 4.0, label: "RF ON" }];
+  assert.deepEqual(markersWithFlashes(base, null, TS), base);
+  assert.deepEqual(markersWithFlashes(base, SKIPPED, TS), base);
+  assert.notEqual(markersWithFlashes(base, null, TS), base, "returns a new array, never the input");
 });
