@@ -10,7 +10,11 @@ import { wsUrl } from "./lib/operator.ts";
 import { decodeFrameMessage, type FrameMessage } from "./lib/protocol.ts";
 import type { PaletteName } from "./lib/palette.ts";
 import type { Range, ScaleMode } from "./lib/scale.ts";
-import { DEFAULT_LAYOUT, layoutReducer, loadLayout, saveLayout } from "./lib/layout.ts";
+import { DEFAULT_LAYOUT, layoutHasKey, layoutReducer, loadLayout, saveLayout } from "./lib/layout.ts";
+import { usePresets } from "./lib/usePresets.ts";
+import { displayFromView, isModified, thermalFromInfo, viewFromDisplay, type ViewDisplay } from "./lib/presets.ts";
+import { applyLivePreset, saveCurrentPreset } from "./lib/presetActions.ts";
+import { PresetPicker, SaveCurrentAs } from "./components/PresetPicker.tsx";
 import { EMPTY_ROIS, hasRois, loadRois, roiLabel, saveRois } from "./lib/roi.ts";
 import { initHistory, roiHistoryReducer } from "./lib/roiHistory.ts";
 import { TraceBuffer, WINDOWS, visibleWindow, windowLabel } from "./lib/plot.ts";
@@ -75,7 +79,20 @@ export function App() {
   const [openExp, setOpenExp] = useState<string | null>(null);
   const [openTitle, setOpenTitle] = useState<string | null>(null);  // display name, if renamed
   const [layout, dispatch] = useReducer(layoutReducer, DEFAULT_LAYOUT, () => loadLayout(storage));
+  // read before the first save below writes the defaults: did this browser store palette/range?
+  const [displayWasStored] = useState(() => layoutHasKey(storage, "display"));
   useEffect(() => { saveLayout(storage, layout); }, [layout]);
+  const presets = usePresets();
+  // Startup: a browser with no stored palette/range takes them from the last applied preset.
+  // Display only; nothing is sent to the camera.
+  const restored = useRef(displayWasStored);
+  useEffect(() => {
+    if (restored.current || !presets.doc) return;
+    restored.current = true;
+    const last = presets.lastApplied;
+    if (!last || JSON.stringify(layout.display) !== JSON.stringify(DEFAULT_LAYOUT.display)) return;
+    dispatch({ type: "setDisplay", patch: viewFromDisplay(last.display, layout.display).view });
+  }, [presets.doc]); // eslint-disable-line react-hooks/exhaustive-deps
   const [roiHist, roiDispatch] = useReducer(roiHistoryReducer, EMPTY_ROIS, () => initHistory(loadRois(storage)));
   const rois = roiHist.present;
   const maskModeRef = useRef(false);
@@ -171,9 +188,12 @@ export function App() {
   const [status, setStatus] = useState<Status>({ state: "disconnected" });
   const [recording, setRecording] = useState<RecordingStatus | null>(null);
   const [frame, setFrame] = useState<FrameMessage | null>(null);
-  const [palette, setPalette] = useState<PaletteName>("iron");
-  const [scaleMode, setScaleMode] = useState<ScaleMode>("auto");
-  const [manual, setManual] = useState<Range>({ min: 20, max: 40 });
+  // palette and colour range live in the layout (remembered by the browser, restorable from a preset)
+  const { palette, scaleMode, manual } = layout.display;
+  const setPalette = useCallback((p: PaletteName) => dispatch({ type: "setDisplay", patch: { palette: p } }), []);
+  const setScaleMode = useCallback((m: ScaleMode) => dispatch({ type: "setDisplay", patch: { scaleMode: m } }), []);
+  const setManual = useCallback((r: Range) => dispatch({ type: "setDisplay", patch: { manual: r } }), []);
+  const setView = useCallback((v: ViewDisplay) => dispatch({ type: "setDisplay", patch: v }), []);
   const [shown, setShown] = useState<Range>({ min: 0, max: 100 });
   const [wsFps, setWsFps] = useState(0);
   const [lastFrameAt, setLastFrameAt] = useState(0);
@@ -296,6 +316,21 @@ export function App() {
   const allHidden = !layout.rail && !layout.dock;
   const [revealNote, setRevealNote] = useState<string | null>(null);
 
+  // Presets (live): apply writes camera settings only on this click, never while recording.
+  const cameraConnected = status.state === "connected" || status.state === "acquiring";
+  const liveThermal = cameraConnected && info ? thermalFromInfo(info).values : null;
+  const saveCurrent = (name: string) => saveCurrentPreset(name, { visible: layout.visibleAdjust, view: layout.display, currentThermal: api.currentThermal, put: presets.put });
+  const livePicker = (
+    <PresetPicker store={presets} mode="live" onSaveCurrent={saveCurrent}
+      modified={(p) => isModified({ visible: layout.visibleAdjust, display: displayFromView(layout.display), thermal: liveThermal }, p)}
+      onApply={(p) => applyLivePreset(p, {
+        recording: isRecording, cameraConnected, view: layout.display,
+        setVisible: (adjust) => dispatch({ type: "setVisibleAdjust", adjust }), setView,
+        readInfo: api.info, setParameters: api.setParameters, confirm: (m) => window.confirm(m),
+        markApplied: presets.markApplied, onCameraWritten: refreshInfo,
+      })} />
+  );
+
   const nowT = hdr && t0Ref.current !== null ? (hdr.device_timestamp_ns - t0Ref.current) / 1e9 : 0;
   const traces: Trace[] = rois.rois.flatMap((r, i) => {
     if (r.hidden) return []; // hidden on the image = hidden on the plot (still measured + recorded)
@@ -361,7 +396,7 @@ export function App() {
     return <PlaybackPage name={openExp} layout={layout} dispatch={dispatch} topbar={topbar}
       rois={rois} roiDispatch={roiDispatch} masks={masks} maskDispatch={maskDispatch} maskMode={maskMode} onMaskMode={toggleMaskMode}
       palette={palette} setPalette={setPalette} scaleMode={scaleMode} setScaleMode={setScaleMode}
-      manual={manual} setManual={setManual} onBack={() => setPage("experiments")} status={status} recording={recording} />;
+      manual={manual} setManual={setManual} onBack={() => setPage("experiments")} status={status} recording={recording} presets={presets} />;
   }
 
   return (
@@ -423,16 +458,16 @@ export function App() {
             <ProfilePanel field={field} rois={rois.rois} selected={rois.selected} shown={shown} />
           </RailSection>
           <RailSection id="camera" title="camera" open={layout.sections.camera} onToggle={() => dispatch({ type: "toggleSection", section: "camera" })} tag={isRecording ? "locked during recording" : "writes camera nodes"}>
-            <CameraControls info={info} locked={isRecording} onApplied={refreshInfo} />
+            <CameraControls info={info} locked={isRecording} onApplied={refreshInfo} presetSave={<SaveCurrentAs store={presets} onSave={saveCurrent} label="save current as preset…" />} />
           </RailSection>
           <RailSection id="recording" title="recording" open={layout.sections.recording} onToggle={() => dispatch({ type: "toggleSection", section: "recording" })}>
-            <RecordPanel acquiring={status.state === "acquiring"} rois={rois.rois} liveAdjust={layout.visibleAdjust} masks={masks.enabled && masks.shapes.length ? masks.shapes : null} />
+            <RecordPanel acquiring={status.state === "acquiring"} rois={rois.rois} liveAdjust={layout.visibleAdjust} lastApplied={presets.lastApplied} masks={masks.enabled && masks.shapes.length ? masks.shapes : null} />
           </RailSection>
           <RailSection id="display" title="display" open={layout.sections.display} onToggle={() => dispatch({ type: "toggleSection", section: "display" })} tag="visualization only">
             <DisplayControls palette={palette} setPalette={setPalette} scaleMode={scaleMode} setScaleMode={setScaleMode} manual={manual} setManual={setManual} shown={shown} isotherm={layout.isotherm} setIsotherm={(isotherm) => dispatch({ type: "setIsotherm", isotherm })} hasReference={!!reference} onSetReference={() => { if (field) setReference(new Float32Array(field.c)); }} onClearReference={() => setReference(null)} onRangeFromRoi={(() => { const sel = rois.rois.find((r) => r.id === rois.selected); if (!field || !sel || sel.kind === "spot") return null; return () => { const rg = rangeFromRoi(field.c, field.w, field.h, sel); if (rg) { setManual({ min: Math.floor(rg.min * 10) / 10, max: Math.ceil(rg.max * 10) / 10 }); setScaleMode("manual"); } }; })()} hold={layout.hold} setHold={(hold) => dispatch({ type: "setHold", hold })} flipH={layout.flipH} flipV={layout.flipV} setFlip={(h, v) => dispatch({ type: "setFlip", h, v })} agc={layout.agc} setAgc={(agc) => dispatch({ type: "setAgc", agc })} units={layout.units} setUnits={(units) => dispatch({ type: "setUnits", units })} conv={field?.conv ?? null} filter={layout.filter} setFilter={(filter) => dispatch({ type: "setFilter", filter })} rfNotch={layout.rfNotch} setRfNotch={(on) => dispatch({ type: "setRfNotch", on })} rfStatus={rfNotchStatus(layout.rfNotch, frame?.header.display?.rf_notch)} segment={layout.segment} setSegment={(segment) => dispatch({ type: "setSegment", segment })} saturation={(() => { const cs = (info as Record<string, unknown> | null | undefined)?.active_case as { low_c?: number; high_c?: number } | undefined; if (!field || !cs || typeof cs.low_c !== "number" || typeof cs.high_c !== "number") return null; const n = saturationCount(field.c, { low: cs.low_c, high: cs.high_c }); return { ...n, lowC: cs.low_c, highC: cs.high_c }; })()} onSnapshot={saveLiveImage} />
           </RailSection>
           <RailSection id="visible" title="visible camera" open={layout.sections.visible} onToggle={() => dispatch({ type: "toggleSection", section: "visible" })} tag="preview only">
-            <VisiblePanel mode="live" available={visibleAvailable} reason={recording?.visible?.reason} adjust={layout.visibleAdjust} visibleMode={layout.visibleMode} overlay={layout.overlay} dispatch={dispatch} aligned={!!align.H} />
+            <VisiblePanel mode="live" picker={livePicker} available={visibleAvailable} reason={recording?.visible?.reason} adjust={layout.visibleAdjust} visibleMode={layout.visibleMode} overlay={layout.overlay} dispatch={dispatch} aligned={!!align.H} />
             {visibleAvailable && <AlignmentPanel state={align} dispatch={alignDispatch} calibrating={calibrating} onCalibrating={setCalibrating} irSize={hdr ? [hdr.width, hdr.height] : null} onSave={saveAlignmentToOperator} onFinishOverlay={() => { setCalibrating(false); dispatch({ type: "setVisibleMode", mode: "overlay" }); }} />}
           </RailSection>
         </Rail>

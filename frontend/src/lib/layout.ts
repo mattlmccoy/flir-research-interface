@@ -4,6 +4,8 @@ import { DEFAULT_ISOTHERM, parseIsotherm, type Isotherm } from "./isotherm.ts";
 /** Studio layout state (spec §3): which panels are open, which rail sections, which tool, image zoom. */
 import { isZoom, type Zoom } from "./zoom.ts";
 import { NEUTRAL_ADJUST, clampAdjust, type VisibleAdjust } from "./visibleAdjust.ts";
+import { PALETTE_NAMES, type PaletteName } from "./palette.ts";
+import type { Range, ScaleMode } from "./scale.ts";
 export const TOOLS = ["select", "spot", "rect", "circle", "ellipse", "line", "polyline", "polygon", "freehand"] as const;
 const isDelta = (v: unknown): v is { a: number; b: number } => !!v && typeof v === "object" && Number.isInteger((v as { a: unknown }).a) && Number.isInteger((v as { b: unknown }).b);
 export interface Agc { mode: "linear" | "plateau"; plateau: number; }
@@ -77,7 +79,21 @@ export interface LayoutState {
   overlay: Overlay;
   /** Live visible-camera exposure / brightness / contrast (display only; stamped into a new recording). */
   visibleAdjust: VisibleAdjust;
+  /** Thermal palette and colour range (auto, or the manual min/max in °C); shared by live and playback. */
+  display: DisplayState;
   sections: Record<Section, boolean>;
+}
+export interface DisplayState { palette: PaletteName; scaleMode: ScaleMode; manual: Range; }
+const DEFAULT_DISPLAY: DisplayState = Object.freeze({ palette: "iron", scaleMode: "auto", manual: Object.freeze({ min: 20, max: 40 }) }) as DisplayState;
+function parseDisplay(v: unknown): DisplayState {
+  const o = (v !== null && typeof v === "object" && !Array.isArray(v) ? v : {}) as Record<string, unknown>;
+  const m = (o.manual !== null && typeof o.manual === "object" ? o.manual : {}) as Record<string, unknown>;
+  const ok = isNum(m.min) && isNum(m.max);
+  return {
+    palette: (PALETTE_NAMES as readonly string[]).includes(o.palette as string) ? (o.palette as PaletteName) : DEFAULT_DISPLAY.palette,
+    scaleMode: o.scaleMode === "manual" ? "manual" : "auto",
+    manual: ok ? { min: m.min as number, max: m.max as number } : DEFAULT_DISPLAY.manual,
+  };
 }
 /** Drag-to-resize bounds (px) for the right rail and the bottom plot dock, with a snap-back
  * window around the default so a resize clicks back to the tidy layout. */
@@ -141,6 +157,7 @@ export const DEFAULT_LAYOUT: LayoutState = {
   units: "C",
   overlay: DEFAULT_OVERLAY,
   visibleAdjust: Object.freeze({ ...NEUTRAL_ADJUST }) as VisibleAdjust,
+  display: DEFAULT_DISPLAY,
   sections: { measurements: true, profile: false, camera: true, experiment: true, recording: true, display: true, export: true, visible: true },
 };
 Object.freeze(DEFAULT_LAYOUT.sections);
@@ -171,6 +188,7 @@ export type LayoutAction =
   | { type: "setVisibleMode"; mode: VisibleMode }
   | { type: "setOverlay"; patch: Partial<Overlay> }
   | { type: "setVisibleAdjust"; adjust: VisibleAdjust }
+  | { type: "setDisplay"; patch: Partial<DisplayState> }
   | { type: "collapseAll" }
   | { type: "restoreAll" };
 
@@ -204,6 +222,7 @@ export function layoutReducer(s: LayoutState, a: LayoutAction): LayoutState {
     case "dockBack": { const { [a.section]: _gone, ...rest } = s.floating; return { ...s, floating: rest }; }
     case "setOverlay": return { ...s, overlay: clampOverlay({ ...s.overlay, ...a.patch }) };
     case "setVisibleAdjust": return { ...s, visibleAdjust: clampAdjust(a.adjust) };
+    case "setDisplay": return { ...s, display: parseDisplay({ ...s.display, ...a.patch }) };
     case "collapseAll": return { ...s, strip: true, rail: false, dock: false };
     case "restoreAll": return { ...s, strip: true, rail: true, dock: true };
   }
@@ -266,12 +285,25 @@ export function loadLayout(storage: Storage | null): LayoutState {
         dy: num(ov.dy, DEFAULT_OVERLAY.dy),
       }),
       visibleAdjust: clampAdjust(asRecord(parsed.visibleAdjust)),
+      display: parseDisplay(parsed.display),
       sections: Object.fromEntries(
         SECTIONS.map((k) => [k, bool(sec[k], DEFAULT_LAYOUT.sections[k])]),
       ) as Record<Section, boolean>,
     };
   } catch {
     return DEFAULT_LAYOUT;
+  }
+}
+
+/** True when the stored layout has `key` at all, whatever its value. `loadLayout` cannot say: it
+ *  fills a missing field with the default, so "nothing stored" and "stored the default" look alike. */
+export function layoutHasKey(storage: Storage | null, key: keyof LayoutState): boolean {
+  try {
+    const raw = storage?.getItem(KEY);
+    if (!raw) return false;
+    return Object.prototype.hasOwnProperty.call(asRecord(JSON.parse(raw)), key);
+  } catch {
+    return false;
   }
 }
 

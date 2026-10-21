@@ -1,5 +1,6 @@
 import { NumberField } from "./NumberField.tsx";
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { api } from "../lib/api.ts";
 import { formFromInfo, valuesFromForm, type CameraForm } from "../lib/camera.ts";
 import { fmtAny } from "../lib/format.ts";
@@ -10,6 +11,8 @@ interface Props {
   /** True while a recording is in progress: every control is locked (brief §30). */
   locked: boolean;
   onApplied: () => void;
+  /** "save current as…" for presets (rendered under the buttons). */
+  presetSave?: ReactNode;
 }
 
 type Case = { index: number; low_c?: number | null; high_c?: number | null; enabled?: boolean };
@@ -29,7 +32,7 @@ function Num({ label, unit, value, step, min, max, disabled, onChange }: { label
 }
 
 /** Camera section body: writes real camera nodes; never a host-side calibration (brief §7). */
-export function CameraControls({ info, locked, onApplied }: Props) {
+export function CameraControls({ info, locked, onApplied, presetSave }: Props) {
   const base = formFromInfo(info ?? {});
   const [form, setForm] = useState<CameraForm>(base);
   const [busy, setBusy] = useState(false);
@@ -93,6 +96,7 @@ export function CameraControls({ info, locked, onApplied }: Props) {
         <button className="secondary" disabled={dis || !dirty} onClick={() => setForm(base)}>Revert</button>
         <button className="secondary" disabled={busy || !info} onClick={nuc} title={NUC_HELP}>NUC now</button>
       </div>
+      {presetSave}
       <Disclosure label="What NUC does" icon="info">
         <ul className="help">
           <li><b>NUC</b> = non-uniformity correction: the camera closes its internal shutter for about a second and re-measures each detector pixel's offset.</li>

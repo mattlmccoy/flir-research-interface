@@ -37,6 +37,9 @@ import { MetadataEditor } from "./MetadataEditor.tsx";
 import { VisiblePanel, VisibleVideo } from "./VisiblePanel.tsx";
 import { visibleForPlayback, visibleSegmentAt } from "../lib/visibleSegments.ts";
 import { useRunVisibleAdjust, useVisibleRange } from "./VisibleAdjustControls.tsx";
+import { PresetPicker } from "./PresetPicker.tsx";
+import type { PresetsStore } from "../lib/usePresets.ts";
+import { applyLook } from "../lib/presetActions.ts";
 import { rangeNote } from "../lib/visibleAdjustUi.ts";
 import { loadAlignment, parseAlignment } from "../lib/alignment.ts";
 import { TimePlot, type Trace } from "./TimePlot.tsx";
@@ -61,6 +64,8 @@ interface Props {
   scaleMode: ScaleMode; setScaleMode: (m: ScaleMode) => void;
   manual: Range; setManual: (r: Range) => void;
   onBack: () => void;
+  /** The operator's presets: playback offers "apply look" (visible into this run + display) only. */
+  presets: PresetsStore;
 }
 
 function seriesTraces(series: RoiSeries | null, rois: RoiState): Trace[] {
@@ -443,7 +448,10 @@ export function PlaybackPage(p: Props) {
             <DisplayControls palette={p.palette} setPalette={p.setPalette} scaleMode={p.scaleMode} setScaleMode={p.setScaleMode} manual={p.manual} setManual={p.setManual} shown={shown} isotherm={p.layout.isotherm} setIsotherm={(isotherm) => p.dispatch({ type: "setIsotherm", isotherm })} hasReference={!!reference} onSetReference={() => { if (field) setReference(new Float32Array(field.c)); }} onClearReference={() => setReference(null)} onRangeFromRoi={(() => { const sel = p.rois.rois.find((r) => r.id === p.rois.selected); if (!field || !sel || sel.kind === "spot") return null; return () => { const rg = rangeFromRoi(field.c, field.w, field.h, sel); if (rg) { p.setManual({ min: Math.floor(rg.min * 10) / 10, max: Math.ceil(rg.max * 10) / 10 }); p.setScaleMode("manual"); } }; })()} hold={p.layout.hold} setHold={(hold) => p.dispatch({ type: "setHold", hold })} flipH={p.layout.flipH} flipV={p.layout.flipV} setFlip={(h, v) => p.dispatch({ type: "setFlip", h, v })} agc={p.layout.agc} setAgc={(agc) => p.dispatch({ type: "setAgc", agc })} units={p.layout.units} setUnits={(units) => p.dispatch({ type: "setUnits", units })} conv={field?.conv ?? null} filter={p.layout.filter} setFilter={(filter) => p.dispatch({ type: "setFilter", filter })} rfNotch={p.layout.rfNotch} setRfNotch={(on) => p.dispatch({ type: "setRfNotch", on })} rfStatus={rfNotchStatus(p.layout.rfNotch, frame?.header.display?.rf_notch)} segment={p.layout.segment} setSegment={(segment) => p.dispatch({ type: "setSegment", segment })} saturation={(() => { const cs = (info?.camera as Record<string, unknown> | null | undefined)?.active_case as { low_c?: number; high_c?: number } | undefined; if (!field || !cs || typeof cs.low_c !== "number" || typeof cs.high_c !== "number") return null; const n = saturationCount(field.c, { low: cs.low_c, high: cs.high_c }); return { ...n, lowC: cs.low_c, highC: cs.high_c }; })()} onSnapshot={() => { const v = document.querySelector<HTMLElement>(".view"); if (v) saveSnapshot(v, snapshotFilename(p.name, index, t, { rfFiltered }), snapshotFooter({ name: p.name, tS: t, index: index, range: shown, palette: p.palette, rois: p.rois.rois.length, reference: !!reference, rfFiltered })); }} />
           </RailSection>
           <RailSection id="visible" title="visible camera" open={p.layout.sections.visible} onToggle={() => p.dispatch({ type: "toggleSection", section: "visible" })} tag="recorded video">
-            <VisiblePanel mode="playback" name={p.name} hasVideo={hasVideo} t={t} playing={playing} speed={speed} vis={playVis} measuredFps={info?.visible?.measured_fps} visibleMode={p.layout.visibleMode} overlay={p.layout.overlay} dispatch={p.dispatch} aligned={!!overlayH} adjust={vAdjust} rangeNote={vRangeNote} />
+            <VisiblePanel mode="playback" picker={<PresetPicker store={p.presets} mode="playback"
+              onApply={async (pr) => applyLook(pr, { hasVideo, setAdjust: vAdjust.set, view: { palette: p.palette, scaleMode: p.scaleMode, manual: p.manual },
+                setView: (v) => { p.setPalette(v.palette); p.setScaleMode(v.scaleMode); p.setManual(v.manual); } })} />}
+              name={p.name} hasVideo={hasVideo} t={t} playing={playing} speed={speed} vis={playVis} measuredFps={info?.visible?.measured_fps} visibleMode={p.layout.visibleMode} overlay={p.layout.overlay} dispatch={p.dispatch} aligned={!!overlayH} adjust={vAdjust} rangeNote={vRangeNote} />
           </RailSection>
           <RailSection id="export" title="export" open={p.layout.sections.export} onToggle={() => p.dispatch({ type: "toggleSection", section: "export" })} tag={derivedStale ? "update needed" : "derived files"} tagWarn={derivedStale}>
             <button className="primary" style={{ width: "100%", marginBottom: 8 }} disabled={n === 0} onClick={() => setShowMedia(true)} title="Open the media export editor: MP4/GIF of a chosen window with overlays">🎬 Media export (clip / GIF)…</button>

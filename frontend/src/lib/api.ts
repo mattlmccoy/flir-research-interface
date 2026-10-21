@@ -4,6 +4,7 @@ import type { VisibleGap, VisibleSegment } from "./visibleSegments.ts";
 import type { VisibleSampleSummary } from "./visibleSample.ts";
 import type { VisibleAdjust } from "./visibleAdjust.ts";
 import type { AdjustSource, RecordStamp } from "./visibleAdjustUi.ts";
+import type { Preset, PresetsDoc, ThermalValue } from "./presets.ts";
 
 /** Site mode: the UI is served from GitHub Pages and talks to a local operator (spec §6.3). */
 export const SITE_MODE = import.meta.env.VITE_SITE_MODE === "1";
@@ -262,6 +263,18 @@ export const api = {
   putLiveRois: (rois: unknown[]) =>
     j<{ count: number }>(req("/api/live/rois", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ rois }) })),
   controlStatus: () => j<ControlStatus>(req("/api/control/status")),
+  // -- presets (visible adjustment + thermal camera settings + display) --
+  presets: () => j<PresetsDoc>(req("/api/presets")),
+  /** Create or replace; the operator stamps saved_utc and returns the whole document. */
+  putPreset: (p: Preset) =>
+    j<PresetsDoc>(req(`/api/presets/${encodeURIComponent(p.name)}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(p) })),
+  deletePreset: (name: string) => j<PresetsDoc>(req(`/api/presets/${encodeURIComponent(name)}`, { method: "DELETE" })),
+  renamePreset: (name: string, newName: string) =>
+    j<PresetsDoc>(req(`/api/presets/${encodeURIComponent(name)}/rename`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ new_name: newName }) })),
+  setLastAppliedPreset: (name: string | null) =>
+    j<PresetsDoc>(req("/api/presets/last-applied", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) })),
+  /** The connected camera's writable values; 409 without a camera. */
+  currentThermal: () => j<{ thermal: Record<string, ThermalValue | null>; left_out: string[] }>(req("/api/presets/current-thermal")),
   controlSeries: (name: string) =>
     j<ControlSeries>(req(`/api/experiments/${encodeURIComponent(name)}/control`)),
 };

@@ -287,3 +287,31 @@ test("the RF-banding filter switch is off by default, toggles, and is remembered
   saveLayout(st, on);
   assert.equal(loadLayout(st).rfNotch, true);
 });
+
+test("palette and colour range are part of the layout and survive a save/load round-trip", () => {
+  assert.deepEqual(DEFAULT_LAYOUT.display, { palette: "iron", scaleMode: "auto", manual: { min: 20, max: 40 } });
+  const s = layoutReducer(DEFAULT_LAYOUT, { type: "setDisplay", patch: { palette: "inferno", scaleMode: "manual", manual: { min: 25, max: 250 } } });
+  const st = memStorage();
+  saveLayout(st, s);
+  assert.deepEqual(loadLayout(st).display, { palette: "inferno", scaleMode: "manual", manual: { min: 25, max: 250 } });
+  const bad = memStorage();
+  bad.setItem("fri.layout.v1", JSON.stringify({ display: { palette: "plaid", scaleMode: "sideways", manual: { min: "a" } } }));
+  assert.deepEqual(loadLayout(bad).display, DEFAULT_LAYOUT.display);
+});
+
+test("layoutHasKey tells 'nothing stored' from 'stored at the default value'", async () => {
+  const { layoutHasKey } = await import("./layout.ts");
+  const empty = memStorage();
+  assert.equal(layoutHasKey(empty, "display"), false);
+  const old = memStorage();
+  old.setItem("fri.layout.v1", JSON.stringify({ rail: true }));
+  assert.equal(layoutHasKey(old, "display"), false, "a layout saved before the field existed");
+  const st = memStorage();
+  saveLayout(st, DEFAULT_LAYOUT);
+  assert.equal(layoutHasKey(st, "display"), true, "stored, even though it equals the default");
+  assert.equal(layoutHasKey(st, "visibleAdjust"), true);
+  const broken = memStorage();
+  broken.setItem("fri.layout.v1", "{not json");
+  assert.equal(layoutHasKey(broken, "display"), false);
+  assert.equal(layoutHasKey(null, "display"), false);
+});

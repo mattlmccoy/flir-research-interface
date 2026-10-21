@@ -10,7 +10,8 @@ import type { VisibleAdjust } from "../lib/visibleAdjust.ts";
 import { recordStamp } from "../lib/visibleAdjustUi.ts";
 
 
-export function RecordPanel({ acquiring, rois, masks = null, liveAdjust }: { acquiring: boolean; rois: Roi[]; masks?: MaskShape[] | null; liveAdjust: VisibleAdjust }) {
+/** `lastApplied`: the last applied preset, so the visible stamp records `preset` / `based_on`. */
+export function RecordPanel({ acquiring, rois, masks = null, liveAdjust, lastApplied = null }: { acquiring: boolean; rois: Roi[]; masks?: MaskShape[] | null; liveAdjust: VisibleAdjust; lastApplied?: { name: string; visible_adjust: VisibleAdjust } | null }) {
   const [name, setName] = useState("Run");
   const [meta, setMeta] = useState<Record<string, string>>({});
   const [profile, setProfile] = useState<Profile>(DEFAULT_PROFILE);
@@ -54,9 +55,9 @@ export function RecordPanel({ acquiring, rois, masks = null, liveAdjust }: { acq
   }
   const vis = status.visible;
   const visibleAvailable = !!vis && vis.state !== "unavailable";
-  // The live slider values go into metadata.json only when the visible video is recorded.
-  // Presets (Task 8) will pass the last-applied preset instead of null.
-  const visibleStamp = () => (withVisible && visibleAvailable ? recordStamp(liveAdjust, null) : null);
+  // The live slider values go into metadata.json only when the visible video is recorded, named
+  // after the last applied preset when they still equal it (`preset`) or were changed (`based_on`).
+  const visibleStamp = () => (withVisible && visibleAvailable ? recordStamp(liveAdjust, lastApplied) : null);
 
   async function start() {
     setBusy(true); setErr(null);

@@ -107,7 +107,9 @@ export function VisibleVideo({ name, t, playing, speed, vis, measuredFps, big = 
   );
 }
 
-interface Placement { visibleMode: VisibleMode; overlay: Overlay; dispatch: (a: LayoutAction) => void; aligned?: boolean; }
+interface Placement { visibleMode: VisibleMode; overlay: Overlay; dispatch: (a: LayoutAction) => void; aligned?: boolean;
+  /** The preset picker, shown first (presets also hold display and camera settings, so it shows without a visible camera too). */
+  picker?: ReactNode; }
 type PanelProps = Placement & (
   /** `adjust`: the live adjustment (layout); slider moves dispatch `setVisibleAdjust`. */
   | { mode: "live"; available: boolean; reason?: string; adjust: VisibleAdjust }
@@ -147,9 +149,10 @@ export function VisiblePanel(p: PanelProps) {
     </>
   ));
   if (p.mode === "live") {
-    if (!p.available) return <div className="hint">Visible camera preview unavailable: {p.reason ?? "ffmpeg or RTSP credentials not configured"}.</div>;
+    if (!p.available) return <>{p.picker}<div className="hint">Visible camera preview unavailable: {p.reason ?? "ffmpeg or RTSP credentials not configured"}.</div></>;
     return (
       <>
+        {p.picker}
         {placement}
         {registration}
         <VisibleAdjustControls value={p.adjust} onChange={(adjust) => p.dispatch({ type: "setVisibleAdjust", adjust })}
@@ -165,9 +168,10 @@ export function VisiblePanel(p: PanelProps) {
       </>
     );
   }
-  if (!p.hasVideo) return <div className="hint">This recording has no visible video.</div>;
+  if (!p.hasVideo) return <>{p.picker}<div className="hint">This recording has no visible video.</div></>;
   return (
     <>
+      {p.picker}
       {placement}
       {registration}
       <VisibleAdjustControls value={p.adjust.adjust} onChange={p.adjust.set} onReset={p.adjust.reset} resetLabel="reset to as-recorded"
