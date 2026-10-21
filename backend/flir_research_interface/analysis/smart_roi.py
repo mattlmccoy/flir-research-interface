@@ -1,8 +1,9 @@
 """Smart ROI: a user-drawn search area inside which the hot sample's outline is found per frame.
 
-This module holds the spec type and its validation, and the pure per-frame detector/tracker
-(``SmartTracker``): edge level, connected region, lock/hold/search states, rings and dimensions.
-All work happens on a crop around the current search area so a 640x480 frame stays cheap.
+This module holds the pure per-frame detector/tracker (``SmartTracker``): edge level, connected
+region, lock/hold/search states, rings and dimensions. All work happens on a crop around the
+current search area so a 640x480 frame stays cheap. The spec type and its validation live in
+``smart_spec`` and are re-exported here.
 """
 
 from __future__ import annotations
@@ -14,6 +15,13 @@ import numpy as np
 import numpy.typing as npt
 from scipy import ndimage
 
+from flir_research_interface.analysis.smart_spec import (
+    DEFAULT_RINGS_PX,
+    SENSITIVITY_RANGE,
+    SmartRoiSpec,
+    parse_smart_roi,
+)
+
 HOLD_S = 1.0  # a failed frame keeps the last outline (valid, "holding") this long, then searches
 SEARCH_MARGIN_PX = 15  # extra margin round the outline (beyond the outermost ring) to search in
 MIN_CONTRAST_C = 2.0  # core (p99) minus surroundings (p20) of the search area
@@ -22,85 +30,6 @@ MAX_AREA_JUMP = 0.35  # fractional area change vs the previous lock allowed in o
 LOCK_PASSES = 3  # lock-frame refinement passes (band-median rule) ...
 LOCK_SETTLE = 0.01  # ... until the area changes less than this between passes
 _HOT_PCT, _COLD_PCT = 99.0, 20.0  # core of the sample; drawn-outline surroundings
-
-DEFAULT_RINGS_PX: tuple[int, ...] = (5, 10, 25)
-SENSITIVITY_RANGE = (0.3, 0.7)
-
-
-@dataclass(frozen=True)
-class SmartRoiSpec:
-    id: int
-    name: str | None
-    search: tuple[tuple[int, int], ...]
-    rings_px: tuple[int, ...] = DEFAULT_RINGS_PX
-    rule: Literal["relative", "fixed"] = "relative"
-    fixed_c: float | None = None
-    sensitivity: float = 0.5
-    ring_emissivity: float | None = None
-
-
-def _int(v: Any, name: str) -> int:
-    if isinstance(v, bool) or not isinstance(v, int | float) or not float(v).is_integer():
-        raise ValueError(f"{name} must be an integer")
-    return int(v)
-
-
-def _number(v: Any, name: str) -> float:
-    if isinstance(v, bool) or not isinstance(v, int | float):
-        raise ValueError(f"{name} must be a number")
-    return float(v)
-
-
-def parse_smart_roi(raw: dict[str, Any]) -> SmartRoiSpec:
-    """Validate a ``kind:"smart"`` ROI object; raises ``ValueError`` on bad input."""
-    pts = raw.get("search")
-    if not isinstance(pts, list) or len(pts) < 3:
-        raise ValueError("smart ROI search area needs at least 3 points")
-    search: list[tuple[int, int]] = []
-    for p in pts:
-        if not isinstance(p, list | tuple) or len(p) != 2:
-            raise ValueError("smart ROI search points must be [x, y] pairs")
-        search.append((_int(p[0], "x"), _int(p[1], "y")))
-
-    rings_raw = raw.get("rings_px", DEFAULT_RINGS_PX)
-    if not isinstance(rings_raw, list | tuple) or not rings_raw:
-        raise ValueError("rings_px must be a non-empty list")
-    rings = tuple(_int(r, "ring offset") for r in rings_raw)
-    if rings[0] < 1 or any(b <= a for a, b in zip(rings, rings[1:], strict=False)):
-        raise ValueError("rings_px must be positive and strictly increasing")
-
-    rule = raw.get("rule", "relative")
-    if rule not in ("relative", "fixed"):
-        raise ValueError("rule must be 'relative' or 'fixed'")
-    fixed_raw = raw.get("fixed_c")
-    fixed_c = None if fixed_raw is None else _number(fixed_raw, "fixed_c")
-    if rule == "fixed" and fixed_c is None:
-        raise ValueError("rule 'fixed' needs fixed_c")
-
-    sensitivity = _number(raw.get("sensitivity", 0.5), "sensitivity")
-    lo, hi = SENSITIVITY_RANGE
-    if not lo <= sensitivity <= hi:
-        raise ValueError(f"sensitivity must be between {lo} and {hi}")
-
-    eps_raw = raw.get("ring_emissivity")
-    ring_emissivity = None if eps_raw is None else _number(eps_raw, "ring_emissivity")
-    if ring_emissivity is not None and not 0.01 <= ring_emissivity <= 1.0:
-        raise ValueError("ring_emissivity must be a number between 0.01 and 1")
-
-    name = raw.get("name")
-    if name is not None and not isinstance(name, str):
-        raise ValueError("name must be a string")
-    return SmartRoiSpec(
-        id=_int(raw.get("id"), "id"),
-        name=name,
-        search=tuple(search),
-        rings_px=rings,
-        rule=rule,
-        fixed_c=fixed_c,
-        sensitivity=sensitivity,
-        ring_emissivity=ring_emissivity,
-    )
-
 
 # --- detector / tracker -------------------------------------------------------------------------
 
@@ -491,3 +420,15 @@ class SmartTracker:
             edge_level_c=level,
             over_range=over,
         )
+
+
+__all__ = [
+    "DEFAULT_RINGS_PX",
+    "HOLD_S",
+    "SEARCH_MARGIN_PX",
+    "SENSITIVITY_RANGE",
+    "SmartResult",
+    "SmartRoiSpec",
+    "SmartTracker",
+    "parse_smart_roi",
+]
