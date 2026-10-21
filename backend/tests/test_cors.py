@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import numpy as np
@@ -120,3 +121,12 @@ def test_site_can_read_the_visible_range_header(
     assert r.headers["x-visible-range"] == "raw-untagged"
     exposed = [h.strip().lower() for h in r.headers["access-control-expose-headers"].split(",")]
     assert "x-visible-range" in exposed
+
+
+def test_api_version_is_1_1_and_in_step_with_the_ui() -> None:
+    """The handshake versions move together: a 1.0 operator then warns a 1.1 UI (minor)."""
+    ui = Path(__file__).resolve().parents[2] / "frontend" / "src" / "lib" / "operator.ts"
+    match = re.search(r'export const UI_API_VERSION = "([^"]+)"', ui.read_text(encoding="utf-8"))
+    assert match is not None
+    assert API_VERSION == "1.1"
+    assert match.group(1) == API_VERSION

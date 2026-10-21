@@ -5,7 +5,7 @@ import { streamMjpeg } from "../lib/mjpeg.ts";
 import { DEFAULT_OVERLAY, VISIBLE_MODES, type LayoutAction, type Overlay, type VisibleMode } from "../lib/layout.ts";
 import { visibleSegmentAt, type VisibleInfo } from "../lib/visibleSegments.ts";
 import { NEUTRAL_ADJUST, isNeutral, type VisibleAdjust } from "../lib/visibleAdjust.ts";
-import { sourceNote } from "../lib/visibleAdjustUi.ts";
+import { RAW_RANGE_NOTE, sourceNote } from "../lib/visibleAdjustUi.ts";
 import { Slider, VisibleAdjustControls, adjustFilter, type RunAdjust } from "./VisibleAdjustControls.tsx";
 
 /** Live MJPEG view: fetches the stream itself so unmounting aborts it (the operator's transcode ends at once).
@@ -64,12 +64,13 @@ function useMediaBox(box: React.RefObject<HTMLElement | null>, media: React.RefO
   return b;
 }
 
-interface VideoProps { name: string; t: number; playing: boolean; speed: number; vis?: VisibleInfo | null; measuredFps?: number | null; big?: boolean; plain?: boolean; topLayer?: ReactNode; flipH?: boolean; flipV?: boolean; adjust?: VisibleAdjust; }
+/** `rangeNote`: shown as a tag on the video when its range is not confirmed full (rangeNote()). */
+interface VideoProps { name: string; t: number; playing: boolean; speed: number; vis?: VisibleInfo | null; measuredFps?: number | null; big?: boolean; plain?: boolean; topLayer?: ReactNode; flipH?: boolean; flipV?: boolean; adjust?: VisibleAdjust; rangeNote?: string | null; }
 
 /** Recorded visible video kept in step with the thermal cursor (host-clock alignment, not frame-exact).
  *  A stream loss splits the recording into segments (visible.mp4, visible_001.mp4, …); the cursor
  *  picks the segment and time inside a gap shows nothing. */
-export function VisibleVideo({ name, t, playing, speed, vis, measuredFps, big = false, plain = false, topLayer, flipH = false, flipV = false, adjust }: VideoProps) {
+export function VisibleVideo({ name, t, playing, speed, vis, measuredFps, big = false, plain = false, topLayer, flipH = false, flipV = false, adjust, rangeNote }: VideoProps) {
   const f = adjustFilter(adjust);
   const flip = { ...(flipH || flipV ? { transform: `scale(${flipH ? -1 : 1}, ${flipV ? -1 : 1})` } : {}), ...f.style };
   const video = useRef<HTMLVideoElement>(null);
@@ -102,6 +103,7 @@ export function VisibleVideo({ name, t, playing, speed, vis, measuredFps, big = 
       {f.svg}
       <video key={index} ref={video} src={src} muted playsInline preload="auto" style={hidden} />
       <span className="tag">{local === null ? "visible stream lost here (gap)" : `recorded visible${nSeg > 1 ? ` · segment ${index + 1}/${nSeg}` : ""}${measuredFps ? ` · ${measuredFps.toFixed(1)} fps` : ""} · host-clock aligned`}</span>
+      {rangeNote && <span className="range-tag" role="status">{rangeNote}</span>}
       {topLayer && layerBox && <div className="top-layer" style={layerBox}>{topLayer}</div>}
     </div>
   );
@@ -177,8 +179,8 @@ export function VisiblePanel(p: PanelProps) {
       <VisibleAdjustControls value={p.adjust.adjust} onChange={p.adjust.set} onReset={p.adjust.reset} resetLabel="reset to as-recorded"
         resetDisabled={p.adjust.source !== "sidecar"}
         notes={<span className="hint">{p.adjust.save.state === "saving" ? "saving…" : p.adjust.save.state === "error" ? <span style={{ color: "var(--err)" }}>not saved: {p.adjust.save.error}</span> : sourceNote(p.adjust.source)}</span>} />
-      {p.rangeNote && <div className="warnbox">{p.rangeNote}: near-white detail above level 235 shows as white.</div>}
-      {mode === "rail" && <VisibleVideo name={p.name} t={p.t} playing={p.playing} speed={p.speed} vis={p.vis} measuredFps={p.measuredFps} adjust={p.adjust.adjust} />}
+      {p.rangeNote && <div className="warnbox">{p.rangeNote}: near-white detail above level 235 {p.rangeNote === RAW_RANGE_NOTE ? "shows" : "may show"} as white.</div>}
+      {mode === "rail" && <VisibleVideo name={p.name} t={p.t} playing={p.playing} speed={p.speed} vis={p.vis} measuredFps={p.measuredFps} adjust={p.adjust.adjust} rangeNote={p.rangeNote} />}
     </>
   );
 }

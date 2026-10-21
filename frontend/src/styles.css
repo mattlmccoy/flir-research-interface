@@ -249,6 +249,9 @@ ul.help li { line-height: 1.35; }
 .visible-box { position: relative; }
 .visible-box img, .visible-box video { width: 100%; display: block; background: var(--image-bg); border: 1px solid var(--line); }
 .visible-box .tag { position: absolute; left: 8px; top: 8px; background: var(--scrim); color: var(--accent); padding: 2px 6px; font-family: var(--font-mono); font-size: 11px; }
+/* The range note on a visible view (rangeNote()): bottom-left of the video; over the IR view it sits top-centre. */
+.range-tag { position: absolute; left: 8px; bottom: 8px; z-index: 3; background: var(--scrim); color: var(--warn); border: 1px solid var(--warn); padding: 1px 6px; font-family: var(--font-mono); font-size: 11px; pointer-events: none; }
+.range-tag.overlay-note { left: 50%; bottom: auto; top: 8px; transform: translateX(-50%); white-space: nowrap; }
 .visible-box.big { min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; background: var(--image-bg); overflow: hidden; }
 .visible-box.big img, .visible-box.big video { width: auto; height: auto; max-width: 100%; max-height: 100%; border: none; object-fit: contain; }
 /* centre cell: thermal alone, or thermal | visible side by side */

@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { NEUTRAL_ADJUST, adjustLinear, type VisibleAdjust } from "./visibleAdjust.ts";
 import { DEFAULT_LAYOUT, layoutReducer, loadLayout, saveLayout } from "./layout.ts";
 import {
+  cachedRangeProbe,
+  effectiveRange,
   filterTableValues,
   parseRangeHeader,
   rangeNote,
@@ -54,11 +56,45 @@ test("svgFilterId is a plain id, the same for the same map and different for a d
   assert.notEqual(svgFilterId({ ...LOOK, exposure_ev: 1.2 }), id);
 });
 
-test("rangeNote warns only when the video is shown without range correction", () => {
-  assert.equal(rangeNote("raw-untagged"), "visible video shown without range correction");
+test("rangeNote has three states: full is quiet, raw-untagged warns, unknown is not confirmed", () => {
   assert.equal(rangeNote("full"), null);
-  assert.equal(rangeNote(null), null);
-  assert.equal(rangeNote(undefined), null);
+  assert.equal(rangeNote("raw-untagged"), "visible video shown without range correction");
+  assert.equal(rangeNote(null), "range correction not confirmed");
+  assert.equal(rangeNote(undefined), "range correction not confirmed");
+});
+
+test("effectiveRange: the header decides; the prediction counts only while the probe is pending", () => {
+  assert.equal(effectiveRange(undefined, "full"), "full"); // pending: the info's prediction
+  assert.equal(effectiveRange(undefined, null), null); // pending, no prediction: unknown
+  assert.equal(effectiveRange(undefined, undefined), null);
+  assert.equal(effectiveRange({ range: "raw-untagged" }, "full"), "raw-untagged");
+  assert.equal(effectiveRange({ range: "full" }, "raw-untagged"), "full");
+  assert.equal(effectiveRange({ range: null }, "full"), null); // probe failed / no header: unknown, never healthy
+});
+
+test("cachedRangeProbe keeps a successful header read and retries after a failure", async () => {
+  const cache = new Map<string, Promise<"full" | "raw-untagged" | null>>();
+  let calls = 0;
+  const ok = async () => { calls += 1; return "full"; };
+  assert.equal(await cachedRangeProbe(cache, "/a", ok), "full");
+  assert.equal(await cachedRangeProbe(cache, "/a", ok), "full");
+  assert.equal(calls, 1);
+
+  calls = 0;
+  const noHeader = async () => { calls += 1; return null; };
+  assert.equal(await cachedRangeProbe(cache, "/b", noHeader), null);
+  assert.equal(cache.has("/b"), false);
+  assert.equal(await cachedRangeProbe(cache, "/b", noHeader), null);
+  assert.equal(calls, 2);
+
+  calls = 0;
+  const throws = async (): Promise<string | null> => { calls += 1; throw new Error("network"); };
+  assert.equal(await cachedRangeProbe(cache, "/c", throws), null);
+  assert.equal(cache.has("/c"), false);
+  assert.equal(calls, 1);
+  assert.equal(await cachedRangeProbe(cache, "/c", ok), "full"); // the retry reads the header
+  assert.equal(calls, 2);
+  assert.equal(cache.has("/c"), true);
 });
 
 test("parseRangeHeader accepts only the two values the operator sends", () => {

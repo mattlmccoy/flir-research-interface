@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { apiUrl, checkHandshake, loadOperatorBase, saveOperatorBase, wsUrl, normalizeBase } from "./operator.ts";
+import { UI_API_VERSION, apiUrl, checkHandshake, loadOperatorBase, saveOperatorBase, wsUrl, normalizeBase } from "./operator.ts";
 
 function storage(init: Record<string, string> = {}): Storage {
   const m = new Map(Object.entries(init));
@@ -37,4 +37,10 @@ test("checkHandshake: major mismatch refuses, minor mismatch warns, same is ok",
   assert.deepEqual(checkHandshake("1.0", "1.2"), { level: "warn", message: "operator API 1.2 differs from UI 1.0 (minor); some features may be missing" });
   assert.equal(checkHandshake("1.0", "2.0").level, "refuse");
   assert.equal(checkHandshake("1.0", undefined).level, "refuse");
+});
+
+test("UI API version is 1.1; a 1.0 operator gets the minor warning", () => {
+  assert.equal(UI_API_VERSION, "1.1");
+  assert.deepEqual(checkHandshake(UI_API_VERSION, "1.0"), { level: "warn", message: "operator API 1.0 differs from UI 1.1 (minor); some features may be missing" });
+  assert.deepEqual(checkHandshake(UI_API_VERSION, "1.1"), { level: "ok" });
 });

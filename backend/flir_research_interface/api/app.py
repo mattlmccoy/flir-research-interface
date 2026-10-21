@@ -46,7 +46,7 @@ from flir_research_interface.visible import full_range
 
 logger = logging.getLogger(__name__)
 
-API_VERSION = "1.0"
+API_VERSION = "1.1"
 """Handshake version for the site UI (spec §6.3): major mismatch = refuse, minor = banner."""
 LOCAL_ORIGIN_RE = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
 CLIENT_HEADER = "x-fri-client"

@@ -261,7 +261,7 @@ export function PlaybackPage(p: Props) {
   const playVis = info ? visibleForPlayback(info) : null; // segments on the thermal clock
   const recordedH = info?.visible_alignment ? parseAlignment(info.visible_alignment).H : null;
   // Visible adjustment (sidecar, else recorded, else neutral) and whether the segment on screen is
-  // range-corrected: the route's X-Visible-Range header, asked once per segment URL.
+  // range-corrected: the route's X-Visible-Range header (a good read is kept per segment URL).
   const vAdjust = useRunVisibleAdjust(p.name, info);
   const segRef = useRef({ name: p.name, index: 0 }); // last segment shown (kept through a stream gap)
   if (segRef.current.name !== p.name) segRef.current = { name: p.name, index: 0 };
@@ -269,7 +269,8 @@ export function PlaybackPage(p: Props) {
   if (seg) segRef.current.index = seg.index;
   const segIdx = segRef.current.index;
   const segUrl = hasVideo && info?.name === p.name ? (segIdx === 0 ? api.visibleVideoUrl(p.name) : api.visibleSegmentUrl(p.name, segIdx)) : null;
-  const vRangeNote = rangeNote(useVisibleRange(segUrl, info?.visible_range));
+  const vRange = useVisibleRange(segUrl, info?.visible_range);
+  const vRangeNote = segUrl ? rangeNote(vRange) : null; // unknown range is "not confirmed", never quiet
   const overlayH = recordedH ?? loadAlignment(typeof localStorage !== "undefined" ? localStorage : null).H;
   const traces = seriesTraces(series, p.rois);
   // Secondary (right) axis, frame-aligned to the temperature trace: RF forward power (W) or the AIT
@@ -377,7 +378,8 @@ export function PlaybackPage(p: Props) {
           <ThermalView frame={frame} palette={p.palette} scaleMode={p.scaleMode} manual={p.manual} onScale={setShown} setManual={p.setManual} setScaleMode={p.setScaleMode}
             rois={p.maskMode ? maskRois : p.rois.rois} statsRois={p.rois.rois} selected={p.maskMode ? p.masks.selected : p.rois.selected} selectedIds={p.maskMode ? p.masks.selectedIds : p.rois.selectedIds} tool={p.layout.tool} roisHidden={!p.maskMode && p.layout.roisHidden} labelScope={p.maskMode ? `exp.${p.name}.mask` : `exp.${p.name}`} zoom={p.layout.zoom} onRoi={p.maskMode ? maskEdit : p.roiDispatch} onStats={onStats} rad={rad} extremes={p.layout.extremes} isotherm={p.layout.isotherm} onField={setField} reference={reference} hold={p.layout.hold} flipH={p.layout.flipH} flipV={p.layout.flipV} agc={p.layout.agc} filter={p.layout.filter} units={p.layout.units} useDisplay={p.layout.rfNotch} valid={p.layout.segment.on ? { min: p.layout.segment.min, max: p.layout.segment.max } : null} mask={maskPx} maskShapes={p.masks.enabled || p.maskMode ? p.masks.shapes : []} maskMode={p.maskMode} onMask={p.maskDispatch}
             overlay={p.layout.visibleMode === "overlay" && hasVideo ? <VisibleVideo plain name={p.name} t={t} playing={playing} speed={speed} vis={playVis} adjust={vAdjust.adjust} /> : undefined} overlayStyle={p.layout.overlay} overlayH={overlayH} />
-          {p.layout.visibleMode === "side" && hasVideo && <VisibleVideo big flipH={p.layout.flipH} flipV={p.layout.flipV} name={p.name} t={t} playing={playing} speed={speed} vis={playVis} measuredFps={info?.visible?.measured_fps} adjust={vAdjust.adjust} />}
+          {p.layout.visibleMode === "overlay" && hasVideo && vRangeNote && <span className="range-tag overlay-note" role="status">visible overlay: {vRangeNote}</span>}
+          {p.layout.visibleMode === "side" && hasVideo && <VisibleVideo big flipH={p.layout.flipH} flipV={p.layout.flipV} name={p.name} t={t} playing={playing} speed={speed} vis={playVis} measuredFps={info?.visible?.measured_fps} adjust={vAdjust.adjust} rangeNote={vRangeNote} />}
         </div>
       }
       dock={

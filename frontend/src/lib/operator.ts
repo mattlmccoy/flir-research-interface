@@ -5,7 +5,7 @@
  * http://localhost:8000 by default, overridable and persisted in localStorage.
  */
 
-export const UI_API_VERSION = "1.0";
+export const UI_API_VERSION = "1.1";
 export const DEFAULT_SITE_BASE = "http://localhost:8000";
 const KEY = "fri.operator.v1";
 

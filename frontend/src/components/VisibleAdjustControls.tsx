@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { api, type ExperimentInfo } from "../lib/api.ts";
 import { ADJUST_LIMITS, NEUTRAL_ADJUST, clampAdjust, isNeutral, type VisibleAdjust } from "../lib/visibleAdjust.ts";
-import { filterTableValues, parseRangeHeader, recordedAdjust, svgFilterId, type AdjustSource, type VisibleRange } from "../lib/visibleAdjustUi.ts";
+import { cachedRangeProbe, effectiveRange, filterTableValues, recordedAdjust, svgFilterId, type AdjustSource, type VisibleRange } from "../lib/visibleAdjustUi.ts";
 
 /** One labelled range slider in a `.kv` grid (shared by the overlay registration and the adjustment). */
 export function Slider({ label, value, min, max, step, unit, digits, signed = false, title, onChange }: { label: string; value: number; min: number; max: number; step: number; unit?: string; digits?: number; signed?: boolean; title?: string; onChange: (v: number) => void }) {
@@ -131,21 +131,17 @@ export function useRunVisibleAdjust(name: string, info: ExperimentInfo | null): 
 
 const rangeCache = new Map<string, Promise<VisibleRange | null>>();
 
-/** What the visible video route actually serves for `url` (its X-Visible-Range header, asked once
- *  per URL); `fallback` (the info's prediction) only while unknown or when the header is unreadable. */
+/** What the visible video route actually serves for `url` (its X-Visible-Range header; a good read
+ *  is shared per URL, a failed one is asked again on the next mount or URL). `fallback` (the info's
+ *  prediction) counts only while the probe is pending; a failed probe or a missing header is null
+ *  (unknown), never the prediction. */
 export function useVisibleRange(url: string | null, fallback: VisibleRange | null | undefined): VisibleRange | null {
   const [got, setGot] = useState<{ url: string; range: VisibleRange | null } | null>(null);
   useEffect(() => {
     if (!url) return;
     let live = true;
-    let p = rangeCache.get(url);
-    if (!p) {
-      p = api.visibleRangeHeader(url).then(parseRangeHeader, () => null);
-      rangeCache.set(url, p);
-    }
-    void p.then((range) => { if (live) setGot({ url, range }); });
+    void cachedRangeProbe(rangeCache, url, api.visibleRangeHeader).then((range) => { if (live) setGot({ url, range }); });
     return () => { live = false; };
   }, [url]);
-  const header = got && got.url === url ? got.range : null;
-  return header ?? fallback ?? null;
+  return effectiveRange(got && got.url === url ? { range: got.range } : undefined, fallback);
 }

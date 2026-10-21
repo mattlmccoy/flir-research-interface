@@ -40,9 +40,42 @@ export function recordStamp(
   return { ...values, preset: same ? lastApplied.name : null, based_on: same ? null : lastApplied.name };
 }
 
-/** The warning shown when the visible video plays without the full-range correction; null otherwise. */
-export function rangeNote(visibleRange: string | null | undefined): string | null {
-  return visibleRange === "raw-untagged" ? "visible video shown without range correction" : null;
+/** The note when the served video is known to lack the full-range correction. */
+export const RAW_RANGE_NOTE = "visible video shown without range correction";
+/** The note when nothing confirms the correction (no header, the probe failed, or no prediction). */
+export const UNCONFIRMED_RANGE_NOTE = "range correction not confirmed";
+
+/** The note for the shown visible video: none when it is full range, else what is wrong or unknown.
+ *  Unknown (null / undefined) never reads as healthy. */
+export function rangeNote(visibleRange: VisibleRange | null | undefined): string | null {
+  if (visibleRange === "full") return null;
+  return visibleRange === "raw-untagged" ? RAW_RANGE_NOTE : UNCONFIRMED_RANGE_NOTE;
+}
+
+/** The range to show: the header probe's answer once it is in (`probe`, null range = failed or no
+ *  header), and the info's prediction (`fallback`) only while the probe is pending (`undefined`). */
+export function effectiveRange(
+  probe: { range: VisibleRange | null } | undefined,
+  fallback: VisibleRange | null | undefined,
+): VisibleRange | null {
+  return probe ? probe.range : (fallback ?? null);
+}
+
+/** The X-Visible-Range of `url` via `read`, sharing one read per URL in `cache`; a read that fails
+ *  or carries no valid header is dropped from the cache, so the next mount or run asks again. */
+export function cachedRangeProbe(
+  cache: Map<string, Promise<VisibleRange | null>>,
+  url: string,
+  read: (url: string) => Promise<string | null>,
+): Promise<VisibleRange | null> {
+  const hit = cache.get(url);
+  if (hit) return hit;
+  const p = read(url).then(parseRangeHeader, () => null).then((range) => {
+    if (range === null && cache.get(url) === p) cache.delete(url);
+    return range;
+  });
+  cache.set(url, p);
+  return p;
 }
 
 /** The `X-Visible-Range` header value, or null when absent or not one the operator sends. */
