@@ -65,7 +65,6 @@ def test_apply_keeps_shape_and_dtype() -> None:
         out = apply_adjust(u8, a)
         assert out.shape == shape
         assert out.dtype == np.uint8
-        assert u8.dtype == np.uint8  # input untouched
 
 
 def test_apply_does_not_modify_its_input() -> None:
@@ -128,6 +127,8 @@ def test_validate_accepts_both_limits_of_every_control() -> None:
         {"exposure_ev": 0.0, "brightness": 0.0, "contrast": 4.0001},
         {"exposure_ev": float("nan"), "brightness": 0.0, "contrast": 1.0},
         {"exposure_ev": float("inf"), "brightness": 0.0, "contrast": 1.0},
+        {"exposure_ev": 10**400, "brightness": 0.0, "contrast": 1.0},
+        {"exposure_ev": -(10**400), "brightness": 0.0, "contrast": 1.0},
         {"exposure_ev": True, "brightness": 0.0, "contrast": 1.0},
         {"exposure_ev": 0.0, "brightness": False, "contrast": 1.0},
         {"exposure_ev": 0.0, "brightness": 0.0, "contrast": True},

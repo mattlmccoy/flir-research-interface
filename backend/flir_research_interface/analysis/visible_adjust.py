@@ -54,7 +54,9 @@ def validate_adjust(raw: Any) -> dict[str, float]:
 
     ``raw`` must be a mapping with ``exposure_ev``, ``brightness`` and ``contrast``, each a real
     number (not a bool) inside :data:`LIMITS`. Other keys, such as ``preset`` and ``based_on`` in a
-    recording request, are ignored and not returned.
+    recording request, are ignored and not returned. Run values through this before
+    :func:`adjust_linear` or :func:`apply_adjust`: NaN and infinity are rejected here, and
+    unvalidated they behave differently in Python and TypeScript.
 
     Raises:
         ValueError: ``raw`` is not a mapping, a control is missing, is not a real number, is a
@@ -69,7 +71,12 @@ def validate_adjust(raw: Any) -> dict[str, float]:
         value = raw[key]
         if isinstance(value, bool) or not isinstance(value, Real):
             raise ValueError(f"{key} must be a number, got {type(value).__name__}")
-        number = float(value)
+        try:
+            number = float(value)
+        except OverflowError:  # an int too large for a float is out of range by definition
+            raise ValueError(
+                f"{key} must be between {low:g} and {high:g}, got an integer too large for a float"
+            ) from None
         if not low <= number <= high:  # also false for NaN
             raise ValueError(f"{key} must be between {low:g} and {high:g}, got {number:g}")
         out[key] = number
@@ -88,6 +95,7 @@ def apply_adjust(u8: npt.NDArray[np.uint8], a: Mapping[str, float]) -> npt.NDArr
 
     Every value goes through the map in the module docstring, rounded half up. The 256 possible
     inputs are mapped once and looked up, so the cost does not depend on the number of pixels.
+    ``a`` must come from :func:`validate_adjust` (NaN/inf are not handled here).
 
     Raises:
         ValueError: ``u8`` is not a uint8 array.
