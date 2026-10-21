@@ -47,7 +47,7 @@ import { EMPTY_MASKS, hasMasks, loadMasks, maskPixels, maskedStats, masksAsRois,
 import { initMaskHistory, maskHistoryReducer, type MaskHistoryAction } from "./lib/maskHistory.ts";
 import type { RoiAction } from "./lib/roi.ts";
 import { SMART_FEED_INTERVAL_MS, useSmartFeed } from "./lib/useSmartFeed.ts";
-import { smartLiveValue } from "./lib/smartFeed.ts";
+import { smartChipFeed, smartLiveValue } from "./lib/smartFeed.ts";
 
 type Page = "live" | "setup" | "experiments" | "playback";
 const storage = (() => {
@@ -399,7 +399,7 @@ export function App() {
         <div className={`center-split ${(layout.visibleMode === "side" || calibrating) && visibleAvailable ? "on" : ""}`}>
           <ThermalView frame={frame} palette={palette} scaleMode={scaleMode} manual={manual} onScale={setShown} setManual={setManual} setScaleMode={setScaleMode}
             rois={maskMode ? maskRois : rois.rois} statsRois={rois.rois} selected={maskMode ? masks.selected : rois.selected} selectedIds={maskMode ? masks.selectedIds : rois.selectedIds} tool={layout.tool} roisHidden={!maskMode && layout.roisHidden} labelScope={maskMode ? `${roiScope}.mask` : roiScope} zoom={layout.zoom} onRoi={maskMode ? maskEdit : roiDispatch} onStats={onStats} rad={rad} extremes={layout.extremes} isotherm={layout.isotherm} onField={setField} reference={reference} hold={layout.hold} flipH={layout.flipH} flipV={layout.flipV} agc={layout.agc} filter={layout.filter} units={layout.units} useDisplay={layout.rfNotch} valid={layout.segment.on ? { min: layout.segment.min, max: layout.segment.max } : null} mask={maskPx} maskShapes={masks.enabled || maskMode ? masks.shapes : []} maskMode={maskMode} onMask={maskDispatch}
-            overlay={layout.visibleMode === "overlay" && !calibrating && visibleAvailable ? <VisibleLive plain /> : undefined} overlayStyle={layout.overlay} overlayH={align.H} smartFeed={smartFeed?.entries}
+            overlay={layout.visibleMode === "overlay" && !calibrating && visibleAvailable ? <VisibleLive plain /> : undefined} overlayStyle={layout.overlay} overlayH={align.H} smartFeed={smartChipFeed(smartFeed, Date.now(), SMART_FEED_INTERVAL_MS)}
             topLayer={calibrating ? <PickLayer label="IR" flipH={layout.flipH} flipV={layout.flipV} color="var(--live)" points={align.pairs.map((p) => p.ir)} pending={align.pending?.ir} onPick={(p) => alignDispatch({ type: "pick", side: "ir", p })} /> : undefined} />
           {(layout.visibleMode === "side" || calibrating) && visibleAvailable && (
             <VisibleLive big flipH={layout.flipH} flipV={layout.flipV} topLayer={calibrating ? <PickLayer label="visible" flipH={layout.flipH} flipV={layout.flipV} color="var(--accent)" points={align.pairs.map((p) => p.visible)} pending={align.pending?.visible} onPick={(p) => alignDispatch({ type: "pick", side: "visible", p })} /> : undefined} />

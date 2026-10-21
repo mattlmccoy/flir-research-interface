@@ -69,3 +69,13 @@ test("smartLiveValue: the live plot point is the operator's mean, NaN (a gap) wh
     ["no feed", smartLiveValue(null, 3, 0, 500)],
   ] as const) assert.ok(Number.isNaN(v), why);
 });
+
+test("smartChipFeed: the on-image chips get the feed's entries only while it is fresh and live", async () => {
+  const { smartChipFeed } = await import("./smartFeed.ts");
+  const f = smartFeedFrom(payload(), 10_000);
+  assert.equal(smartChipFeed(f, 10_500, 500)?.get(3)?.sample.mean_c, 507.3);
+  assert.equal(smartChipFeed(f, 11_001, 500), undefined, "hung poll: chips must not keep the last numbers");
+  assert.equal(smartChipFeed(smartFeedFrom(payload({}, false), 10_000), 10_000, 500), undefined, "not live");
+  assert.equal(smartChipFeed({ ok: false, at: 10_000, live: true, entries: f.entries }, 10_000, 500), undefined, "failed poll");
+  assert.equal(smartChipFeed(null, 10_000, 500), undefined);
+});

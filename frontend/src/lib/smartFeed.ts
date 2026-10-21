@@ -16,6 +16,12 @@ export function feedFresh(feed: SmartFeed | null, now: number, intervalMs: numbe
   return !!feed && feed.ok && now - feed.at <= 2 * intervalMs;
 }
 
+/** The entries the on-image chips may take numbers from: only a fresh feed from a live operator
+ *  (otherwise undefined, so a hung poll or a stopped camera never leaves old numbers on the image). */
+export function smartChipFeed(feed: SmartFeed | null, now: number, intervalMs: number): Map<number, SmartReadoutEntry> | undefined {
+  return feed && feedFresh(feed, now, intervalMs) && feed.live ? feed.entries : undefined;
+}
+
 export type SmartTone = "locked" | "holding" | "searching" | "invalid" | "none";
 export interface SmartRowView {
   lines: string[];
