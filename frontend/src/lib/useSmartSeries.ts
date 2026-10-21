@@ -2,11 +2,10 @@
 // a ROI that has none or a stale one (POST …/compute, poll …/status). Pure logic: smartSeries.ts.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api.ts";
-import { isNotFound, parseSmartSeries, type SmartJob, type SmartSeriesState } from "./smartSeries.ts";
+import { SMART_POLL_MS, isNotFound, parseSmartSeries, smartPollStep, type SmartJob, type SmartPollEvent, type SmartPollState, type SmartSeriesState } from "./smartSeries.ts";
 
 /** Points per stored series fetched for the plot and the playhead readout (the API strides down). */
 export const SMART_SERIES_POINTS = 4000;
-const POLL_MS = 700;
 
 export interface SmartSeriesHook {
   states: Map<number, SmartSeriesState>;
@@ -40,26 +39,30 @@ export function useSmartSeries(name: string, ids: number[], beforeCompute: (id: 
       .then((st) => { if (gen.current === g) setState(id, st); return st; });
   }, [name]);
 
-  const poll = useCallback(async (id: number, g: number): Promise<void> => {
-    if (polling.current.has(id)) return;
-    polling.current.add(id);
+  const poll = useCallback(async (id: number, g: number, start: SmartJob | null): Promise<void> => {
+    const active = polling.current;  // this run's set (replaced when the run changes)
+    if (active.has(id)) return;
+    active.add(id);
     try {
+      let ps: SmartPollState = { job: start, failures: 0 };
+      let delay = SMART_POLL_MS;
       for (;;) {
-        await new Promise((r) => setTimeout(r, POLL_MS));
+        await new Promise((r) => setTimeout(r, delay));
         if (gen.current !== g) return;
-        const jb = await api.smartStatus(name, id);
+        const ev: SmartPollEvent = await api.smartStatus(name, id)
+          .then((job): SmartPollEvent => ({ ok: true, job }), (e: unknown): SmartPollEvent => ({ ok: false, error: String(e) }));
         if (gen.current !== g) return;
-        setJob(id, jb);
-        if (jb.state === "running") continue;
-        if (jb.state === "done") { await load(id, g); setVersion((v) => v + 1); }
-        return;
+        const step = smartPollStep(ps, ev);
+        ps = step.next;
+        if (ps.job) setJob(id, ps.job);
+        if (step.action === "reload") { await load(id, g); setVersion((v) => v + 1); }
+        if (step.action !== "continue") return;
+        delay = step.delayMs;
       }
-    } catch (e) {
-      if (gen.current === g) onError(`smart ROI ${id} progress: ${String(e)}`);
     } finally {
-      polling.current.delete(id);
+      active.delete(id);
     }
-  }, [name, load, onError]);
+  }, [name, load]);
 
   useEffect(() => {
     const g = ++gen.current;
@@ -72,7 +75,7 @@ export function useSmartSeries(name: string, ids: number[], beforeCompute: (id: 
         api.smartStatus(name, id).then((jb) => {
           if (gen.current !== g) return;
           setJob(id, jb);
-          if (jb.state === "running") void poll(id, g);
+          if (jb.state === "running") void poll(id, g, jb);
         }).catch(() => undefined);
       });
     }
@@ -84,8 +87,9 @@ export function useSmartSeries(name: string, ids: number[], beforeCompute: (id: 
     void (async () => {
       try {
         if (!(await beforeCompute(id)) || gen.current !== g) return;
-        setJob(id, await api.smartCompute(name, id));
-        void poll(id, g);
+        const jb = await api.smartCompute(name, id);
+        setJob(id, jb);
+        void poll(id, g, jb);
       } catch (e) {
         if (gen.current === g) onError(`smart ROI ${id} compute: ${String(e)}`);
       }

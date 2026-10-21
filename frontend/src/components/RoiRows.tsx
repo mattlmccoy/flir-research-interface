@@ -32,7 +32,16 @@ function SmartValue({ id, feed, played, units, conv }: { id: number; feed: Smart
   if (feed === undefined && !played) return <span className="vals">…</span>;
   const v = played ? played.view : smartRowView(feed ?? null, id, Date.now(), SMART_FEED_INTERVAL_MS);
   if (v.mean === null) return <span className={`vals smart-val tone-${v.tone}`}>{v.marker ?? "n/a"}</span>;
-  return <span className={`vals smart-val tone-${v.tone}`} title={v.marker ? "holding the last good outline (edge lost this frame)" : undefined}>{v.marker ? `${v.marker} · ` : ""}{fmtTemp(v.mean, units, conv)}</span>;
+  return <span className={`vals smart-val tone-${v.tone}`} title={v.marker ? smartMarkerTip(v.marker) : undefined}>{v.marker ? `${v.marker} · ` : ""}{fmtTemp(v.mean, units, conv)}</span>;
+}
+
+/** Hover text for the value column's marker(s). */
+function smartMarkerTip(marker: string): string {
+  const tips: string[] = [];
+  if (marker.includes("stale")) tips.push("stale: the ROI or recording changed since this series was computed; recompute it");
+  if (marker.includes("≈")) tips.push("≈ nearest stored point: the plot series is downsampled");
+  if (marker.includes("holding")) tips.push("holding the last good outline (edge lost this frame)");
+  return tips.join(" · ");
 }
 
 /** Second line of a smart row: the operator's readout (state, sample, rings, thermal-edge size). */

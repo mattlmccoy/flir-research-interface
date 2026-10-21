@@ -3,7 +3,7 @@
 // built from it. Pure: fetching and polling live in components/useSmartSeries.ts.
 import { smartReadoutLines, type SmartReadoutEntry, type SmartState } from "./smartReadout.ts";
 import type { SmartRowView } from "./smartFeed.ts";
-import { SMART_DEFAULT_RINGS, SMART_DEFAULT_SENSITIVITY, type Smart } from "./roi.ts";
+import { smartTracking, type Smart } from "./roi.ts";
 
 type Col = (number | null)[];
 export interface SmartSeriesRing { inner_px: number; outer_px: number; mean: Col; max: Col; min: Col; }
@@ -105,19 +105,33 @@ export function smartRowAt(s: SmartSeries, frame: number): { frame: number; exac
 
 const none = (line: string): SmartRowView => ({ lines: [line], tone: "none", mean: null, marker: null });
 
-/** Playback rail readout for one smart ROI at frame `frame`, from its stored series. */
-export function smartPlaybackRow(st: SmartSeriesState, frame: number): SmartRowView {
+/** Context for the playhead readout: `edited` = the on-screen ROI's tracking settings differ from
+ *  the stored ones the series was computed from; `overlay` = the stored per-frame state at exactly
+ *  this frame (from the overlay endpoint), when loaded. */
+export interface SmartPlaybackCtx { edited?: boolean; overlay?: { state: SmartState; valid: boolean } | null; }
+
+/** Playback rail readout for one smart ROI at frame `frame`, from its stored series. A stale or
+ *  edited series and a downsampled (nearest-point) value are marked and never get the locked tone;
+ *  the exact frame's overlay state, when known, gates the number. */
+export function smartPlaybackRow(st: SmartSeriesState, frame: number, ctx: SmartPlaybackCtx = {}): SmartRowView {
   if (st.kind === "loading") return none("loading the stored smart ROI series…");
   if (st.kind === "missing") return none("not computed for this run yet: compute it to see its values");
   if (st.kind === "error") return none(`couldn’t load the stored series: ${st.message}`);
   const r = smartRowAt(st.series, frame);
   if (!r) return none("no stored reading at this frame");
-  const e = r.entry;
+  const ov = ctx.overlay;
+  const e = ov && (!ov.valid || ov.state === "searching") && r.entry.valid
+    ? { ...r.entry, state: ov.state, valid: false, dims: null }  // this exact frame is not a reading
+    : r.entry;
   const lines = smartReadoutLines(e);
-  if (!r.exact) lines.push(`values at frame ${r.frame + 1} (nearest stored point before frame ${frame + 1}; the plot series is downsampled)`);
+  if (!r.exact && e.valid) lines.push(`≈ values at frame ${r.frame + 1} (nearest stored point before frame ${frame + 1}; the plot series is downsampled)`);
   if (st.series.stale) lines.push("stale: the ROI or recording changed since this series was computed; recompute it");
+  else if (ctx.edited) lines.push("stale: the ROI was edited on screen since this series was computed; recompute it");
   if (!e.valid) return { lines, tone: e.state === "searching" ? "searching" : "invalid", mean: null, marker: e.state === "searching" ? "searching" : "not valid" };
-  return { lines, tone: e.state === "holding" ? "holding" : "locked", mean: e.sample.mean_c, marker: e.state === "holding" ? "holding" : null };
+  const stale = st.series.stale || !!ctx.edited;
+  const marks = [stale ? "stale" : null, r.exact ? null : "≈", e.state === "holding" ? "holding" : null].filter((m): m is string => m !== null);
+  const tone = stale || !r.exact ? "invalid" : e.state === "holding" ? "holding" : "locked";
+  return { lines, tone, mean: e.sample.mean_c, marker: marks.length ? marks.join(" ") : null };
 }
 
 export interface SmartComputeAction { label: string; kind: "compute" | "reload"; disabled: boolean; }
@@ -142,20 +156,39 @@ export function smartJobText(job: SmartJob | null): string | null {
   return null;
 }
 
-/** The tracking settings of a smart ROI (what the backend's stale check compares; not name/colour).
- *  A stored ROI may omit defaulted keys (backend smart_roi.py parse_smart_roi defaults). */
-function trackingKey(r: Record<string, unknown>): string {
-  const search = Array.isArray(r.search) ? r.search.map((p) => (Array.isArray(p) ? [Number(p[0]), Number(p[1])] : p)) : r.search;
-  const rings = Array.isArray(r.rings_px) ? r.rings_px.map(Number) : [...SMART_DEFAULT_RINGS];
-  const rule = r.rule ?? "relative";
-  const sens = r.sensitivity === undefined ? SMART_DEFAULT_SENSITIVITY : Number(r.sensitivity);
-  return JSON.stringify([search, rings, rule, sens, rule === "fixed" ? Number(r.fixed_c) : null, typeof r.ring_emissivity === "number" ? r.ring_emissivity : null]);
-}
-
 /** True when the on-screen smart ROI is not stored with the run, or its tracking settings differ
  *  from the stored one (so a compute must first save the ROIs into the run). */
 export function smartEdited(onScreen: Smart, stored: unknown[] | null | undefined): boolean {
   const s = (Array.isArray(stored) ? stored : []).find((x): x is Record<string, unknown> => isObj(x) && x.id === onScreen.id);
   if (!s || s.kind !== "smart") return true;
-  return trackingKey(s) !== trackingKey(onScreen as unknown as Record<string, unknown>);
+  return JSON.stringify(smartTracking(s)) !== JSON.stringify(smartTracking(onScreen as unknown as Record<string, unknown>));
+}
+
+export const SMART_POLL_MS = 700;
+/** Consecutive failed status polls tolerated before the job is reported lost. */
+export const SMART_POLL_TRIES = 3;
+export interface SmartPollState { job: SmartJob | null; failures: number; }
+export type SmartPollEvent = { ok: true; job: SmartJob } | { ok: false; error: string };
+
+/** One status poll of the compute job: keep polling while running, reload the series when done,
+ *  stop on error/idle. A failed poll is retried with a growing delay; after SMART_POLL_TRIES in a
+ *  row the job becomes an error ("lost contact"), so the UI never sticks at "computing…". */
+export function smartPollStep(prev: SmartPollState, ev: SmartPollEvent): { next: SmartPollState; action: "continue" | "reload" | "stop"; delayMs: number } {
+  if (ev.ok) {
+    const next = { job: ev.job, failures: 0 };
+    if (ev.job.state === "running") return { next, action: "continue", delayMs: SMART_POLL_MS };
+    return { next, action: ev.job.state === "done" ? "reload" : "stop", delayMs: 0 };
+  }
+  const failures = prev.failures + 1;
+  if (failures < SMART_POLL_TRIES) return { next: { job: prev.job, failures }, action: "continue", delayMs: SMART_POLL_MS * 2 ** failures };
+  const job: SmartJob = { state: "error", done: prev.job?.done ?? 0, total: prev.job?.total ?? 0, error: `lost contact with the compute job (${ev.error}); it may still be running on the operator` };
+  return { next: { job, failures }, action: "stop", delayMs: 0 };
+}
+
+/** The run's stored ROI list with only `roi` saved into it (same id replaced, else appended); the
+ *  other stored ROIs are kept exactly as stored. Used before computing an unsaved/edited smart ROI. */
+export function upsertStoredRoi(stored: unknown[] | null | undefined, roi: Smart): unknown[] {
+  const list = Array.isArray(stored) ? stored : [];
+  const at = list.findIndex((x) => isObj(x) && x.id === roi.id);
+  return at < 0 ? [...list, roi] : list.map((x, k) => (k === at ? roi : x));
 }

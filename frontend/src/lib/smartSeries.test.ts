@@ -140,3 +140,84 @@ test("smartEdited: a stored ROI that omits defaulted keys equals the on-screen o
   assert.equal(smartEdited(onScreen, stored), false);
   assert.equal(smartEdited({ ...onScreen, sensitivity: 0.4 }, stored), true);
 });
+
+test("fix1: a stale series never looks current (stale marker, not the locked tone)", () => {
+  const v = smartPlaybackRow(ready({ ...series(), stale: true }), 5);
+  assert.notEqual(v.tone, "locked");
+  assert.equal(v.tone, "invalid");
+  assert.match(v.marker ?? "", /stale/);
+  assert.ok(v.lines.some((l) => /stale/.test(l)));
+});
+
+test("fix1: an ROI edited on screen since the compute is treated as stale", () => {
+  const v = smartPlaybackRow(ready(), 5, { edited: true });
+  assert.notEqual(v.tone, "locked");
+  assert.match(v.marker ?? "", /stale/);
+  assert.ok(v.lines.some((l) => /edited/.test(l)));
+});
+
+test("fix2: a downsampled (not exact) value is marked ≈ and not locked-toned", () => {
+  const s = series();
+  const v = smartPlaybackRow(ready({ ...s, index: s.index.map((i) => i * 2) }), 11);
+  assert.ok(v.mean !== null);
+  assert.match(v.marker ?? "", /≈/);
+  assert.notEqual(v.tone, "locked");
+});
+
+test("fix2: the exact frame's overlay state gates the number (searching / invalid → no number)", () => {
+  const s = series();
+  const strided = ready({ ...s, index: s.index.map((i) => i * 2) });
+  const searching = smartPlaybackRow(strided, 11, { overlay: { state: "searching", valid: false } });
+  assert.equal(searching.mean, null);
+  assert.equal(searching.tone, "searching");
+  assert.equal(searching.marker, "searching");
+  const invalid = smartPlaybackRow(strided, 11, { overlay: { state: "holding", valid: false } });
+  assert.equal(invalid.mean, null);
+  assert.equal(invalid.tone, "invalid");
+  const ok = smartPlaybackRow(strided, 11, { overlay: { state: "locked", valid: true } });
+  assert.ok(ok.mean !== null);
+  assert.match(ok.marker ?? "", /≈/);
+  // an exact locked row with a matching overlay stays plainly locked
+  const exact = smartPlaybackRow(ready(), 5, { overlay: { state: "locked", valid: true } });
+  assert.equal(exact.tone, "locked");
+  assert.equal(exact.marker, null);
+});
+
+test("fix3: smartPollStep keeps polling a running job, reloads when done, stops on error/idle", async () => {
+  const { smartPollStep, SMART_POLL_MS } = await import("./smartSeries.ts");
+  const running = { state: "running" as const, done: 10, total: 40, error: null };
+  const r = smartPollStep({ job: null, failures: 2 }, { ok: true, job: running });
+  assert.deepEqual(r, { next: { job: running, failures: 0 }, action: "continue", delayMs: SMART_POLL_MS });
+  assert.equal(smartPollStep({ job: running, failures: 0 }, { ok: true, job: { ...running, state: "done", done: 40 } }).action, "reload");
+  assert.equal(smartPollStep({ job: running, failures: 0 }, { ok: true, job: { ...running, state: "error", error: "x" } }).action, "stop");
+  assert.equal(smartPollStep({ job: running, failures: 0 }, { ok: true, job: { ...running, state: "idle" } }).action, "stop");
+});
+
+test("fix3: a failed status poll retries with backoff, then gives up as an error so the button returns", async () => {
+  const { smartPollStep, smartComputeAction, SMART_POLL_MS } = await import("./smartSeries.ts");
+  const running = { state: "running" as const, done: 10, total: 40, error: null };
+  const fail = { ok: false as const, error: "TypeError: Failed to fetch" };
+  const a = smartPollStep({ job: running, failures: 0 }, fail);
+  assert.equal(a.action, "continue");
+  assert.equal(a.next.failures, 1);
+  assert.equal(a.next.job, running, "still shown as running while retrying");
+  assert.ok(a.delayMs > SMART_POLL_MS);
+  const b = smartPollStep(a.next, fail);
+  assert.equal(b.action, "continue");
+  assert.ok(b.delayMs > a.delayMs, "backoff grows");
+  const c = smartPollStep(b.next, fail);
+  assert.equal(c.action, "stop");
+  assert.equal(c.next.job?.state, "error");
+  assert.match(c.next.job?.error ?? "", /lost contact with the compute job/);
+  assert.equal(smartComputeAction({ kind: "missing" }, c.next.job, false)?.disabled, false, "compute button comes back");
+});
+
+test("minor1: upsertStoredRoi replaces the same id or appends, leaving the other stored ROIs as stored", async () => {
+  const { upsertStoredRoi } = await import("./smartSeries.ts");
+  const stored = [{ id: 2, kind: "spot", x: 1, y: 1 }, { id: 3, kind: "smart", name: "graphite", search: [[0, 0], [9, 0], [9, 9]] }];
+  const r: Smart = { id: 3, kind: "smart", name: "graphite", search: [[1, 0], [9, 0], [9, 9]], rings_px: [5, 10, 25], rule: "relative", sensitivity: 0.4 };
+  assert.deepEqual(upsertStoredRoi(stored, r), [stored[0], r]);
+  assert.deepEqual(upsertStoredRoi(stored, { ...r, id: 7 }), [...stored, { ...r, id: 7 }]);
+  assert.deepEqual(upsertStoredRoi(null, r), [r]);
+  assert.equal(stored.length, 2, "input not mutated");
+});

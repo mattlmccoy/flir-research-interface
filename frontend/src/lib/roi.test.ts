@@ -565,3 +565,16 @@ test("setSmart leaves non-smart ROIs untouched", () => {
   s = roiReducer(s, { type: "setSmart", id: 1, sensitivity: 0.4 });
   assert.deepEqual(s.rois[0], before);
 });
+
+test("roisDifferFromStored: a stored smart ROI that omits defaulted keys matches the on-screen one", async () => {
+  const { roisDifferFromStored, smartTracking } = await import("./roi.ts");
+  // captured: GET /api/experiments/{name} `rois` of a run recorded with a freshly drawn smart ROI
+  const stored = [{ id: 3, kind: "smart", name: "graphite", search: [[52, 86], [74, 86], [81, 85], [40, 43]] }];
+  const onScreen: Roi = { id: 3, kind: "smart", name: "graphite", search: [[52, 86], [74, 86], [81, 85], [40, 43]], rings_px: [5, 10, 25], rule: "relative", sensitivity: 0.5 };
+  assert.equal(roisDifferFromStored([onScreen], stored), false);
+  assert.equal(roisDifferFromStored([{ ...onScreen, sensitivity: 0.4 }], stored), true);
+  assert.deepEqual(smartTracking(stored[0]), smartTracking(onScreen as unknown as Record<string, unknown>));
+  // fixed_c only counts under the fixed rule
+  assert.deepEqual(smartTracking({ ...stored[0], fixed_c: 300 }), smartTracking(stored[0]));
+  assert.notDeepEqual(smartTracking({ ...stored[0], rule: "fixed", fixed_c: 300 }), smartTracking({ ...stored[0], rule: "fixed", fixed_c: 310 }));
+});

@@ -92,6 +92,20 @@ export function visibleRois(rois: Roi[]): Roi[] { return rois.filter((r) => !r.h
  * compared as JS numbers so a stored `72.0` equals an on-screen `72`. Works on both the on-screen
  * `Roi` and the plain dicts returned by the API.
  */
+/**
+ * The tracking settings of a smart ROI with the backend's defaults applied (smart_roi.py
+ * parse_smart_roi: rings 5/10/25 px, relative rule, sensitivity 0.5), so a stored ROI that omits a
+ * defaulted key equals the on-screen one that carries it. `fixed_c` counts only under the fixed rule.
+ * Works on both the on-screen `Roi` and the plain dicts returned by the API.
+ */
+export function smartTracking(r: Record<string, unknown>): unknown[] {
+  const search = Array.isArray(r.search) ? r.search.map((p) => (Array.isArray(p) ? [Number(p[0]), Number(p[1])] : p)) : r.search;
+  const rings = Array.isArray(r.rings_px) ? r.rings_px.map(Number) : [...SMART_DEFAULT_RINGS];
+  const rule = r.rule ?? "relative";
+  const sens = r.sensitivity === undefined ? SMART_DEFAULT_SENSITIVITY : Number(r.sensitivity);
+  return [search, rings, rule, sens, rule === "fixed" ? Number(r.fixed_c) : null, typeof r.ring_emissivity === "number" ? r.ring_emissivity : null];
+}
+
 function roiSignature(r: Record<string, unknown>): string {
   const g: Record<string, unknown> = { id: r.id, kind: r.kind };
   switch (r.kind) {
@@ -100,11 +114,7 @@ function roiSignature(r: Record<string, unknown>): string {
     case "circle": g.cx = r.cx; g.cy = r.cy; g.r = r.r; break;
     case "ellipse": g.cx = r.cx; g.cy = r.cy; g.rx = r.rx; g.ry = r.ry; break;
     case "polygon": case "polyline": g.points = r.points; break;
-    case "smart":
-      g.search = r.search; g.rings_px = r.rings_px; g.rule = r.rule; g.sensitivity = r.sensitivity;
-      if (r.rule === "fixed") g.fixed_c = r.fixed_c;
-      if (typeof r.ring_emissivity === "number") g.ring_emissivity = r.ring_emissivity;
-      break;
+    case "smart": g.tracking = smartTracking(r); break;
   }
   if (typeof r.name === "string" && r.name.trim()) g.name = r.name.trim().slice(0, 40);
   if (typeof r.color === "string") g.color = r.color;

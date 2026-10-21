@@ -30,8 +30,8 @@ import { fmtAny, fmtCelsius } from "../lib/format.ts";
 import { ThermalView, type StatsMap } from "./ThermalView.tsx";
 import { useSmartPlaybackOverlays } from "../lib/useSmartPlaybackOverlays.ts";
 import { useSmartSeries } from "../lib/useSmartSeries.ts";
-import { smartComputeAction, smartEdited, smartJobText, smartPlaybackRow } from "../lib/smartSeries.ts";
-import { smartTraces, type SmartDimChoice } from "../lib/smartTraces.ts";
+import { smartComputeAction, smartEdited, smartJobText, smartPlaybackRow, upsertStoredRoi } from "../lib/smartSeries.ts";
+import { plotEmptyText, smartTraces, type SmartDimChoice } from "../lib/smartTraces.ts";
 import type { SmartPlaybackRow } from "./RoiRows.tsx";
 import { DisplayControls } from "./DisplayControls.tsx";
 import { RoiRows } from "./RoiRows.tsx";
@@ -243,14 +243,14 @@ export function PlaybackPage(p: Props) {
 
   const t = tl ? tl.t_s[index] : 0;
   const smartIds = useMemo(() => p.rois.rois.filter((r) => r.kind === "smart").map((r) => r.id), [p.rois.rois]);
-  // A compute reads the ROI stored with the run, so an unsaved or edited smart ROI is saved first
-  // (this replaces the run's stored ROI set with the one on screen, as "regenerate" does).
+  // A compute reads the ROI stored with the run, so an unsaved or edited smart ROI is saved first:
+  // only that ROI is written into the run's stored set (same id replaced, else appended).
   const beforeCompute = useCallback(async (id: number): Promise<boolean> => {
     const r = p.rois.rois.find((x) => x.id === id);
     if (!r || r.kind !== "smart") return false;
     if (!smartEdited(r, info?.rois)) return true;
-    if (!window.confirm(`Save the ${p.rois.rois.length} ROI${p.rois.rois.length === 1 ? "" : "s"} on screen into this run (replacing its stored ROIs), then compute ${roiLabel(r)} over every frame?`)) return false;
-    await api.putRois(p.name, p.rois.rois);
+    if (!window.confirm(`Save ${roiLabel(r)}'s current outline and settings into this run (its other stored ROIs are unchanged), then compute it over every frame?`)) return false;
+    await api.putRois(p.name, upsertStoredRoi(info?.rois, r));
     api.experiment(p.name).then(setInfo).catch(() => undefined);
     return true;
   }, [p.name, p.rois.rois, info?.rois]);
@@ -264,10 +264,12 @@ export function PlaybackPage(p: Props) {
       if (r.kind !== "smart") continue;
       const st = smart.states.get(r.id) ?? { kind: "loading" as const };
       const job = smart.jobs.get(r.id) ?? null;
-      const act = smartComputeAction(st, job, smartEdited(r, info?.rois));
+      const edited = smartEdited(r, info?.rois);
+      const act = smartComputeAction(st, job, edited);
       const text = smartJobText(job);
       m.set(r.id, {
-        view: smartPlaybackRow(st, index),
+        // the exact frame's stored state (overlay) gates the number when the series is downsampled
+        view: smartPlaybackRow(st, index, { edited, overlay: smartOverlays.find((o) => o.id === r.id) ?? null }),
         action: act || text ? (
           <div className="smart-compute">
             {act && <button className="secondary" type="button" disabled={act.disabled} onClick={() => (act.kind === "reload" ? smart.reload(r.id) : smart.compute(r.id))}
@@ -279,7 +281,7 @@ export function PlaybackPage(p: Props) {
       });
     }
     return m;
-  }, [p.rois.rois, smart.states, smart.jobs, smart.compute, smart.reload, index, info?.rois]);
+  }, [p.rois.rois, smart.states, smart.jobs, smart.compute, smart.reload, index, info?.rois, smartOverlays]);
   const hdr = frame?.header;
   const exp = (info?.experiment ?? {}) as Record<string, unknown>;
   const cam = (info?.camera ?? {}) as Record<string, unknown>;
@@ -303,7 +305,8 @@ export function PlaybackPage(p: Props) {
   const smartPlot = p.rois.rois.flatMap((r, i) => {
     const st = smart.states.get(r.id);
     if (r.kind !== "smart" || r.hidden || st?.kind !== "ready") return [];
-    return smartTraces(st.series, { ...smartShow, dims: sizeDim }, { id: r.id, label: roiLabel(r), color: roiColor(r, i) });
+    const stale = st.series.stale || smartEdited(r, info?.rois);
+    return smartTraces(st.series, { ...smartShow, dims: sizeDim }, { id: r.id, label: roiLabel(r), color: roiColor(r, i), stale });
   });
   const traces = [...seriesTraces(series, p.rois), ...smartPlot.filter((x) => x.axis === "temp")];
   // Secondary (right) axis, frame-aligned to the temperature trace: RF forward power (W), the AIT
@@ -446,13 +449,11 @@ export function PlaybackPage(p: Props) {
           </>) : undefined}>
           <TimePlot traces={withDelta} markers={markers} window={{ t0: 0, t1: Math.max(info?.duration_s ?? 0, 0.001) }} cursorT={t}
             rightTraces={right.traces} rightUnits={right.units || "W"}
-            emptyText={
-              !p.rois.rois.length ? "add a spot or rectangle ROI to plot it over the whole recording"
-              : p.rois.rois.every((r) => r.kind === "smart") && ![...smart.states.values()].some((st) => st.kind === "ready" || st.kind === "loading")
-                ? "smart ROI not computed for this run yet: use “compute smart ROI” in the measurements panel"
-              : seriesStatus === "error" ? "couldn’t load the series — check the operator, then adjust an ROI to retry"
-              : "loading series over the whole recording… (long recordings can take several seconds)"
-            }
+            emptyText={plotEmptyText({
+              rois: p.rois.rois, seriesStatus,
+              smart: p.rois.rois.filter((r) => r.kind === "smart" && !r.hidden).map((r) => smart.states.get(r.id) ?? { kind: "loading" as const }),
+              smartShown: smartShow.sample || smartShow.rings,
+            })}
             onSeek={(tt) => { if (tl) { setPlaying(false); setIndex(nearestIndex(tl.t_s, tt)); } }} />
         </PlotDock>
       }

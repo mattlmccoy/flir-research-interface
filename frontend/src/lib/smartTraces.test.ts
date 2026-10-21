@@ -75,3 +75,22 @@ test("dims choice picks that column, in px, on the size axis", () => {
 test("nothing chosen, nothing drawn", () => {
   assert.deepEqual(smartTraces(series(), { sample: false, rings: false, dims: "off" }, ROI), []);
 });
+
+test("fix1: a stale series labels every trace (stale)", () => {
+  const trs = smartTraces(series(), { sample: true, rings: true, dims: "area" }, { ...ROI, stale: true });
+  assert.ok(trs.length === 5 && trs.every((t) => t.label.endsWith(" (stale)")), trs.map((t) => t.label).join(", "));
+});
+
+test("minor3: the empty-plot text tells error, nothing selected, loading and not computed apart", async () => {
+  const { plotEmptyText } = await import("./smartTraces.ts");
+  const smartRoi = { kind: "smart", hidden: false }, spot = { kind: "spot", hidden: false };
+  const base = { seriesStatus: "idle" as const, smartShown: true };
+  assert.match(plotEmptyText({ ...base, rois: [], smart: [] }), /add a spot/);
+  assert.match(plotEmptyText({ ...base, rois: [{ ...spot, hidden: true }], smart: [] }), /hidden/);
+  assert.match(plotEmptyText({ ...base, rois: [spot], smart: [], seriesStatus: "error" }), /couldn’t load the series/);
+  assert.match(plotEmptyText({ ...base, rois: [smartRoi], smart: [{ kind: "error", message: "500 boom" }] }), /couldn’t load the smart ROI series: 500 boom/);
+  assert.match(plotEmptyText({ ...base, rois: [smartRoi], smart: [{ kind: "loading" }] }), /loading/);
+  assert.match(plotEmptyText({ ...base, rois: [spot], smart: [], seriesStatus: "loading" }), /loading/);
+  assert.match(plotEmptyText({ ...base, rois: [smartRoi], smart: [{ kind: "missing" }] }), /not computed/);
+  assert.match(plotEmptyText({ ...base, smartShown: false, rois: [smartRoi], smart: [{ kind: "ready", series: series() }] }), /nothing selected/);
+});
