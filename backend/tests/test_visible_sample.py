@@ -111,10 +111,37 @@ def test_region_mask_outside_frame_returns_none() -> None:
     reach = region_mask(_square(1290, 100, 30), 30)
     assert reach is not None
     assert reach[1][0] + reach[1][2] == VIS_SIZE[0]
-    # straddling the left edge
+    assert reach[1][2] % 2 == 0 and reach[1][3] % 2 == 0
+    # straddling the left edge: the clipped region is 51 x 121 px, widened to 52 x 122
     left = region_mask(_square(-40, 100, 60), 30)
     assert left is not None
     assert left[1][0] == 0
+    assert left[1][2] % 2 == 0 and left[1][3] % 2 == 0
+
+
+def test_region_mask_odd_bbox_is_widened_with_blank_pixels() -> None:
+    # straddling the left edge, the tight bbox has an odd width and height (51 x 121 px): the extra
+    # column and row go on the right and bottom and hold no region pixels
+    out = region_mask(_square(-40, 100, 60), 30)
+    assert out is not None
+    mask, (x0, y0, w, h) = out
+    assert (x0, w % 2, h % 2) == (0, 0, 0)
+    assert mask.shape == (h, w)
+    assert not mask[:, -1].any() and not mask[-1, :].any()
+    assert mask[:, :-1].any(axis=0).all() and mask[:-1, :].any(axis=1).all()
+
+
+def test_region_mask_odd_bbox_at_far_edge_widens_up_and_left() -> None:
+    # the tight bbox ends at the right and bottom frame edge with an odd width and height
+    # (79 x 99 px), so the extra column and row go on the left and top
+    out = region_mask(_square(1231, 891, 60), 30)
+    assert out is not None
+    mask, (x0, y0, w, h) = out
+    assert (x0 + w, y0 + h) == VIS_SIZE
+    assert (w % 2, h % 2) == (0, 0)
+    assert mask.shape == (h, w)
+    assert not mask[:, 0].any() and not mask[0, :].any()
+    assert mask[:, 1:].any(axis=0).all() and mask[1:, :].any(axis=1).all()
 
 
 def test_fixture_crops_match_region_mask(run: dict[str, Any]) -> None:
