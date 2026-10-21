@@ -197,8 +197,15 @@ def _closeup_command(
     ffmpeg: str, src: Path, out: Path, crop: tuple[int, int, int], lo: float
 ) -> list[str]:
     """ffmpeg argv for the close-up: drop the start-up skip, crop, stretch luma ``lo``..250 to
-    0..255, scale x3 (Lanczos), and keep the original frame times (the video starts at the first
-    frame that was analysed, not at 0)."""
+    0..255, scale x3 (Lanczos), and keep every remaining frame at its source time (the video starts
+    at the first frame that was analysed, not at 0).
+
+    The source's frames are irregular (1 ms to 840 ms apart on the real run), so: ``passthrough``
+    neither drops nor duplicates; ``-enc_time_base -1`` keeps the encoder on the source's own time
+    base (the default is 1 / the average frame rate, about 98 ms, and frames that land on the same
+    tick are merged and the rest shift); and ``-bf 0`` stores frames in display order, so a seek to
+    a frame's time lands on that frame.
+    """
     x, y, side = crop
     ramp = f"clip((val-{lo:g})*255/({STRETCH_HI}-{lo:g}),0,255)"
     size = CLOSEUP_SCALE * side
@@ -207,7 +214,8 @@ def _closeup_command(
         f"lutyuv=y='{ramp}',scale={size}:{size}:flags=lanczos"
     )
     cmd = [ffmpeg, "-v", "error", "-nostdin", "-y", "-i", str(src), "-vf", vf]
-    return cmd + ["-fps_mode", "vfr", "-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p"] + [
+    cmd += ["-fps_mode", "passthrough", "-enc_time_base", "-1"]
+    return cmd + ["-c:v", "libx264", "-bf", "0", "-crf", "20", "-pix_fmt", "yuv420p"] + [
         "-an", "-f", "mp4", str(out)
     ]  # fmt: skip
 

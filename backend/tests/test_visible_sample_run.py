@@ -789,7 +789,7 @@ def test_closeup_command_stretches_luma_and_scales_by_three() -> None:
         "lutyuv=y='clip((val-87.5)*255/(250-87.5),0,255)',"
         "scale=378:378:flags=lanczos"
     )
-    assert cmd[cmd.index("-fps_mode") + 1] == "vfr"
+    assert cmd[cmd.index("-fps_mode") + 1] == "passthrough"
     assert cmd[cmd.index("-crf") + 1] == "20"
     assert cmd[cmd.index("-pix_fmt") + 1] == "yuv420p"
 
