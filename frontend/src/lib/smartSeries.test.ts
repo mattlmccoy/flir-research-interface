@@ -218,6 +218,14 @@ test("minor1: upsertStoredRoi replaces the same id or appends, leaving the other
   const r: Smart = { id: 3, kind: "smart", name: "graphite", search: [[1, 0], [9, 0], [9, 9]], rings_px: [5, 10, 25], rule: "relative", sensitivity: 0.4 };
   assert.deepEqual(upsertStoredRoi(stored, r), [stored[0], r]);
   assert.deepEqual(upsertStoredRoi(stored, { ...r, id: 7 }), [...stored, { ...r, id: 7 }]);
-  assert.deepEqual(upsertStoredRoi(null, r), [r]);
+  assert.deepEqual(upsertStoredRoi([], r), [r]);
   assert.equal(stored.length, 2, "input not mutated");
+});
+
+test("critical: upsertStoredRoi throws on a non-array stored list instead of PUTting [roi] over the run's ROIs", async () => {
+  const { upsertStoredRoi } = await import("./smartSeries.ts");
+  const r: Smart = { id: 3, kind: "smart", name: "graphite", search: [[1, 0], [9, 0], [9, 9]], rings_px: [5, 10, 25], rule: "relative", sensitivity: 0.4 };
+  assert.throws(() => upsertStoredRoi(undefined, r), /stored ROI list/);
+  assert.throws(() => upsertStoredRoi(null, r), /stored ROI list/);
+  assert.throws(() => upsertStoredRoi({ rois: [] } as unknown as unknown[], r), /stored ROI list/);
 });

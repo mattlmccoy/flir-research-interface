@@ -186,9 +186,12 @@ export function smartPollStep(prev: SmartPollState, ev: SmartPollEvent): { next:
 }
 
 /** The run's stored ROI list with only `roi` saved into it (same id replaced, else appended); the
- *  other stored ROIs are kept exactly as stored. Used before computing an unsaved/edited smart ROI. */
+ *  other stored ROIs are kept exactly as stored. Used before computing an unsaved/edited smart ROI.
+ *  Throws when `stored` is not an array: treating "unknown" as "empty" would PUT [roi] and wipe
+ *  every other ROI stored with the run (a run with none stored passes []). */
 export function upsertStoredRoi(stored: unknown[] | null | undefined, roi: Smart): unknown[] {
-  const list = Array.isArray(stored) ? stored : [];
+  if (!Array.isArray(stored)) throw new Error("upsertStoredRoi: the run's stored ROI list is not loaded");
+  const list = stored;
   const at = list.findIndex((x) => isObj(x) && x.id === roi.id);
   return at < 0 ? [...list, roi] : list.map((x, k) => (k === at ? roi : x));
 }

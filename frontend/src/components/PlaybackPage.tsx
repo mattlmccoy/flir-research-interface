@@ -247,13 +247,15 @@ export function PlaybackPage(p: Props) {
   // only that ROI is written into the run's stored set (same id replaced, else appended).
   const beforeCompute = useCallback(async (id: number): Promise<boolean> => {
     const r = p.rois.rois.find((x) => x.id === id);
+    if (!info) { setErr("run info not loaded yet; try again"); return false; }
     if (!r || r.kind !== "smart") return false;
-    if (!smartEdited(r, info?.rois)) return true;
+    if (!smartEdited(r, info.rois)) return true;
     if (!window.confirm(`Save ${roiLabel(r)}'s current outline and settings into this run (its other stored ROIs are unchanged), then compute it over every frame?`)) return false;
-    await api.putRois(p.name, upsertStoredRoi(info?.rois, r));
+    // info.rois is null when the run has no stored ROIs (reader.py "rois": metadata.get("rois"))
+    await api.putRois(p.name, upsertStoredRoi(info.rois ?? [], r));
     api.experiment(p.name).then(setInfo).catch(() => undefined);
     return true;
-  }, [p.name, p.rois.rois, info?.rois]);
+  }, [p.name, p.rois.rois, info]);
   const onSmartError = useCallback((m: string) => setErr(m), []);
   const smart = useSmartSeries(p.name, smartIds, beforeCompute, onSmartError);
   // stored smart ROI outlines for this frame (none until the run's smart series is computed)
