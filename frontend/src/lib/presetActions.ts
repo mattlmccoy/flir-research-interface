@@ -4,6 +4,7 @@
 // `CurrentCase` last, and every partial result reported.
 import {
   applyPlan,
+  RECORDING_SKIP,
   displayFromView,
   presetFromState,
   thermalFromInfo,
@@ -13,6 +14,7 @@ import {
   NUC_WARNING,
   type Preset,
   type ThermalValue,
+  type ThermalWriteResult,
   type ViewDisplay,
 } from "./presets.ts";
 import type { VisibleAdjust } from "./visibleAdjust.ts";
@@ -25,6 +27,8 @@ export interface LiveDeps {
   /** Camera status is connected or acquiring. */
   cameraConnected: boolean;
   view: ViewDisplay;
+  /** Re-reads whether a recording runs (`api.recordingStatus`), just before the camera write. */
+  readRecording: () => Promise<boolean>;
   setVisible: (a: VisibleAdjust) => void;
   setView: (v: ViewDisplay) => void;
   /** `api.info` (read fresh at apply time: the values to compare and the camera's enum options). */
@@ -64,15 +68,32 @@ export async function applyLivePreset(p: Preset, d: LiveDeps): Promise<ApplyLine
     if (!d.confirm(`Write ${plan.thermal.length} camera setting${plan.thermal.length === 1 ? "" : "s"} from "${p.name}"?\n\n${list}${nuc}`)) {
       lines.push({ text: "camera settings not written (cancelled)", warn: true });
     } else {
-      const r = await writeThermal(plan.thermal, d.setParameters);
-      lines.push({ text: writeSummary(r), warn: r.failed !== null });
-      d.onCameraWritten?.();
+      let recordingNow: boolean | null = null;
+      try { recordingNow = await d.readRecording(); } catch (e) {
+        lines.push({ text: `camera settings not written: the recording state could not be read (${String(e)})`, warn: true });
+      }
+      if (recordingNow) lines.push({ text: RECORDING_SKIP, warn: true });
+      if (recordingNow === false) {
+        const r = await writeThermal(plan.thermal, d.setParameters);
+        lines.push({ text: recordingLocked(r) ?? writeSummary(r), warn: r.failed !== null });
+        d.onCameraWritten?.();
+      }
     }
   } else if (plan.thermal && hasThermal && plan.skipped.length === 0) {
     lines.push({ text: "camera: already matches the preset", warn: false });
   }
   try { await d.markApplied(p.name); } catch (e) { lines.push({ text: `could not record "${p.name}" as last applied: ${String(e)}`, warn: true }); }
   return lines;
+}
+
+/** A node write refused because a recording started (the operator's 409), in the recording-skip
+ *  wording plus what was written before it; null for any other result. */
+function recordingLocked(r: ThermalWriteResult): string | null {
+  if (!r.failed || !/409\b.*locked while recording/.test(r.failed.error)) return null;
+  const parts = [RECORDING_SKIP];
+  if (r.written.length) parts.push(`written before the recording started: ${r.written.join(", ")}`);
+  parts.push(`not written: ${[r.failed.node, ...r.notWritten].join(", ")}`);
+  return parts.join("; ");
 }
 
 export interface SaveDeps {
@@ -115,7 +136,7 @@ export function applyLook(p: Preset, d: LookDeps): ApplyLine[] {
   const lines: ApplyLine[] = [];
   if (d.hasVideo) {
     d.setAdjust(p.visible_adjust);
-    lines.push({ text: `"${p.name}": visible adjustment saved for this run, display set; camera settings are not changed`, warn: false });
+    lines.push({ text: `"${p.name}": visible adjustment set for this run (saving…), display set; camera settings are not changed`, warn: false });
   } else {
     lines.push({ text: `"${p.name}": display set; this run has no visible video; camera settings are not changed`, warn: false });
   }

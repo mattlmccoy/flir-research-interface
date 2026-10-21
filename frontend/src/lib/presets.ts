@@ -208,3 +208,33 @@ export function writeSummary(r: ThermalWriteResult): string {
   if (r.notWritten.length) parts.push(`not written: ${r.notWritten.join(", ")}`);
   return parts.join("; ");
 }
+
+/** The picker's marker for the last applied preset. `camera-unknown`: the sliders and display
+ *  match, but the preset has camera settings and the camera's values are not known, so it cannot
+ *  say the preset is applied (never shown as "as applied"). */
+export type PresetMarker = "applied" | "modified" | "camera-unknown";
+export function presetMarker(
+  current: { visible: VisibleAdjust; display: PresetDisplay; thermal: Record<string, ThermalValue> | null },
+  preset: Preset,
+): PresetMarker {
+  if (isModified({ visible: current.visible, display: current.display }, preset)) return "modified";
+  if (Object.keys(preset.thermal ?? {}).length === 0) return "applied";
+  if (!current.thermal) return "camera-unknown";
+  return isModified(current, preset) ? "modified" : "applied";
+}
+
+/** What a fresh browser takes from the last applied preset at startup: each part (display,
+ *  visible sliders) only when the browser had nothing stored for it. Never camera settings. */
+export function startupRestore(a: {
+  displayWasStored: boolean;
+  visibleWasStored: boolean;
+  lastApplied: Preset | null;
+  currentView: ViewDisplay;
+}): { display?: ViewDisplay; visible?: VisibleAdjust } {
+  const p = a.lastApplied;
+  if (!p) return {};
+  const out: { display?: ViewDisplay; visible?: VisibleAdjust } = {};
+  if (!a.displayWasStored) out.display = viewFromDisplay(p.display, a.currentView).view;
+  if (!a.visibleWasStored) out.visible = clampAdjust(p.visible_adjust);
+  return out;
+}

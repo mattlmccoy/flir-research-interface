@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Preset } from "../lib/presets.ts";
+import type { Preset, PresetMarker } from "../lib/presets.ts";
 import type { PresetsStore } from "../lib/usePresets.ts";
 import type { ApplyLine } from "../lib/presetActions.ts";
 
@@ -49,12 +49,12 @@ interface PickerProps {
   onApply: (p: Preset) => Promise<ApplyLine[]>;
   /** live only: builds and stores a preset from the current state; resolves to a message. */
   onSaveCurrent?: (name: string) => Promise<string>;
-  /** live only: true when the current state no longer matches this preset. */
-  modified?: (p: Preset) => boolean;
+  /** live only: whether the current state still matches this preset (`presetMarker`). */
+  marker?: (p: Preset) => PresetMarker;
 }
 
 /** Preset dropdown for the visible-camera section. Starts on the last applied preset. */
-export function PresetPicker({ store, mode, onApply, onSaveCurrent, modified }: PickerProps) {
+export function PresetPicker({ store, mode, onApply, onSaveCurrent, marker }: PickerProps) {
   const presets = store.doc?.presets ?? [];
   const last = store.doc?.last_applied ?? null;
   const [sel, setSel] = useState<string>("");
@@ -87,7 +87,7 @@ export function PresetPicker({ store, mode, onApply, onSaveCurrent, modified }: 
   if (store.loadError && !store.doc) {
     return <div className="errbox">presets unavailable: {store.loadError} <button className="secondary" onClick={() => void store.reload()}>retry</button></div>;
   }
-  const isMod = mode === "live" && chosen && chosen.name === last && modified ? modified(chosen) : null;
+  const mark = mode === "live" && chosen && chosen.name === last && marker ? marker(chosen) : null;
   return (
     <div aria-label="presets">
       <div className="row">
@@ -95,7 +95,9 @@ export function PresetPicker({ store, mode, onApply, onSaveCurrent, modified }: 
           <option value="">{store.doc ? (presets.length ? "choose a preset…" : "no presets saved") : "loading presets…"}</option>
           {presets.map((p) => <option key={p.name} value={p.name}>{p.name}{p.name === last ? " (last applied)" : ""}</option>)}
         </select>
-        {isMod !== null && <span className={isMod ? "badge warn" : "hint"} title={isMod ? "The sliders, the palette/range or the camera settings differ from this preset" : undefined}>{isMod ? "modified" : "as applied"}</span>}
+        {mark === "applied" && <span className="hint">as applied</span>}
+        {mark === "modified" && <span className="badge warn" title="The sliders, the palette/range or the camera settings differ from this preset">modified</span>}
+        {mark === "camera-unknown" && <span className="badge warn" title="The camera's settings are not known (no camera connected or its info not read), so they were not compared with this preset">visible/display as applied; camera not checked</span>}
         <button className="primary" disabled={!chosen || busy} onClick={() => void apply()}
           title={mode === "live" ? "Set the sliders and the display, and write the camera settings (not while recording)" : "Save the preset's visible adjustment for this run and set the display. Camera settings are not changed."}>
           {busy ? "…" : mode === "live" ? "apply" : "apply look"}

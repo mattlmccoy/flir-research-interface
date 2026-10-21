@@ -19,6 +19,7 @@ function deps(over: Partial<LiveDeps> = {}) {
   const log = { visible: [] as unknown[], view: [] as unknown[], writes: [] as Record<string, unknown>[], confirms: [] as string[], applied: [] as (string | null)[] };
   const d: LiveDeps = {
     recording: false, cameraConnected: true, view: VIEW,
+    readRecording: async () => false,
     setVisible: (a) => log.visible.push(a), setView: (v) => log.view.push(v),
     readInfo: async () => A70,
     setParameters: async (v) => { log.writes.push(v); return { applied: v }; },
@@ -58,12 +59,39 @@ test("live apply with the camera write cancelled writes nothing and says so", as
 });
 
 test("live apply reports which nodes were written when a write fails part-way", async () => {
-  const { d } = deps({ setParameters: async (v) => { if ("NUCMode" in v) throw new Error("409 camera parameters are locked while recording"); return v; } });
+  const { d, log } = deps({ setParameters: async (v) => { if ("NUCMode" in v) throw new Error("500 camera rejected the write"); return v; } });
   const lines = await applyLivePreset(BED, d);
   const bad = lines.find((l) => l.warn && /failed at NUCMode/.test(l.text));
   assert.ok(bad, JSON.stringify(lines));
   assert.match(bad.text, /written: ObjectEmissivity/);
   assert.match(bad.text, /not written: CurrentCase/);
+  assert.deepEqual(log.visible, [LOOK], "the sliders were still applied");
+  assert.deepEqual(log.view, [{ palette: "inferno", scaleMode: "manual", manual: { min: 20, max: 250 } }], "the display was still applied");
+});
+
+test("live apply re-checks the recording state after the confirmation and writes nothing if one started", async () => {
+  const { d, log } = deps({ readRecording: async () => true });
+  const lines = await applyLivePreset(BED, d);
+  assert.equal(log.confirms.length, 1);
+  assert.deepEqual(log.writes, []);
+  assert.ok(lines.some((l) => l.warn && l.text === RECORDING_SKIP), JSON.stringify(lines));
+  assert.deepEqual(log.visible, [LOOK]);
+});
+
+test("live apply writes nothing when the recording state cannot be re-read", async () => {
+  const { d, log } = deps({ readRecording: async () => { throw new Error("Failed to fetch"); } });
+  const lines = await applyLivePreset(BED, d);
+  assert.deepEqual(log.writes, []);
+  assert.ok(lines.some((l) => l.warn && /camera settings not written/.test(l.text) && /recording state/.test(l.text)), JSON.stringify(lines));
+});
+
+test("a 409 'locked while recording' from a node write is reported as the recording skip", async () => {
+  const { d } = deps({ setParameters: async (v) => { if ("NUCMode" in v) throw new Error("409 camera parameters are locked while recording"); return v; } });
+  const lines = await applyLivePreset(BED, d);
+  const w = lines.find((l) => l.warn && l.text.startsWith(RECORDING_SKIP));
+  assert.ok(w, JSON.stringify(lines));
+  assert.match(w.text, /written before the recording started: ObjectEmissivity/);
+  assert.match(w.text, /not written: NUCMode, CurrentCase/);
 });
 
 test("live apply with unreadable camera info writes nothing", async () => {
@@ -101,6 +129,8 @@ test("apply look sets the run's adjustment and the display, and has no camera pa
   assert.deepEqual(set, [LOOK]);
   assert.deepEqual(views, [{ palette: "inferno", scaleMode: "manual", manual: { min: 20, max: 250 } }]);
   assert.ok(lines.some((l) => /camera settings are not changed/.test(l.text)));
+  assert.ok(lines.some((l) => /set for this run \(saving…\)/.test(l.text)), "the sidecar save is debounced: not claimed as done");
+  assert.equal(lines.some((l) => /saved for this run/.test(l.text)), false);
 });
 
 test("apply look on a run without visible video sets only the display", () => {

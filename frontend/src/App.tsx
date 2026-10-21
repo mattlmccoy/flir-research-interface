@@ -12,7 +12,8 @@ import type { PaletteName } from "./lib/palette.ts";
 import type { Range, ScaleMode } from "./lib/scale.ts";
 import { DEFAULT_LAYOUT, layoutHasKey, layoutReducer, loadLayout, saveLayout } from "./lib/layout.ts";
 import { usePresets } from "./lib/usePresets.ts";
-import { displayFromView, isModified, thermalFromInfo, viewFromDisplay, type ViewDisplay } from "./lib/presets.ts";
+import { displayFromView, presetMarker, startupRestore, thermalFromInfo, type ViewDisplay } from "./lib/presets.ts";
+import { isNeutral } from "./lib/visibleAdjust.ts";
 import { applyLivePreset, saveCurrentPreset } from "./lib/presetActions.ts";
 import { PresetPicker, SaveCurrentAs } from "./components/PresetPicker.tsx";
 import { EMPTY_ROIS, hasRois, loadRois, roiLabel, saveRois } from "./lib/roi.ts";
@@ -55,6 +56,9 @@ type Page = "live" | "setup" | "experiments" | "playback";
 const storage = (() => {
   try { return typeof localStorage !== "undefined" ? localStorage : null; } catch { return null; }
 })();
+/** Which preset-restorable layout parts this browser had stored when the page loaded, read once
+ *  before any save (the App saves its layout on mount, which would make every part look stored). */
+const STORED_AT_LOAD = { display: layoutHasKey(storage, "display"), visibleAdjust: layoutHasKey(storage, "visibleAdjust") };
 /** ~10 min of live trace at 15 Hz per ROI. */
 const MAX_TRACE_POINTS = 9000;
 
@@ -79,19 +83,18 @@ export function App() {
   const [openExp, setOpenExp] = useState<string | null>(null);
   const [openTitle, setOpenTitle] = useState<string | null>(null);  // display name, if renamed
   const [layout, dispatch] = useReducer(layoutReducer, DEFAULT_LAYOUT, () => loadLayout(storage));
-  // read before the first save below writes the defaults: did this browser store palette/range?
-  const [displayWasStored] = useState(() => layoutHasKey(storage, "display"));
   useEffect(() => { saveLayout(storage, layout); }, [layout]);
   const presets = usePresets();
-  // Startup: a browser with no stored palette/range takes them from the last applied preset.
-  // Display only; nothing is sent to the camera.
-  const restored = useRef(displayWasStored);
+  // Startup: each part this browser had nothing stored for (palette/range, visible sliders) starts
+  // from the last applied preset. Nothing is sent to the camera. A part already changed while the
+  // presets loaded is left alone.
+  const restored = useRef(STORED_AT_LOAD.display && STORED_AT_LOAD.visibleAdjust);
   useEffect(() => {
     if (restored.current || !presets.doc) return;
     restored.current = true;
-    const last = presets.lastApplied;
-    if (!last || JSON.stringify(layout.display) !== JSON.stringify(DEFAULT_LAYOUT.display)) return;
-    dispatch({ type: "setDisplay", patch: viewFromDisplay(last.display, layout.display).view });
+    const r = startupRestore({ displayWasStored: STORED_AT_LOAD.display, visibleWasStored: STORED_AT_LOAD.visibleAdjust, lastApplied: presets.lastApplied, currentView: layout.display });
+    if (r.display && JSON.stringify(layout.display) === JSON.stringify(DEFAULT_LAYOUT.display)) dispatch({ type: "setDisplay", patch: r.display });
+    if (r.visible && isNeutral(layout.visibleAdjust)) dispatch({ type: "setVisibleAdjust", adjust: r.visible });
   }, [presets.doc]); // eslint-disable-line react-hooks/exhaustive-deps
   const [roiHist, roiDispatch] = useReducer(roiHistoryReducer, EMPTY_ROIS, () => initHistory(loadRois(storage)));
   const rois = roiHist.present;
@@ -322,9 +325,10 @@ export function App() {
   const saveCurrent = (name: string) => saveCurrentPreset(name, { visible: layout.visibleAdjust, view: layout.display, currentThermal: api.currentThermal, put: presets.put });
   const livePicker = (
     <PresetPicker store={presets} mode="live" onSaveCurrent={saveCurrent}
-      modified={(p) => isModified({ visible: layout.visibleAdjust, display: displayFromView(layout.display), thermal: liveThermal }, p)}
+      marker={(p) => presetMarker({ visible: layout.visibleAdjust, display: displayFromView(layout.display), thermal: liveThermal }, p)}
       onApply={(p) => applyLivePreset(p, {
         recording: isRecording, cameraConnected, view: layout.display,
+        readRecording: async () => (await api.recordingStatus()).state === "recording",
         setVisible: (adjust) => dispatch({ type: "setVisibleAdjust", adjust }), setView,
         readInfo: api.info, setParameters: api.setParameters, confirm: (m) => window.confirm(m),
         markApplied: presets.markApplied, onCameraWritten: refreshInfo,

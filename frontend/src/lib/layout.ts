@@ -85,14 +85,16 @@ export interface LayoutState {
 }
 export interface DisplayState { palette: PaletteName; scaleMode: ScaleMode; manual: Range; }
 const DEFAULT_DISPLAY: DisplayState = Object.freeze({ palette: "iron", scaleMode: "auto", manual: Object.freeze({ min: 20, max: 40 }) }) as DisplayState;
-function parseDisplay(v: unknown): DisplayState {
+/** A valid display from `v`; each invalid part falls back to `fallback`'s (the default on load,
+ *  the current display on a `setDisplay` patch, so a bad patch never resets the range). */
+function parseDisplay(v: unknown, fallback: DisplayState = DEFAULT_DISPLAY): DisplayState {
   const o = (v !== null && typeof v === "object" && !Array.isArray(v) ? v : {}) as Record<string, unknown>;
   const m = (o.manual !== null && typeof o.manual === "object" ? o.manual : {}) as Record<string, unknown>;
   const ok = isNum(m.min) && isNum(m.max);
   return {
-    palette: (PALETTE_NAMES as readonly string[]).includes(o.palette as string) ? (o.palette as PaletteName) : DEFAULT_DISPLAY.palette,
-    scaleMode: o.scaleMode === "manual" ? "manual" : "auto",
-    manual: ok ? { min: m.min as number, max: m.max as number } : DEFAULT_DISPLAY.manual,
+    palette: (PALETTE_NAMES as readonly string[]).includes(o.palette as string) ? (o.palette as PaletteName) : fallback.palette,
+    scaleMode: o.scaleMode === "manual" || o.scaleMode === "auto" ? o.scaleMode : fallback.scaleMode,
+    manual: ok ? { min: m.min as number, max: m.max as number } : fallback.manual,
   };
 }
 /** Drag-to-resize bounds (px) for the right rail and the bottom plot dock, with a snap-back
@@ -222,7 +224,7 @@ export function layoutReducer(s: LayoutState, a: LayoutAction): LayoutState {
     case "dockBack": { const { [a.section]: _gone, ...rest } = s.floating; return { ...s, floating: rest }; }
     case "setOverlay": return { ...s, overlay: clampOverlay({ ...s.overlay, ...a.patch }) };
     case "setVisibleAdjust": return { ...s, visibleAdjust: clampAdjust(a.adjust) };
-    case "setDisplay": return { ...s, display: parseDisplay({ ...s.display, ...a.patch }) };
+    case "setDisplay": return { ...s, display: parseDisplay({ ...s.display, ...a.patch }, s.display) };
     case "collapseAll": return { ...s, strip: true, rail: false, dock: false };
     case "restoreAll": return { ...s, strip: true, rail: true, dock: true };
   }

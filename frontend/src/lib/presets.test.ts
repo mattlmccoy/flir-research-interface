@@ -7,6 +7,8 @@ import {
   displayFromView,
   isModified,
   presetFromState,
+  presetMarker,
+  startupRestore,
   thermalFromInfo,
   viewFromDisplay,
   writeThermal,
@@ -167,4 +169,24 @@ test("writeThermal writes one node at a time in order and reports a failure part
 test("writeThermal with every write accepted reports them all", async () => {
   const r = await writeThermal([["ObjectEmissivity", 0.9], ["CurrentCase", 2]], async (v) => ({ applied: v }));
   assert.deepEqual(r, { written: ["ObjectEmissivity", "CurrentCase"], failed: null, notWritten: [] });
+});
+
+test("presetMarker: applied, modified, or camera not checked when the preset has camera settings and the camera state is unknown", () => {
+  const disp = BED.display;
+  const matching = { ...A70_NOW, ObjectEmissivity: 0.9, NUCMode: "Off", CurrentCase: 2 };
+  assert.equal(presetMarker({ visible: { ...LOOK }, display: disp, thermal: matching }, BED), "applied");
+  assert.equal(presetMarker({ visible: { ...LOOK }, display: disp, thermal: A70_NOW }, BED), "modified");
+  assert.equal(presetMarker({ visible: { ...LOOK }, display: disp, thermal: null }, BED), "camera-unknown");
+  assert.equal(presetMarker({ visible: { ...LOOK, contrast: 2 }, display: disp, thermal: null }, BED), "modified", "a moved slider is modified whatever the camera");
+  assert.equal(presetMarker({ visible: { ...LOOK }, display: disp, thermal: null }, { ...BED, thermal: {} }), "applied", "no camera settings in the preset: nothing to check");
+});
+
+test("startupRestore: nothing stored restores both parts, one stored only the other, both stored or no preset nothing", () => {
+  const view: ViewDisplay = { palette: "iron", scaleMode: "auto", manual: { min: 20, max: 40 } };
+  const wantDisplay: ViewDisplay = { palette: "inferno", scaleMode: "manual", manual: { min: 20, max: 250 } };
+  assert.deepEqual(startupRestore({ displayWasStored: false, visibleWasStored: false, lastApplied: BED, currentView: view }), { display: wantDisplay, visible: LOOK });
+  assert.deepEqual(startupRestore({ displayWasStored: true, visibleWasStored: false, lastApplied: BED, currentView: view }), { visible: LOOK });
+  assert.deepEqual(startupRestore({ displayWasStored: false, visibleWasStored: true, lastApplied: BED, currentView: view }), { display: wantDisplay });
+  assert.deepEqual(startupRestore({ displayWasStored: true, visibleWasStored: true, lastApplied: BED, currentView: view }), {});
+  assert.deepEqual(startupRestore({ displayWasStored: false, visibleWasStored: false, lastApplied: null, currentView: view }), {});
 });

@@ -315,3 +315,11 @@ test("layoutHasKey tells 'nothing stored' from 'stored at the default value'", a
   assert.equal(layoutHasKey(broken, "display"), false);
   assert.equal(layoutHasKey(null, "display"), false);
 });
+
+test("setDisplay with an invalid range keeps the current range, not the default", () => {
+  const s = layoutReducer(DEFAULT_LAYOUT, { type: "setDisplay", patch: { palette: "inferno", scaleMode: "manual", manual: { min: 25, max: 250 } } });
+  const bad = layoutReducer(s, { type: "setDisplay", patch: { manual: { min: Number.NaN, max: Infinity } } });
+  assert.deepEqual(bad.display, { palette: "inferno", scaleMode: "manual", manual: { min: 25, max: 250 } });
+  const badPalette = layoutReducer(s, { type: "setDisplay", patch: { palette: "plaid" as never } });
+  assert.equal(badPalette.display.palette, "inferno");
+});
