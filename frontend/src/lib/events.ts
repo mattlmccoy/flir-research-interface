@@ -73,11 +73,12 @@ const MARKER_CATS: MarkerCat[] = [
   { label: "RF on", color: "var(--live)", match: (l) => l.includes("RF") && l.includes("ON") },
   { label: "RF off", color: "var(--warn)", match: (l) => l.includes("RF") && l.includes("OFF") },
   { label: "NUC", color: "var(--trace-3)", match: (l) => l.includes("NUC") },
+  { label: "visible flash", color: "var(--trace-5)", match: (l) => l.includes("VISIBLE FLASH") },
   { label: "gap", color: "var(--err)", match: (l) => l.includes("GAP") },
 ];
 const OTHER_CAT = { label: "event", color: "var(--fg-strong)" };
 
-/** Theme-token color for an event marker by its label (RF on/off, NUC, gap, other). */
+/** Theme-token color for an event marker by its label (RF on/off, NUC, visible flash, gap, other). */
 export function markColor(label: string): string {
   const l = label.toUpperCase();
   return MARKER_CATS.find((c) => c.match(l))?.color ?? OTHER_CAT.color;

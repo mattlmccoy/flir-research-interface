@@ -2,8 +2,9 @@ import { NumberField } from "./NumberField.tsx";
 import { useState } from "react";
 import { api, type Hdf5Export, type ThermalVideoExport } from "../lib/api.ts";
 import { roisDifferFromStored, type Roi } from "../lib/roi.ts";
+import { visibleSampleStatusText, type VisibleSampleSummary } from "../lib/visibleSample.ts";
 
-interface Props { name: string; index: number; nFrames: number; rois: Roi[]; celsius: boolean; thermalPreview?: { bytes: number } | null; onThermalPreview?: () => void; files?: { name: string; bytes: number }[]; onRefresh?: () => void; storedRois?: unknown[] | null; }
+interface Props { name: string; index: number; nFrames: number; rois: Roi[]; celsius: boolean; thermalPreview?: { bytes: number } | null; onThermalPreview?: () => void; files?: { name: string; bytes: number }[]; onRefresh?: () => void; storedRois?: unknown[] | null; visibleSample?: VisibleSampleSummary | null; }
 
 const FRAME_FORMATS = [
   { f: "csv", label: "CSV", title: "°C grid (raw counts if not temperature-linear)" },
@@ -22,7 +23,7 @@ const Spinner = () => <span className="spinner" aria-hidden="true" />;
 
 const STEP_LABEL: Record<string, string> = {
   starting: "starting…", "roi series": "writing ROI series…", images: "rendering images…",
-  "roi video": "encoding ROI video", done: "done", running: "working…",
+  "visible sample": "analysing visible video…", "roi video": "encoding ROI video", done: "done", running: "working…",
   "waiting for the current render": "waiting for the current render to finish…",
 };
 function progLabel(prog: { step: string; done: number; total: number } | null): string {
@@ -41,7 +42,7 @@ function ProgressBar({ done, total }: { done: number; total: number }) {
   );
 }
 
-export function ExportSection({ name, index, nFrames, rois, celsius, thermalPreview, onThermalPreview, files = [], onRefresh, storedRois }: Props) {
+export function ExportSection({ name, index, nFrames, rois, celsius, thermalPreview, onThermalPreview, files = [], onRefresh, storedRois, visibleSample }: Props) {
   const [busy, setBusy] = useState(false);
   // Which single-flight export (hdf5 / range / report) is running, so only its button spins.
   const [busyKind, setBusyKind] = useState<"hdf5" | "range" | "report" | null>(null);
@@ -105,6 +106,7 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
   }
 
   const busyElsewhere = busy || tvBusy || nFrames === 0;
+  const visibleSampleText = visibleSampleStatusText(visibleSample);
   return (
     <>
       {derivedBusy ? (
@@ -127,7 +129,7 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
             </button>
           </div>
           <button className="linkish" disabled={busyElsewhere} onClick={() => regenerateDerived(true, false)} style={{ marginTop: 6 }}
-            title="Update the ROI plot and roi_series.csv (and the peak-frame image) from the ROIs on screen but skip re-rendering the slow ROI video.">
+            title="Update the ROI plot, roi_series.csv, the peak-frame image and the visible-camera analysis (with its close-up video) from the ROIs on screen, but skip re-rendering the slow ROI video.">
             or just the plot + CSV — skip the video (fast)
           </button>
         </div>
@@ -139,12 +141,13 @@ export function ExportSection({ name, index, nFrames, rois, celsius, thermalPrev
               re-generate
             </button>
           </div>
-          <button className="linkish" disabled={busyElsewhere} onClick={() => regenerateDerived(true, false)} title="Rebuild the ROI plot and roi_series.csv (and the peak-frame image) but skip the slow ROI video.">
+          <button className="linkish" disabled={busyElsewhere} onClick={() => regenerateDerived(true, false)} title="Rebuild the ROI plot, roi_series.csv, the peak-frame image and the visible-camera analysis (with its close-up video), but skip the slow ROI video.">
             plot + CSV only (skip video)
           </button>
         </div>
       ) : null}
       {!derivedBusy && derivedOut && <div className="hint" style={{ color: "var(--accent)" }}>{derivedOut}</div>}
+      {visibleSampleText && <div className={visibleSample?.status === "failed" ? "errbox" : "hint"}>{visibleSampleText}</div>}
       <div className="kv">
         <span>ROI series</span>
         <span className="v plain" style={{ textAlign: "right" }}>

@@ -1,5 +1,6 @@
 import { apiUrl, loadOperatorBase, saveOperatorBase } from "./operator.ts";
 import type { VisibleGap, VisibleSegment } from "./visibleSegments.ts";
+import type { VisibleSampleSummary } from "./visibleSample.ts";
 
 /** Site mode: the UI is served from GitHub Pages and talks to a local operator (spec §6.3). */
 export const SITE_MODE = import.meta.env.VITE_SITE_MODE === "1";
@@ -111,7 +112,7 @@ export interface Experiment {
   last_seen_utc?: string | null;
 }
 
-export interface ExperimentInfo { name: string; path: string; n_frames: number; size_bytes?: number; width: number; height: number; duration_s: number; complete: boolean; ir_format: string | null; conversion: Record<string, unknown> | null; experiment: Record<string, unknown> | null; camera: Record<string, unknown> | null; software: Record<string, unknown> | null; started_utc: string | null; events?: Record<string, unknown>[]; manifest: Record<string, unknown> | null; visible?: { file?: string | null; measured_fps?: number | null; error?: string | null; segments?: VisibleSegment[] | null; gaps?: VisibleGap[] | null } | null; visible_timeline?: VisibleSegment[] | null; visible_alignment?: Record<string, unknown> | null; rois?: Record<string, unknown>[] | null; masks?: Record<string, unknown>[] | null; thermal_preview?: { path: string; bytes: number } | null; exports?: { name: string; bytes: number }[]; }
+export interface ExperimentInfo { name: string; path: string; n_frames: number; size_bytes?: number; width: number; height: number; duration_s: number; complete: boolean; ir_format: string | null; conversion: Record<string, unknown> | null; experiment: Record<string, unknown> | null; camera: Record<string, unknown> | null; software: Record<string, unknown> | null; started_utc: string | null; events?: Record<string, unknown>[]; manifest: Record<string, unknown> | null; visible?: { file?: string | null; measured_fps?: number | null; error?: string | null; segments?: VisibleSegment[] | null; gaps?: VisibleGap[] | null } | null; visible_timeline?: VisibleSegment[] | null; visible_alignment?: Record<string, unknown> | null; visible_sample?: VisibleSampleSummary | null; rois?: Record<string, unknown>[] | null; masks?: Record<string, unknown>[] | null; thermal_preview?: { path: string; bytes: number } | null; exports?: { name: string; bytes: number }[]; }
 export interface Timeline { t_s: number[]; frame_id: number[]; }
 export interface ExperimentEvent { t_s?: number; type?: string; name?: string; [k: string]: unknown; }
 export interface RoiSeries {
@@ -145,7 +146,8 @@ export const api = {
   putRois: (name: string, rois: unknown[]) =>
     j<{ rois: number }>(req(`/api/experiments/${encodeURIComponent(name)}/rois`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ rois }) })),
   /** Start a background regenerate of the ROI-dependent derived files; poll exportDerivedStatus.
-   * `video=false` is the quick option (plot + CSV + images only, skips the slow video encode). */
+   * `video=false` is the quick option: it skips the slow ROI video encode but still reruns the
+   * visible-camera analysis (with its close-up video), plus the ROI plot, CSV and images. */
   exportDerived: (name: string, video = true) =>
     j<DerivedJob>(req(`/api/experiments/${encodeURIComponent(name)}/export/derived${video ? "" : "?video=false"}`, { method: "POST" })),
   exportDerivedStatus: (name: string) =>

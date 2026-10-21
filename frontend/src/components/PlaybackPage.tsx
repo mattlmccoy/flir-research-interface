@@ -30,6 +30,7 @@ import { ThermalView, type StatsMap } from "./ThermalView.tsx";
 import { DisplayControls } from "./DisplayControls.tsx";
 import { RoiRows } from "./RoiRows.tsx";
 import { ExportSection } from "./ExportSection.tsx";
+import { visibleFlashMarkers } from "../lib/visibleSample.ts";
 import { MediaExportEditor } from "./MediaExportEditor.tsx";
 import { MetadataEditor } from "./MetadataEditor.tsx";
 import { VisiblePanel, VisibleVideo } from "./VisiblePanel.tsx";
@@ -244,7 +245,9 @@ export function PlaybackPage(p: Props) {
   const [reference, setReference] = useState<Float32Array | null>(null);
   const rad = useMemo(() => radiometryFromCamera(info?.camera), [info]);
   const active = cam.active_case as { low_c?: number; high_c?: number } | undefined;
-  const markers = info && tl ? eventsToMarkers(info.events ?? [], tl, info.started_utc) : [];
+  const markers = info && tl
+    ? [...eventsToMarkers(info.events ?? [], tl, info.started_utc), ...visibleFlashMarkers(info.visible_sample)].sort((a, b) => a.t - b.t)
+    : [];
   const hasVideo = !!info?.visible?.file;
   const playVis = info ? visibleForPlayback(info) : null; // segments on the thermal clock
   const recordedH = info?.visible_alignment ? parseAlignment(info.visible_alignment).H : null;
@@ -427,7 +430,7 @@ export function PlaybackPage(p: Props) {
           </RailSection>
           <RailSection id="export" title="export" open={p.layout.sections.export} onToggle={() => p.dispatch({ type: "toggleSection", section: "export" })} tag={derivedStale ? "update needed" : "derived files"} tagWarn={derivedStale}>
             <button className="primary" style={{ width: "100%", marginBottom: 8 }} disabled={n === 0} onClick={() => setShowMedia(true)} title="Open the media export editor: MP4/GIF of a chosen window with overlays">🎬 Media export (clip / GIF)…</button>
-            <ExportSection name={p.name} index={index} nFrames={n} rois={p.rois.rois} celsius={hdr?.kelvin_per_count != null} thermalPreview={info?.thermal_preview} files={info?.exports ?? []} storedRois={info?.rois ?? null} onRefresh={() => { api.experiment(p.name).then(setInfo).catch((e) => setErr(String(e))); }} />
+            <ExportSection name={p.name} index={index} nFrames={n} rois={p.rois.rois} celsius={hdr?.kelvin_per_count != null} thermalPreview={info?.thermal_preview} files={info?.exports ?? []} storedRois={info?.rois ?? null} visibleSample={info?.visible_sample} onRefresh={() => { api.experiment(p.name).then(setInfo).catch((e) => setErr(String(e))); }} />
           </RailSection>
         </Rail>
       }
