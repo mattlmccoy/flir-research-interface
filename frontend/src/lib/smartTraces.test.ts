@@ -24,7 +24,7 @@ test("sample mean on the °C axis is the ROI's own trace (id = ROI id, ROI colou
   assert.equal(tr.dash, undefined);
   assert.equal(tr.label, "graphite mean");
   assert.deepEqual(Array.from(tr.t), series().t_s);
-  assert.ok(Math.abs(tr.v[5] - 113.36285751753641) < 1e-9);
+  assert.ok(Math.abs(tr.v[5] - 111.02618369144791) < 1e-9);
 });
 
 test("searching rows are gaps (NaN) on every trace, never 0; holding rows keep their values", () => {
@@ -50,7 +50,7 @@ test("one dashed trace per stored ring band, labelled with the band", () => {
   assert.ok(rings.every((r) => r.axis === "temp" && r.color === ROI.color && r.dash && r.dash.length > 0));
   assert.equal(new Set(rings.map((r) => r.id)).size, 3);
   assert.ok(rings.every((r) => r.id !== 3));
-  assert.ok(Math.abs(rings[2].v[5] - 33.73849322965674) < 1e-9);
+  assert.ok(Math.abs(rings[2].v[5] - 33.111010709223656) < 1e-9);
 });
 
 test("ring count follows the stored series (no rings → no ring traces)", () => {
@@ -65,8 +65,8 @@ test("dims choice picks that column, in px, on the size axis", () => {
   const [area] = pick("area"), [length] = pick("length"), [width] = pick("width");
   assert.equal(area.axis, "size");
   assert.equal(area.label, "graphite area (px)");
-  assert.equal(area.v[1], 903);
-  assert.ok(Math.abs(length.v[1] - 38.3192212476371) < 1e-9);
+  assert.equal(area.v[1], 1034);
+  assert.ok(Math.abs(length.v[1] - 39.810127883337756) < 1e-9);
   assert.equal(width.v[1], s.dims.width_px[1]);
   assert.equal(width.label, "graphite width (px)");
   assert.equal(smartTraces(s, { sample: false, rings: false, dims: "off" }, ROI).length, 0);

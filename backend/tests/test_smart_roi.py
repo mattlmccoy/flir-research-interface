@@ -210,6 +210,21 @@ def test_relocks_in_drawn_outline_after_tracking_far_outside_it() -> None:
     assert abs(back.dims["centroid_x"] - CX) < 0.5
 
 
+def test_runaway_hot_spot_does_not_shrink_the_outline() -> None:
+    """A smoking/arcing spot (a few px far hotter than the sample) must not set the edge: the hot
+    level is the region's p90, so the area stays within 10 % of the no-hotspot area while max_c
+    still reports the spot."""
+    clean = SmartTracker(_spec(), W, H).update(_blob(), 0.0)
+    frame = _blob()
+    frame[int(CY) - 2 : int(CY) + 3, int(CX) - 2 : int(CX) + 3] = 3000.0  # 25 px runaway spot
+    hot = SmartTracker(_spec(), W, H).update(frame, 0.0)
+    assert clean.dims is not None and hot.dims is not None
+    assert hot.state == "locked"
+    assert abs(hot.dims["area_px"] / clean.dims["area_px"] - 1.0) <= 0.10, (
+        hot.dims["area_px"], clean.dims["area_px"])
+    assert hot.sample["max_c"] == 3000.0
+
+
 def test_over_range_core() -> None:
     frame = _blob()
     core = _rho(rx=RX / 2, ry=RY / 2) <= 1.0

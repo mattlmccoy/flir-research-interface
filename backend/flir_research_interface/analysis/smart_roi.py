@@ -24,14 +24,17 @@ from flir_research_interface.analysis.smart_spec import (
 
 HOLD_S = 1.0  # a failed frame keeps the last outline (valid, "holding") this long, then searches
 SEARCH_MARGIN_PX = 15  # extra margin round the outline (beyond the outermost ring) to search in
-# least hot-minus-cold to accept a frame: the chosen region's p99 minus the surroundings (median of
+# least hot-minus-cold to accept a frame: the chosen region's p90 minus the surroundings (median of
 # the band outside the last outline while tracking; p20 of the drawn outline before a lock)
 MIN_CONTRAST_C = 2.0
 MIN_AREA_PX = 20
 MAX_AREA_JUMP = 0.35  # fractional area change vs the previous lock allowed in one frame
 LOCK_PASSES = 3  # lock-frame refinement passes (band-median rule) ...
 LOCK_SETTLE = 0.01  # ... until the area changes less than this between passes
-_HOT_PCT, _COLD_PCT = 99.0, 20.0  # region p99 (hot); drawn-outline p20 (cold before a lock)
+_HOT_PCT, _COLD_PCT = 99.0, 20.0  # search-area p99 (provisional hot); drawn-outline p20 (cold)
+# the chosen region's hot level: p90, so a few smoking/arcing pixels far hotter than the sample
+# never set the edge (they still show in the reported max_c)
+_REGION_HOT_PCT = 90.0
 
 # --- detector / tracker -------------------------------------------------------------------------
 
@@ -268,9 +271,9 @@ class SmartTracker:
     def _detect(
         self, field_c: FloatArr, search: BoolArr, bad: BoolArr, cold: float | None
     ) -> tuple[BoolArr | None, float | None]:
-        """(sample mask or None if this frame fails the checks, edge level). ``hot`` is the p99 of
-        the chosen region itself, so neither the background share of the search area nor a hotter
-        neighbour inside it moves the sample's edge."""
+        """(sample mask or None if this frame fails the checks, edge level). ``hot`` is the p90 of
+        the chosen region itself, so neither the background share of the search area, a hotter
+        neighbour inside it, nor a runaway hot spot on the sample moves the sample's edge."""
         usable = search & ~bad
         vals = field_c[usable]
         if vals.size == 0 or cold is None:
@@ -282,7 +285,7 @@ class SmartTracker:
         comp = self._choose(usable & (field_c >= level))  # provisional region
         if comp is None:
             return None, level
-        hot = float(np.percentile(field_c[comp], _HOT_PCT))
+        hot = float(np.percentile(field_c[comp], _REGION_HOT_PCT))
         if hot - cold < MIN_CONTRAST_C:
             return None, level
         if fixed is None:

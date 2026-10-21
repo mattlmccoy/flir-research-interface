@@ -19,7 +19,7 @@ test("parseSmartSeries keeps the real payload's columns and rejects malformed on
   assert.equal(s.rings.length, 3);
   assert.deepEqual([s.rings[1].inner_px, s.rings[1].outer_px], [5, 10]);
   assert.equal(s.stale, false);
-  assert.equal(s.dims.area_px[1], 903);
+  assert.equal(s.dims.area_px[1], 1034);
   assert.equal(parseSmartSeries(null), null);
   assert.equal(parseSmartSeries({ ...FIX, state: ["locked"] }), null, "column lengths disagree");
   assert.equal(parseSmartSeries({ ...FIX, state: (FIX.state as string[]).map(() => "lost") }), null, "unknown state");
@@ -43,7 +43,7 @@ test("smartRowAt: the stored row at the playhead, or the nearest earlier stored 
   assert.equal(r.entry.state, "locked");
   assert.equal(r.entry.valid, true);
   assert.equal(r.entry.rings.length, 3);
-  assert.equal(r.entry.dims?.area_px, 1077);
+  assert.equal(r.entry.dims?.area_px, 1172);
   const strided: SmartSeries = { ...s, index: s.index.map((i) => i * 2) };  // as if stride 2
   const near = smartRowAt(strided, 11);
   assert.ok(near);
@@ -67,8 +67,8 @@ test("smartRowAt: searching rows carry no numbers; holding rows are valid", () =
 test("smartPlaybackRow: readout at the playhead, never a number when unknown", () => {
   const locked = smartPlaybackRow(ready(), 5);
   assert.equal(locked.tone, "locked");
-  assert.ok(locked.mean !== null && Math.abs(locked.mean - 113.36285751753641) < 1e-9);
-  assert.match(locked.lines[0], /^locked · mean 113 °C · max 147/);
+  assert.ok(locked.mean !== null && Math.abs(locked.mean - 111.02618369144791) < 1e-9);
+  assert.match(locked.lines[0], /^locked · mean 111 °C · max 147/);
   assert.ok(locked.lines.some((l) => l.startsWith("ring 10–25 px")));
   const holding = smartPlaybackRow(ready(), 10);
   assert.equal(holding.tone, "holding");
