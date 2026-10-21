@@ -357,26 +357,42 @@ test("markersWithFlashes leaves the event marks alone when there is nothing to a
 });
 
 // --- the adjusted analysis (exports/visible_sample_adjusted.json) ---------------------------------
-// Same shape as visible_sample.json plus `adjust` (the run's adjustment the analysis was run with).
-// The values here are the shape-only stand-in for the adjusted result of 20261020_144402_Run:
-// the analysed numbers are that run's raw ones (OK above), the adjust block is an invented example.
-const ADJ = { exposure_ev: 1, brightness: -0.5, contrast: 1.25, source: "sidecar" } as const;
-const OK_ADJ: VisibleSampleAdjustedSummary = { ...OK, adjust: ADJ };
-const NOW = { exposure_ev: 1, brightness: -0.5, contrast: 1.25 };
-const ADJ_PREFIX = "Visible sample (adjusted: exposure +1 EV, brightness -0.5, contrast 1.25): ";
+// Same shape as visible_sample.json plus `adjust` (the adjustment the analysis was run with).
+// Captured from the real exports/visible_sample_adjusted.json of 20261020_144402_Run, written on
+// 2026-10-21 by analyse_visible_sample(adjust={exposure_ev: -1, brightness: 0, contrast: 1.4}); only
+// the fields the app reads are kept, with the values unchanged (rounded as the app's other fixtures are).
+const ADJ = { exposure_ev: -1, brightness: 0, contrast: 1.4, source: "real-data gate" } as const;
+const OK_ADJ: VisibleSampleAdjustedSummary = {
+  status: "ok",
+  reason: null,
+  coverage: { frames_analysed: 6189, t_first_s: 26.483, t_last_s: 632.572, gaps_over_300ms: 61, uncovered_s: 21.509569, longest_gap_s: 0.836811 },
+  events: [
+    { t_start_s: 627.769, t_peak_s: 627.769, t_end_s: 628.488, peak_brightening: 64.0, n_frames: 4, peak_frame: 6142, segment: 0 },
+  ],
+  segments: [{ index: 0, file: "visible.mp4", t_start_s: 25.996, anchor: "first_frame", frames_analysed: 6189 }],
+  missing: [],
+  plot_error: null,
+  adjust: ADJ,
+};
+const NOW = { exposure_ev: -1, brightness: 0, contrast: 1.4 };
+const ADJ_PREFIX = "Visible sample (adjusted: exposure -1 EV, brightness 0, contrast 1.4): ";
 
 test("adjustedStatus fresh: the adjusted prefix then the raw status body, nothing about sliders", () => {
-  const body = visibleSampleStatusText(OK)!.replace(/^Visible sample: /, "");
+  assert.equal(
+    adjustedStatusText(OK_ADJ, NOW),
+    ADJ_PREFIX + "1 flash at the sample, 26.5–632.6 s analysed (61 gaps > 0.3 s, 21.5 s uncovered, longest 0.84 s)",
+  );
+  const body = visibleSampleStatusText(OK_ADJ)!.replace(/^Visible sample: /, "");
   assert.equal(adjustedStatusText(OK_ADJ, NOW), ADJ_PREFIX + body);
   assert.ok(!adjustedStatusText(OK_ADJ, NOW)!.includes("sliders changed"));
 });
 
 test("adjustedStatus stale: sliders moved since the analysis says so", () => {
-  const text = adjustedStatusText(OK_ADJ, { ...NOW, exposure_ev: 1.5 })!;
+  const text = adjustedStatusText(OK_ADJ, { ...NOW, exposure_ev: -0.5 })!;
   assert.ok(text.startsWith(ADJ_PREFIX), text);
   assert.ok(text.endsWith("; sliders changed since"), text);
   // a difference below the comparison tolerance is not a change
-  assert.ok(!adjustedStatusText(OK_ADJ, { ...NOW, contrast: 1.25 + 1e-9 })!.includes("sliders changed"));
+  assert.ok(!adjustedStatusText(OK_ADJ, { ...NOW, contrast: 1.4 + 1e-9 })!.includes("sliders changed"));
 });
 
 test("adjustedStatus absent: null when no adjusted result exists", () => {
@@ -391,7 +407,7 @@ test("adjustedStatus skipped and failed show their reason", () => {
   assert.equal(adjustedStatusText(failed, NOW), ADJ_PREFIX + "analysis failed (ValueError: boom)");
   assert.equal(visibleSampleIsError(failed), true);
   assert.equal(visibleSampleIsError(skipped), false);
-  assert.ok(adjustedStatusText(skipped, { ...NOW, brightness: 0 })!.endsWith("; sliders changed since"));
+  assert.ok(adjustedStatusText(skipped, { ...NOW, brightness: 0.1 })!.endsWith("; sliders changed since"));
 });
 
 test("adjustedStatus formats the numbers: signed exposure and brightness, at most 2 decimals, no -0", () => {
