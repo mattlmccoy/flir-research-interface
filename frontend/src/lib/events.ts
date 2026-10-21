@@ -115,10 +115,22 @@ export function assignLabelRows(items: { x: number; width: number }[], gap = 4):
   return rows;
 }
 
-/** Time of the next (dir = 1) or previous (dir = -1) marker strictly beyond `t`, or null. */
-export function nextMarkerTime(markers: Marker[], t: number, dir: 1 | -1): number | null {
-  const eps = 1e-6;
-  const cands = markers.map((m) => m.t).filter((mt) => (dir === 1 ? mt > t + eps : mt < t - eps));
-  if (cands.length === 0) return null;
-  return dir === 1 ? Math.min(...cands) : Math.max(...cands);
+/**
+ * Frame index the next-mark (dir = 1) or previous-mark (dir = -1) button should go to from frame
+ * `index`, or null when there is none. Every marker is first snapped to the frame the player would
+ * show for it (`nearestIndex`), and the result is the nearest such frame strictly beyond `index`.
+ * Stepping by time instead can trap the button: a marker placed between two frames (an event with
+ * no frame_id sits at its wall-clock offset) snaps back to the frame before it, and the next click
+ * finds the same marker again.
+ */
+export function nextMarkerIndex(markers: Marker[], tS: ArrayLike<number>, index: number, dir: 1 | -1): number | null {
+  if (tS.length === 0) return null;
+  let best: number | null = null;
+  for (const m of markers) {
+    if (!Number.isFinite(m.t)) continue;
+    const i = nearestIndex(tS, m.t);
+    if (dir === 1 ? i <= index : i >= index) continue;
+    if (best === null || (dir === 1 ? i < best : i > best)) best = i;
+  }
+  return best;
 }

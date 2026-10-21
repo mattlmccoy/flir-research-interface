@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { markColor, markerLegend, nearestIndex, nextMarkerTime } from "./events.ts";
+import { markColor, markerLegend, nextMarkerIndex } from "./events.ts";
 import { markersWithFlashes, visibleFlashMarkers, visibleSampleIsError, visibleSampleStatusText, type VisibleSampleSummary } from "./visibleSample.ts";
 
 // Event times, peaks and coverage are the values measured on the real run 20261020_144402_Run
@@ -187,32 +187,52 @@ test("failed and unreadable summaries are styled as errors; skipped, ok, empty a
 
 // -- placement on the thermal timeline ------------------------------------------------------------
 
-/** What the playback page does for "next mark": jump to the marker time, which the player snaps to
- *  the nearest thermal frame; the cursor time is then that frame's time. */
-function nextMarkClicks(markers: { t: number; label: string }[], tS: number[], from: number, maxClicks = 10): number[] {
+// The whole marker set of the real run 20261020_144402_Run, as the playback page builds it. The
+// flashes are snapped to frames (markersWithFlashes); `trigger` (0.0629 s) and `trigger_end` (627.0783 s)
+// carry no frame_id, so eventsToMarkers places them at their wall-clock offset, BETWEEN frames. The
+// frame times are captured from the run's exports/roi_series.csv (and the player's own landings);
+// the first frame at 0.0 is the start of the recording. Labels are shape-only.
+const WALK_TS = [
+  0.0, 0.066,
+  4.0, 4.029,
+  261.054,
+  554.009, 554.042, 554.075, 554.108,
+  615.61, 615.643, 615.676, 615.709,
+  627.031, 627.064, 627.097, 627.131,
+  627.73, 627.763, 627.797, 627.83,
+  631.06,
+];
+const WALK_BASE = [
+  { t: 0.0629, label: "trigger" },
+  { t: 4.029, label: "RF ON" },
+  { t: 261.054, label: "gap 3" },
+  { t: 627.0783, label: "trigger_end" },
+  { t: 631.06, label: "RF OFF" },
+];
+const WALK_FORWARD = [0.066, 4.029, 261.054, 554.042, 615.676, 627.064, 627.763, 631.06];
+const WALK_BACKWARD = [627.763, 627.064, 615.676, 554.042, 261.054, 4.029, 0.066];
+
+/** Click ▶◆ (dir 1) or ◆◀ (dir -1) repeatedly from frame `index`; returns the frame times visited. */
+function walkMarks(markers: { t: number; label: string }[], tS: number[], index: number, dir: 1 | -1, maxClicks = 12): number[] {
   const visited: number[] = [];
-  let t = from;
-  for (let i = 0; i < maxClicks; i++) {
-    const mt = nextMarkerTime(markers, t, 1);
-    if (mt === null) break;
-    t = tS[nearestIndex(tS, mt)];
-    visited.push(t);
+  let i = index;
+  for (let click = 0; click < maxClicks; click++) {
+    const next = nextMarkerIndex(markers, tS, i, dir);
+    if (next === null) break;
+    i = next;
+    visited.push(tS[i]);
   }
   return visited;
 }
 
-test("next-mark advances through every flash instead of sticking on the first", () => {
-  // the marks eventsToMarkers produced for this run: RF ON and the gap sit exactly on a frame
-  const base = [{ t: 4.0, label: "RF ON" }, { t: 261.054, label: "gap 3" }];
-  const markers = markersWithFlashes(base, OK, TS);
-  // from the gap at 261.054: each click must land on the next flash's frame, then run out
-  assert.deepEqual(nextMarkClicks(markers, TS, 261.054), [554.042, 615.676, 627.763]);
+test("▶◆ visits every mark of the real run in order, including the wall-clock-placed trigger_end", () => {
+  const markers = markersWithFlashes(WALK_BASE, OK, WALK_TS);
+  assert.deepEqual(walkMarks(markers, WALK_TS, 0, 1), WALK_FORWARD);
 });
 
-test("a flash mark that was not snapped to a frame would stick (documents the failure)", () => {
-  const raw = OK.events!.map((ev) => ({ t: ev.t_peak_s, label: "visible flash" }));
-  const clicks = nextMarkClicks(raw, TS, 261.054, 4);
-  assert.deepEqual(clicks, [554.042, 554.042, 554.042, 554.042]);
+test("◆◀ visits every mark of the real run in reverse order", () => {
+  const markers = markersWithFlashes(WALK_BASE, OK, WALK_TS);
+  assert.deepEqual(walkMarks(markers, WALK_TS, WALK_TS.length - 1, -1), WALK_BACKWARD);
 });
 
 test("a non-finite peak time is dropped, not placed", () => {

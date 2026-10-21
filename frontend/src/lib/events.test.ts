@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assignLabelRows, eventsToMarkers, markColor, markerLegend, nearestIndex, nextMarkerTime } from "./events.ts";
+import { assignLabelRows, eventsToMarkers, markColor, markerLegend, nearestIndex, nextMarkerIndex } from "./events.ts";
 
 const TL = { t_s: [0, 0.1, 0.2, 0.3, 0.4], frame_id: [100, 101, 103, 104, 105] };
 const START = "2026-09-02T10:00:00.000+00:00";
@@ -55,15 +55,51 @@ test("long frozen runs (the camera's NUC) become NUC markers; single repeated fr
   assert.equal(m[0].t, 0.2, "first frame with id >= 102 is 103 at t=0.2");
 });
 
-test("nextMarkerTime jumps to the next / previous marker strictly beyond the current time", () => {
-  const ms = [{ t: 1, label: "a" }, { t: 3, label: "b" }, { t: 5, label: "c" }];
-  assert.equal(nextMarkerTime(ms, 0, 1), 1);
-  assert.equal(nextMarkerTime(ms, 1, 1), 3);
-  assert.equal(nextMarkerTime(ms, 3.0001, 1), 5);
-  assert.equal(nextMarkerTime(ms, 5, 1), null);
-  assert.equal(nextMarkerTime(ms, 5, -1), 3);
-  assert.equal(nextMarkerTime(ms, 1, -1), null);
-  assert.equal(nextMarkerTime([], 2, 1), null);
+// Synthetic frames and marks: shape-only. `M_TS` has a frame every 0.1 s.
+const M_TS = [0, 0.1, 0.2, 0.3, 0.4, 0.5];
+
+test("nextMarkerIndex returns the nearest frame index strictly beyond the current one", () => {
+  const ms = [{ t: 0.1, label: "a" }, { t: 0.3, label: "b" }, { t: 0.5, label: "c" }];
+  assert.equal(nextMarkerIndex(ms, M_TS, 0, 1), 1);
+  assert.equal(nextMarkerIndex(ms, M_TS, 1, 1), 3);
+  assert.equal(nextMarkerIndex(ms, M_TS, 2, 1), 3);
+  assert.equal(nextMarkerIndex(ms, M_TS, 5, 1), null);
+  assert.equal(nextMarkerIndex(ms, M_TS, 5, -1), 3);
+  assert.equal(nextMarkerIndex(ms, M_TS, 4, -1), 3);
+  assert.equal(nextMarkerIndex(ms, M_TS, 1, -1), null);
+});
+
+test("nextMarkerIndex picks the nearest marker regardless of the order of the markers", () => {
+  const ms = [{ t: 0.5, label: "c" }, { t: 0.1, label: "a" }, { t: 0.3, label: "b" }];
+  assert.equal(nextMarkerIndex(ms, M_TS, 0, 1), 1);
+  assert.equal(nextMarkerIndex(ms, M_TS, 5, -1), 3);
+});
+
+test("nextMarkerIndex is null with no markers, no frames or only non-finite marker times", () => {
+  assert.equal(nextMarkerIndex([], M_TS, 0, 1), null);
+  assert.equal(nextMarkerIndex([{ t: 0.3, label: "b" }], [], 0, 1), null);
+  assert.equal(nextMarkerIndex([{ t: NaN, label: "x" }, { t: Infinity, label: "y" }], M_TS, 0, 1), null);
+});
+
+test("a mark placed between frames, snapping forward, cannot trap ◆◀", () => {
+  // t = 0.27 snaps to frame 3 (0.3). From frame 3 the old time-based step found 0.27 < 0.3 again and
+  // jumped to frame 3 forever; by index it is not "before" frame 3, so the walk moves on.
+  const ms = [{ t: 0.1, label: "a" }, { t: 0.27, label: "wall-clock" }];
+  assert.equal(nextMarkerIndex(ms, M_TS, 5, -1), 3);
+  assert.equal(nextMarkerIndex(ms, M_TS, 3, -1), 1);
+});
+
+test("a mark placed between frames, snapping backward, cannot trap ▶◆", () => {
+  // t = 0.23 snaps to frame 2 (0.2): the old step re-found 0.23 > 0.2 forever.
+  const ms = [{ t: 0.23, label: "wall-clock" }, { t: 0.5, label: "c" }];
+  assert.equal(nextMarkerIndex(ms, M_TS, 0, 1), 2);
+  assert.equal(nextMarkerIndex(ms, M_TS, 2, 1), 5);
+});
+
+test("two marks that snap to the same frame are one stop", () => {
+  const ms = [{ t: 0.28, label: "a" }, { t: 0.31, label: "b" }, { t: 0.5, label: "c" }];
+  assert.equal(nextMarkerIndex(ms, M_TS, 0, 1), 3);
+  assert.equal(nextMarkerIndex(ms, M_TS, 3, 1), 5);
 });
 
 test("markerLegend lists the distinct event categories present (deduped, only present)", () => {

@@ -24,7 +24,7 @@ function storedToRois(rois: unknown): Roi[] {
   return loadRois({ getItem: () => JSON.stringify({ rois, nextId: 1 }), setItem: () => undefined } as unknown as Storage).rois;
 }
 import { roiColor } from "../lib/overlay.ts";
-import { eventsToMarkers, markColor, nearestIndex, nextMarkerTime } from "../lib/events.ts";
+import { eventsToMarkers, markColor, nearestIndex, nextMarkerIndex } from "../lib/events.ts";
 import { fmtAny, fmtCelsius } from "../lib/format.ts";
 import { ThermalView, type StatsMap } from "./ThermalView.tsx";
 import { DisplayControls } from "./DisplayControls.tsx";
@@ -276,8 +276,8 @@ export function PlaybackPage(p: Props) {
       <button className="primary" style={{ minWidth: 64 }} onClick={() => setPlaying((v) => !v)}>{playing ? "pause" : "play"}</button>
       <button className="secondary" onClick={() => setIndex((i) => clampIndex(i + 1, n))} title="Next frame" aria-label="Next frame">▶︎</button>
       <button className="secondary" onClick={() => setIndex(clampIndex(n - 1, n))} title="Last frame" aria-label="Last frame">⏭</button>
-      <button className="secondary" disabled={!markers.length} onClick={() => { const mt = nextMarkerTime(markers, t, -1); if (mt !== null && tl) { setPlaying(false); setIndex(nearestIndex(tl.t_s, mt)); } }} title="Previous mark (RF ON/OFF, NUC, gap…)" aria-label="Previous mark">◆◀︎</button>
-      <button className="secondary" disabled={!markers.length} onClick={() => { const mt = nextMarkerTime(markers, t, 1); if (mt !== null && tl) { setPlaying(false); setIndex(nearestIndex(tl.t_s, mt)); } }} title="Next mark" aria-label="Next mark">▶︎◆</button>
+      <button className="secondary" disabled={!markers.length} onClick={() => { const mi = tl ? nextMarkerIndex(markers, tl.t_s, index, -1) : null; if (mi !== null) { setPlaying(false); setIndex(mi); } }} title="Previous mark (RF ON/OFF, NUC, gap…)" aria-label="Previous mark">◆◀︎</button>
+      <button className="secondary" disabled={!markers.length} onClick={() => { const mi = tl ? nextMarkerIndex(markers, tl.t_s, index, 1) : null; if (mi !== null) { setPlaying(false); setIndex(mi); } }} title="Next mark" aria-label="Next mark">▶︎◆</button>
       <select value={String(speed)} onChange={(e) => setSpeed(Number(e.target.value))} aria-label="Playback speed">
         {SPEEDS.map((s) => <option key={String(s)} value={String(s)}>{speedLabel(s)}</option>)}
       </select>
