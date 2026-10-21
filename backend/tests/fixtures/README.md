@@ -15,3 +15,25 @@ the recording was stopped, yet its manifest said `complete: true`) and the last 
 events 60–82 (`t_utc`, `frame_id`, `forward_w`, `reverse_w`) of the real run `20260923_175956_Run`.
 The camera reconnected twice mid-run: ids 9177 → 1 at t = 67.8 s and 71 → 1 at t = 83.0 s, so ids
 1–71 occur twice. Copied from `thermal.zarr` and `events.json` unchanged (t_s rounded to 1 µs).
+
+`visible_sample_20261020_144402.json` — the inputs of the visible-camera sample analysis, from the
+real FLIR A70 run `20261020_144402_Run` (2026-10-20). `visible_alignment` and `rois` are copied
+unchanged from its `metadata.json`. `host_t0_ns` is thermal frame 0's `host_timestamp_ns`;
+`t_start_s` (25.996) is where `visible.mp4` starts on the thermal axis, the segment's
+`first_frame_host_ns` minus `host_t0_ns`, rounded to 1 ms. `packets` is the `pts_time` and
+keyframe flag (`K` in the ffprobe flags) of all 6,192 packets of `visible.mp4`, from
+`ffprobe -select_streams v:0 -show_entries packet=pts_time,flags`. No pixel data.
+
+`visible_sample_20261020_144402.npz` — luma (the Y plane) of that run's `visible.mp4`, cropped to the
+analysis region's bounding box: the mapped `freehand_sample` ROI grown by 30 px (126×124 px at
+x0 316, y0 375 of the 1280×960 frame). `crops` holds frames 3170 (368.1 s on the thermal axis),
+6141–6143 (before, during and after the flash at 627.77 s) and 3–26 (the first 5 s after the
+0.25 s skip of frames 0–2), in that order; `crop_frames` gives their frame indices. The crops are
+the decoded values, unchanged (ffmpeg 6 `-vf extractplanes=y -fps_mode passthrough`, which gives
+exactly one frame per packet; the default mode inserts a duplicate). `brightening` and `keyframe`
+cover all 6,192 frames. `keyframe` is the packet flag. `brightening` is **derived from the real
+video by a one-off capture script**, not stored by the camera: frame *i*'s 99.5th percentile
+(`np.percentile`, linear interpolation) of `int16(luma[i]) - int16(luma[i-1])` over the region
+mask pixels, where the previous frame is the previous *analysed* frame (index 3 or later). It is
+NaN for frames 0–3 (frames 0–2 are skipped, frame 3 has no analysed predecessor) and is computed
+for keyframes too. Check values: frames 6141, 6142, 6143 give 5, 97, 27; the region has 13,543 px.
