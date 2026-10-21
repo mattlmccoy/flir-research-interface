@@ -243,3 +243,42 @@ test("seriesRecomputed: a reload that shows a different compute drops cached out
   assert.equal(seriesRecomputed("2026-10-21T10:00:00+00:00", "2026-10-21T11:00:00+00:00"), true, "recomputed elsewhere");
   assert.equal(seriesRecomputed(null, "2026-10-21T11:00:00+00:00"), true, "was missing, now computed");
 });
+
+test("saveSmartForCompute: waits for the run info refresh, so back-to-back computes never drop an upsert", async () => {
+  const { saveSmartForCompute } = await import("./smartSeries.ts");
+  const base = { id: 3, kind: "smart" as const, name: "graphite", search: [[1, 0], [9, 0], [9, 9]] as [number, number][], rings_px: [5, 10, 25], rule: "relative" as const, sensitivity: 0.5 };
+  const spot = { id: 2, kind: "spot", x: 1, y: 1 };
+  let server: unknown[] = [spot];
+  const puts: unknown[][] = [];
+  const events: string[] = [];
+  let release: () => void = () => undefined;
+  const io = {
+    confirm: () => true,
+    putRois: async (list: unknown[]) => { puts.push(list); server = list; },
+    refresh: () => new Promise<{ rois: unknown[] }>((res) => { release = () => { events.push("refreshed"); res({ rois: server }); }; }),
+  };
+  const first = saveSmartForCompute(base, { rois: [spot] }, io).then((r) => { events.push("returned"); return r; });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(events, [], "does not return before the refresh lands");
+  release();
+  const a = await first;
+  assert.deepEqual(events, ["refreshed", "returned"]);
+  assert.equal(a.ok, true);
+  const second = saveSmartForCompute({ ...base, id: 7 }, a.info, io);
+  await new Promise((r) => setTimeout(r, 0));
+  release();
+  await second;
+  assert.deepEqual(puts[1], [spot, base, { ...base, id: 7 }], "the second upsert keeps the first one");
+});
+
+test("saveSmartForCompute: a failed refresh still carries the list it saved; unedited needs no save; cancel stops", async () => {
+  const { saveSmartForCompute } = await import("./smartSeries.ts");
+  const r = { id: 3, kind: "smart" as const, search: [[1, 0], [9, 0], [9, 9]] as [number, number][], rings_px: [5, 10, 25], rule: "relative" as const, sensitivity: 0.5 };
+  const io = { confirm: () => true, putRois: async () => undefined, refresh: async (): Promise<{ rois: unknown[] }> => { throw new Error("offline"); } };
+  const got = await saveSmartForCompute(r, { rois: [] }, io);
+  assert.equal(got.ok, true);
+  assert.deepEqual(got.info.rois, [r]);
+  const same = await saveSmartForCompute(r, { rois: [r] }, { ...io, putRois: async () => { throw new Error("must not save"); } });
+  assert.equal(same.ok, true);
+  assert.equal((await saveSmartForCompute(r, { rois: [] }, { ...io, confirm: () => false })).ok, false);
+});

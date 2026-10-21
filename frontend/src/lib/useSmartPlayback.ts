@@ -1,11 +1,11 @@
 // Playback's smart ROI wiring: the stored series + compute jobs (useSmartSeries), the per-frame
 // stored outlines (useSmartPlaybackOverlays), the rail rows, the stale set and the plot traces.
 // Pure logic lives in smartSeries.ts / smartTraces.ts; this only connects it to PlaybackPage.
-import { createElement, useCallback, useMemo } from "react";
+import { createElement, useCallback, useMemo, useRef } from "react";
 import { api, type ExperimentInfo } from "./api.ts";
 import { roiColor } from "./overlay.ts";
 import { roiLabel, type Roi } from "./roi.ts";
-import { smartComputeAction, smartEdited, smartJobText, smartPlaybackRow, upsertStoredRoi } from "./smartSeries.ts";
+import { saveSmartForCompute, smartComputeAction, smartEdited, smartJobText, smartPlaybackRow } from "./smartSeries.ts";
 import { smartTraces, type SmartDimChoice, type SmartTrace } from "./smartTraces.ts";
 import type { SmartOverlay } from "./smartLabels.ts";
 import { useSmartPlaybackOverlays } from "./useSmartPlaybackOverlays.ts";
@@ -39,18 +39,24 @@ export interface SmartPlayback {
 export function useSmartPlayback({ name, rois, info, setInfo, setErr, index, show, sizeDim }: Args): SmartPlayback {
   const smartIds = useMemo(() => rois.filter((r) => r.kind === "smart").map((r) => r.id), [rois]);
   // A compute reads the ROI stored with the run, so an unsaved or edited smart ROI is saved first:
-  // only that ROI is written into the run's stored set (same id replaced, else appended).
+  // only that ROI is written into the run's stored set (same id replaced, else appended). The info
+  // refresh is awaited and kept in a ref, so a second compute right after builds on that save.
+  const infoRef = useRef(info);
+  infoRef.current = info;
   const beforeCompute = useCallback(async (id: number): Promise<boolean> => {
     const r = rois.find((x) => x.id === id);
-    if (!info) { setErr("run info not loaded yet; try again"); return false; }
+    const cur = infoRef.current;
+    if (!cur) { setErr("run info not loaded yet; try again"); return false; }
     if (!r || r.kind !== "smart") return false;
-    if (!smartEdited(r, info.rois)) return true;
-    if (!window.confirm(`Save ${roiLabel(r)}'s current outline and settings into this run (its other stored ROIs are unchanged), then compute it over every frame?`)) return false;
-    // info.rois is null when the run has no stored ROIs (reader.py "rois": metadata.get("rois"))
-    await api.putRois(name, upsertStoredRoi(info.rois ?? [], r));
-    api.experiment(name).then(setInfo).catch(() => undefined);
-    return true;
-  }, [name, rois, info, setErr, setInfo]);
+    const got = await saveSmartForCompute(r, cur, {
+      confirm: (m) => window.confirm(m),
+      putRois: (list) => api.putRois(name, list),
+      refresh: () => api.experiment(name),
+    });
+    infoRef.current = got.info;
+    if (got.info !== cur) setInfo(got.info);
+    return got.ok;
+  }, [name, rois, setErr, setInfo]);
   const smart = useSmartSeries(name, smartIds, beforeCompute, setErr);
   const overlays = useSmartPlaybackOverlays(name, smartIds, index, smart.version);
   const stale = useMemo(() => new Set(rois.flatMap((r) => {

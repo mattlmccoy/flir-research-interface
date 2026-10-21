@@ -3,7 +3,7 @@
 // built from it. Pure: fetching and polling live in components/useSmartSeries.ts.
 import { smartReadoutLines, type SmartReadoutEntry, type SmartState } from "./smartReadout.ts";
 import type { SmartRowView } from "./smartFeed.ts";
-import { smartTracking, type Smart } from "./roi.ts";
+import { roiLabel, smartTracking, type Smart } from "./roi.ts";
 
 type Col = (number | null)[];
 export interface SmartSeriesRing { inner_px: number; outer_px: number; mean: Col; max: Col; min: Col; }
@@ -203,4 +203,28 @@ export function upsertStoredRoi(stored: unknown[] | null | undefined, roi: Smart
   const list = stored;
   const at = list.findIndex((x) => isObj(x) && x.id === roi.id);
   return at < 0 ? [...list, roi] : list.map((x, k) => (k === at ? roi : x));
+}
+
+export interface SaveForComputeIO<I> {
+  confirm: (message: string) => boolean;
+  putRois: (list: unknown[]) => Promise<unknown>;
+  refresh: () => Promise<I>;
+}
+
+/** Before computing `roi`: when it differs from the run's stored copy, ask, save it into the stored
+ *  list (upsertStoredRoi) and wait for the run info refresh, so the next compute builds on the list
+ *  just saved (a refresh that fails falls back to that list). `ok` false = cancelled. */
+export async function saveSmartForCompute<I extends { rois?: unknown[] | null }>(
+  roi: Smart, info: I, io: SaveForComputeIO<I>,
+): Promise<{ ok: boolean; info: I }> {
+  if (!smartEdited(roi, info.rois)) return { ok: true, info };
+  if (!io.confirm(`Save ${roiLabel(roi)}'s current outline and settings into this run (its other stored ROIs are unchanged), then compute it over every frame?`)) return { ok: false, info };
+  // info.rois is null when the run has no stored ROIs (reader.py "rois": metadata.get("rois"))
+  const list = upsertStoredRoi(info.rois ?? [], roi);
+  await io.putRois(list);
+  try {
+    return { ok: true, info: await io.refresh() };
+  } catch {
+    return { ok: true, info: { ...info, rois: list } };
+  }
 }
