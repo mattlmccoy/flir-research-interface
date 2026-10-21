@@ -15,3 +15,9 @@ test("an explicit user choice is preserved across format switches", () => {
   assert.equal(defaultMaxMbForFormat("mp4", 50), 50); // and it survives the switch to MP4
   assert.equal(defaultMaxMbForFormat("gif", 10), 10);
 });
+
+test("mediaRoiSupported: smart ROIs can't be drawn or plotted in a media export (the backend skips them)", async () => {
+  const { mediaRoiSupported } = await import("./mediaDefaults.ts");
+  assert.equal(mediaRoiSupported("smart"), false);
+  for (const k of ["spot", "rect", "circle", "ellipse", "line", "polygon", "polyline", undefined]) assert.equal(mediaRoiSupported(k), true, String(k));
+});
