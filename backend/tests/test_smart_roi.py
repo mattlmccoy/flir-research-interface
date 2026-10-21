@@ -191,6 +191,25 @@ def test_bad_frame_holds_then_searches() -> None:
     assert gone.state == "searching" and gone.valid is False
 
 
+def test_relocks_in_drawn_outline_after_tracking_far_outside_it() -> None:
+    """Tracked (uncapped) far from the drawn outline, then lost: the re-lock search area (last
+    outline ∩ capped user outline) is empty, so it falls back to the drawn outline."""
+    t = SmartTracker(_spec(), W, H)
+    t.update(_blob(), 0.0)
+    ts = 0.0
+    for cx in range(int(CX) + 8, 441, 8):  # walk the sample far right of BOX (x <= 300)
+        ts += 1 / 30
+        r = t.update(_blob(cx=cx), ts)
+        assert r.state == "locked", cx
+    assert r.dims is not None and r.dims["centroid_x"] > 420
+    flat = np.full((H, W), 40.0)
+    gone = t.update(flat, ts + HOLD_S + 0.1)
+    assert gone.state == "searching"
+    back = t.update(_blob(), ts + HOLD_S + 0.2)  # the sample is back where the user drew
+    assert back.state == "locked" and back.dims is not None
+    assert abs(back.dims["centroid_x"] - CX) < 0.5
+
+
 def test_over_range_core() -> None:
     frame = _blob()
     core = _rho(rx=RX / 2, ry=RY / 2) <= 1.0

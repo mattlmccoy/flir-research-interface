@@ -24,12 +24,14 @@ from flir_research_interface.analysis.smart_spec import (
 
 HOLD_S = 1.0  # a failed frame keeps the last outline (valid, "holding") this long, then searches
 SEARCH_MARGIN_PX = 15  # extra margin round the outline (beyond the outermost ring) to search in
-MIN_CONTRAST_C = 2.0  # core (p99) minus surroundings (p20) of the search area
+# least hot-minus-cold to accept a frame: the chosen region's p99 minus the surroundings (median of
+# the band outside the last outline while tracking; p20 of the drawn outline before a lock)
+MIN_CONTRAST_C = 2.0
 MIN_AREA_PX = 20
 MAX_AREA_JUMP = 0.35  # fractional area change vs the previous lock allowed in one frame
 LOCK_PASSES = 3  # lock-frame refinement passes (band-median rule) ...
 LOCK_SETTLE = 0.01  # ... until the area changes less than this between passes
-_HOT_PCT, _COLD_PCT = 99.0, 20.0  # core of the sample; drawn-outline surroundings
+_HOT_PCT, _COLD_PCT = 99.0, 20.0  # region p99 (hot); drawn-outline p20 (cold before a lock)
 
 # --- detector / tracker -------------------------------------------------------------------------
 
@@ -194,14 +196,19 @@ class SmartTracker:
 
     # -- per frame ---------------------------------------------------------------------------
 
+    def _user_search(self) -> tuple[BoolArr, BoolArr | None, Box] | None:
+        if self._user_box is None:
+            return None
+        b = self._user_box
+        return self._user[b[1] : b[3], b[0] : b[2]], None, b
+
     def _search(self) -> tuple[BoolArr, BoolArr | None, Box] | None:
         """(search mask, cold band or None, their box). The band — the shell (max ring, max ring
-        + margin] outside the last outline — is where the surroundings are read while tracking."""
+        + margin] outside the last outline — is where the surroundings are read while tracking.
+        Re-lock searches the last outline's area capped to the drawn outline; when the track had
+        wandered so far that nothing is left, it searches the drawn outline itself."""
         if self._outline is None or self._outline_box is None:
-            if self._user_box is None:
-                return None
-            b = self._user_box
-            return self._user[b[1] : b[3], b[0] : b[2]], None, b
+            return self._user_search()
         ring = max(self.spec.rings_px)
         r = ring + SEARCH_MARGIN_PX
         b = _pad(self._outline_box, r + 1, self.w, self.h)
@@ -214,7 +221,7 @@ class SmartTracker:
             band = np.asarray(dist > ring, dtype=bool) & mask
         sb = _bbox(mask)
         if sb is None:
-            return None
+            return self._user_search() if self._state == "searching" else None
         cut = (slice(sb[1], sb[3]), slice(sb[0], sb[2]))
         box = (b[0] + sb[0], b[1] + sb[1], b[0] + sb[2], b[1] + sb[3])
         return mask[cut], None if band is None else band[cut], box
