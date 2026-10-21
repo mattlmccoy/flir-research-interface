@@ -16,14 +16,6 @@ from typing import Any
 import numpy as np
 import pytest
 from PIL import Image
-from test_visible_sample_run import (
-    FIXTURES,
-    _experiment,
-    _exports,
-    _run,
-    _synthetic_clip,
-    needs_ffmpeg,
-)
 
 from flir_research_interface.analysis import visible_sample_run as vsr
 from flir_research_interface.analysis.run_summary import (
@@ -52,6 +44,14 @@ from flir_research_interface.analysis.visible_sample_plot import (
 from flir_research_interface.camera.base import Frame
 from flir_research_interface.playback.reader import ExperimentReader
 from flir_research_interface.recording.recorder import Recorder
+from tests.visible_sample_helpers import (
+    FIXTURES,
+    experiment,
+    exported,
+    needs_ffmpeg,
+    run_analysis,
+    synthetic_clip,
+)
 
 N_FRAMES = 80  # thermal frames, 10 fps: 0 to 7.9 s
 SAMPLE = {"id": 7, "kind": "rect", "name": "freehand_sample", "x0": 2, "y0": 2, "x1": 10, "y1": 10}
@@ -327,7 +327,7 @@ def real() -> dict[str, Any]:
 @pytest.fixture(scope="module")
 def short_clip(tmp_path_factory: pytest.TempPathFactory, real: dict[str, Any]) -> Path:
     """synthetic, 1.5 s: plumbing for the runner, not detection truth."""
-    return _synthetic_clip(tmp_path_factory.mktemp("short") / "s.mp4", real, 1.5, 0.5)
+    return synthetic_clip(tmp_path_factory.mktemp("short") / "s.mp4", real, 1.5, 0.5)
 
 
 @pytest.fixture
@@ -345,13 +345,13 @@ def _plot_path(d: Path) -> Path:
 def test_runner_writes_the_plot_on_ok(
     tmp_path: Path, real: dict[str, Any], short_clip: Path, fixed_threshold: None, closeup: bool
 ) -> None:
-    d = _experiment(tmp_path, real, [short_clip])
-    out = _run(d, closeup=closeup)
+    d = experiment(tmp_path, real, [short_clip])
+    out = run_analysis(d, closeup=closeup)
     assert out["status"] == "ok" and out["plot_error"] is None, out
     img = Image.open(_plot_path(d))
     assert img.format == "PNG" and img.size == (PLOT_W, PLOT_H)
     assert out["files"][-2:] == ["visible_sample_plot.png", "visible_sample.json"]
-    assert _exports(d) == sorted(out["files"])  # no .part left, nothing unlisted
+    assert exported(d) == sorted(out["files"])  # no .part left, nothing unlisted
     assert json.loads((d / "exports" / "visible_sample.json").read_text()) == out
 
 
@@ -359,12 +359,12 @@ def test_runner_writes_the_plot_on_ok(
 def test_runner_removes_the_plot_when_a_later_run_is_skipped(
     tmp_path: Path, real: dict[str, Any], short_clip: Path, fixed_threshold: None
 ) -> None:
-    d = _experiment(tmp_path, real, [short_clip])
-    assert _run(d)["status"] == "ok" and _plot_path(d).is_file()
-    out = _run(d, ffmpeg="/nonexistent")
+    d = experiment(tmp_path, real, [short_clip])
+    assert run_analysis(d)["status"] == "ok" and _plot_path(d).is_file()
+    out = run_analysis(d, ffmpeg="/nonexistent")
     assert out["status"] == "skipped" and out["reason"] == "ffmpeg not found"
     assert not _plot_path(d).exists()
-    assert _exports(d) == ["visible_sample.json"]
+    assert exported(d) == ["visible_sample.json"]
 
 
 @needs_ffmpeg
@@ -377,18 +377,18 @@ def test_runner_keeps_the_analysis_when_only_the_plot_fails(
 ) -> None:
     """The plot is derived from the CSV and the summary: losing it must not lose them, but the
     summary must say it is missing, and an older plot must not stand in for it."""
-    d = _experiment(tmp_path, real, [short_clip])
-    assert _run(d)["status"] == "ok" and _plot_path(d).is_file()
+    d = experiment(tmp_path, real, [short_clip])
+    assert run_analysis(d)["status"] == "ok" and _plot_path(d).is_file()
 
     def fails(*args: Any, **kw: Any) -> bytes:
         raise RuntimeError("no font")
 
     monkeypatch.setattr(vsr, "visible_sample_plot_png", fails)
-    out = _run(d)
+    out = run_analysis(d)
     assert out["status"] == "ok" and out["reason"] is None
     assert out["plot_error"] == "RuntimeError: no font"
     assert "visible_sample_plot.png" not in out["files"]
     assert not _plot_path(d).exists()  # the plot of the first run is gone, not left to mislead
-    assert _exports(d) == sorted(out["files"])
+    assert exported(d) == sorted(out["files"])
     assert (d / "exports" / "visible_sample.csv").is_file() and out["coverage"]["frames_analysed"]
     assert json.loads((d / "exports" / "visible_sample.json").read_text()) == out
