@@ -578,3 +578,16 @@ test("roisDifferFromStored: a stored smart ROI that omits defaulted keys matches
   assert.deepEqual(smartTracking({ ...stored[0], fixed_c: 300 }), smartTracking(stored[0]));
   assert.notDeepEqual(smartTracking({ ...stored[0], rule: "fixed", fixed_c: 300 }), smartTracking({ ...stored[0], rule: "fixed", fixed_c: 310 }));
 });
+
+test("smart rings over MAX_RING_PX are rejected on load and ignored by setSmart (operator rejects them)", () => {
+  const { store, storage } = mkStore();
+  const pts = [[0, 0], [8, 0], [8, 8]];
+  store.set("fri.rois.v1", JSON.stringify({ rois: [
+    { id: 1, kind: "smart", search: pts, rings_px: [5, 10, 100] },
+    { id: 2, kind: "smart", search: pts, rings_px: [5, 10, 101] },
+  ], nextId: 3 }));
+  assert.deepEqual(loadRois(storage).rois.map((r) => r.id), [1]);
+  let s = roiReducer(EMPTY, { type: "add", roi: newSmart([[0, 0], [9, 0], [9, 9]]) });
+  s = roiReducer(s, { type: "setSmart", id: 1, rings_px: [5, 500] });
+  assert.deepEqual((s.rois[0] as Extract<Roi, { kind: "smart" }>).rings_px, [5, 10, 25]);
+});

@@ -61,11 +61,25 @@ def test_parse_smart_full() -> None:
         {"sensitivity": 0.2},
         {"sensitivity": 0.8},
         {"ring_emissivity": 0},
+        {"rings_px": [5, 10, 101]},  # over MAX_RING_PX: would stall the camera thread
+        {"rule": "fixed", "fixed_c": float("nan")},
+        {"rule": "fixed", "fixed_c": float("inf")},
+        {"fixed_c": float("-inf")},
+        {"ring_emissivity": float("nan")},
     ],
 )
 def test_parse_smart_rejects(bad: dict[str, Any]) -> None:
     with pytest.raises(ValueError):
         parse_smart_roi(_raw(**bad))
+
+
+def test_parse_smart_ring_limit_is_inclusive() -> None:
+    from flir_research_interface.analysis.smart_spec import MAX_RING_PX
+
+    assert MAX_RING_PX == 100
+    assert parse_smart_roi(_raw(rings_px=[5, 10, 100])).rings_px == (5, 10, 100)
+    with pytest.raises(ValueError, match="100"):
+        parse_smart_roi(_raw(rings_px=[101]))
 
 
 def test_parse_rois_passes_smart_through() -> None:

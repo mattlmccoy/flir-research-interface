@@ -20,3 +20,12 @@ test("parseRingOffsets explains the problem", () => {
   assert.equal(got.ok, false);
   if (!got.ok) assert.match(got.error, /increasing/);
 });
+
+test("parseRingOffsets caps the outermost ring at MAX_RING_PX (100 px), like the operator", async () => {
+  const { MAX_RING_PX } = await import("./roi.ts");
+  assert.equal(MAX_RING_PX, 100);
+  assert.deepEqual(parseRingOffsets("5, 10, 100"), { ok: true, rings: [5, 10, 100] });
+  const got = parseRingOffsets("5, 10, 101");
+  assert.equal(got.ok, false);
+  if (!got.ok) assert.match(got.error, /100 px/);
+});

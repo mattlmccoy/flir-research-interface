@@ -48,6 +48,8 @@ export interface Smart extends Meta {
 }
 export const SMART_DEFAULT_RINGS: readonly number[] = Object.freeze([5, 10, 25]);
 export const SMART_DEFAULT_SENSITIVITY = 0.5;
+/** Largest ring offset the operator accepts (backend smart_spec.py MAX_RING_PX). */
+export const MAX_RING_PX = 100;
 /** A new smart ROI around a drawn outline, with the v1 defaults (rings 5/10/25 px, relative rule, sensitivity 0.5). */
 export function newSmart(search: [number, number][]): Omit<Smart, "id"> {
   return { kind: "smart", search: search.map(([x, y]) => [x, y] as [number, number]), rings_px: [...SMART_DEFAULT_RINGS], rule: "relative", sensitivity: SMART_DEFAULT_SENSITIVITY };
@@ -222,7 +224,7 @@ export function roiReducer(s: RoiState, a: RoiAction): RoiState {
         if (r.kind !== "smart") return r;
         const next: Smart = { ...r };
         const rings = a.rings_px;
-        if (rings && rings.length > 0 && rings.every((x, i) => Number.isInteger(x) && x > 0 && (i === 0 || x > rings[i - 1]))) next.rings_px = [...rings];
+        if (rings && rings.length > 0 && rings.every((x, i) => Number.isInteger(x) && x > 0 && x <= MAX_RING_PX && (i === 0 || x > rings[i - 1]))) next.rings_px = [...rings];
         if (typeof a.sensitivity === "number" && a.sensitivity >= 0.3 && a.sensitivity <= 0.7) next.sensitivity = a.sensitivity;
         if (a.ring_emissivity === null) delete next.ring_emissivity;
         else if (typeof a.ring_emissivity === "number" && a.ring_emissivity >= 0.01 && a.ring_emissivity <= 1) next.ring_emissivity = a.ring_emissivity;
@@ -475,14 +477,14 @@ function isPoints(v: unknown): v is [number, number][] {
   return Array.isArray(v) && v.every((p) => Array.isArray(p) && p.length === 2 && isInt(p[0]) && isInt(p[1]));
 }
 
-/** Mirrors backend parse_smart_roi: ≥ 3 integer search points, positive strictly increasing rings,
+/** Mirrors backend parse_smart_roi: ≥ 3 integer search points, positive strictly increasing rings ≤ MAX_RING_PX,
  *  `fixed_c` required for the fixed rule, sensitivity in [0.3, 0.7], ring emissivity in [0.01, 1]. */
 function asSmart(r: Record<string, unknown>): Smart | null {
   if (!isPoints(r.search) || r.search.length < 3) return null;
   let rings: number[] = [...SMART_DEFAULT_RINGS];
   if (r.rings_px !== undefined) {
     const v = r.rings_px;
-    if (!Array.isArray(v) || v.length === 0 || !v.every((x) => isInt(x) && x > 0) || !v.every((x, i) => i === 0 || x > v[i - 1])) return null;
+    if (!Array.isArray(v) || v.length === 0 || !v.every((x) => isInt(x) && x > 0 && x <= MAX_RING_PX) || !v.every((x, i) => i === 0 || x > v[i - 1])) return null;
     rings = v as number[];
   }
   const rule = r.rule === undefined ? "relative" : r.rule;

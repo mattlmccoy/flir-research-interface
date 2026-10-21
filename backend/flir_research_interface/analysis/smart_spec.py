@@ -5,11 +5,13 @@ Re-exported by ``smart_roi``, which holds the per-frame detector/tracker.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Literal
 
 DEFAULT_RINGS_PX: tuple[int, ...] = (5, 10, 25)
 SENSITIVITY_RANGE = (0.3, 0.7)
+MAX_RING_PX = 100  # outermost ring offset; bigger rings make the per-frame crop (and work) explode
 
 
 @dataclass(frozen=True)
@@ -31,8 +33,8 @@ def _int(v: Any, name: str) -> int:
 
 
 def _number(v: Any, name: str) -> float:
-    if isinstance(v, bool) or not isinstance(v, int | float):
-        raise ValueError(f"{name} must be a number")
+    if isinstance(v, bool) or not isinstance(v, int | float) or not math.isfinite(v):
+        raise ValueError(f"{name} must be a finite number")
     return float(v)
 
 
@@ -53,6 +55,8 @@ def parse_smart_roi(raw: dict[str, Any]) -> SmartRoiSpec:
     rings = tuple(_int(r, "ring offset") for r in rings_raw)
     if rings[0] < 1 or any(b <= a for a, b in zip(rings, rings[1:], strict=False)):
         raise ValueError("rings_px must be positive and strictly increasing")
+    if rings[-1] > MAX_RING_PX:
+        raise ValueError(f"ring offsets must be at most {MAX_RING_PX} px")
 
     rule = raw.get("rule", "relative")
     if rule not in ("relative", "fixed"):
@@ -89,6 +93,7 @@ def parse_smart_roi(raw: dict[str, Any]) -> SmartRoiSpec:
 
 __all__ = [
     "DEFAULT_RINGS_PX",
+    "MAX_RING_PX",
     "SENSITIVITY_RANGE",
     "SmartRoiSpec",
     "parse_smart_roi",
