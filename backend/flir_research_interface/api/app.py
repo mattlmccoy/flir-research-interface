@@ -1599,13 +1599,14 @@ def create_app(
     async def export_derived_route(name: str, video: bool = True) -> dict[str, Any]:
         """Start (or return) a background regenerate of the ROI-dependent derived files.
 
-        roi_series.csv, README/roi_plot/peak-frame images and (unless ``video=false``) the
-        ROI-annotated thermal video — from the recording's stored ROIs. ``video=false`` is the
-        quick option: plot + CSV + images only, skipping the slow video encode. The clean thermal
-        video never depends on the ROIs and is not re-rendered here. The visible sample analysis
-        (``exports/visible_sample.*``, close-up videos included) is rerun either way. Returns a
-        job record immediately; poll ``/export/derived/status``. Pair with ``PUT /rois`` after
-        editing.
+        roi_series.csv, README/roi_plot/peak-frame images, the visible sample analysis
+        (``exports/visible_sample.*``, close-up videos included) and (unless ``video=false``) the
+        ROI-annotated thermal video — from the recording's stored ROIs. ``video=false`` skips only
+        the slow ROI-annotated thermal video encode. It does not skip the visible analysis, which
+        is rerun either way: 15.8 s on the 10-minute reference run (4 s of it the close-up
+        encode). The clean thermal video never depends on the ROIs and is not re-rendered here.
+        Returns a job record immediately; poll ``/export/derived/status``. Pair with
+        ``PUT /rois`` after editing.
         """
         from flir_research_interface.analysis.thermal_video import render_thermal_video
 

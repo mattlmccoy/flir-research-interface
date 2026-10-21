@@ -259,7 +259,7 @@ max(MAD, 1))` over the run's non-keyframe values; flagged frames within 1.0 s fo
 | Event 2 | 615.66-615.85 s, 2 frames, peak +19 at frame 6005 |
 | Event 3 | 627.77-629.41 s, 7 frames, peak +97 at frame 6142 |
 | 413.3-414.0 s | no event: the largest `brightening` in the window is +5; the 413.65 s decoding glitch (a band of the image shifted sideways) reads 0.0, and the frame at 413.84 s is a keyframe, whose `brightening` is left empty |
-| Run time | 15.3 s on an Apple M2 Pro for 606.6 s of video: 2.0 s decoding and measuring, 3.3 s close-up encode, 9.4 s plot (it re-reads the thermal store), 0.5 s probing |
+| Run time | 15.8 s on an Apple M2 Pro for 606.6 s of video, 4.05 s of it the close-up encode (the rest is decoding and measuring, the plot, which re-reads the thermal store, and probing) |
 
 The events line up with the thermal record: the sample ROI's max jumps at about 553 s and 615 s,
 and the 627.77 s event follows the max reaching 250 °C. The two small events are 4-5 levels above the

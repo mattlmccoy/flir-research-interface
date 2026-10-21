@@ -244,11 +244,18 @@ test("failed and unreadable summaries are styled as errors; skipped, ok, empty a
 
 // -- placement on the thermal timeline ------------------------------------------------------------
 
-// The whole marker set of the real run 20261020_144402_Run, as the playback page builds it. The
-// flashes are snapped to frames (markersWithFlashes); `trigger` (0.0629 s) and `trigger_end` (627.0783 s)
-// carry no frame_id, so eventsToMarkers places them at their wall-clock offset, BETWEEN frames. The
-// frame times are captured from the run's exports/roi_series.csv (and the player's own landings);
-// the first frame at 0.0 is the start of the recording. Labels are shape-only.
+// The marker set of the real run 20261020_144402_Run, as the playback page builds it. The flashes
+// are snapped to frames (markersWithFlashes); `trigger` (0.0629 s) and `trigger_end` (627.0783 s)
+// carry no frame_id, so eventsToMarkers places them at their wall-clock offset, BETWEEN frames.
+// Labels are shape-only.
+//
+// Which times are captured and which are hand-placed (checked against the run's exports/roi_series.csv
+// and events.json): every WALK_TS value is a real frame time except 4.0. The real frames next to RF ON
+// are 3.995 and 4.029 (4.029 is the RF ON annotation's frame, and is in the list); there is no frame at
+// 4.0, so it is a hand-placed extra. 0.0 and 0.066 are frames 0 and 2, 631.06 is the last frame, and the
+// flash-neighbourhood times are captured. In WALK_BASE, "RF ON" (4.029), "gap 3" (261.054), `trigger` and
+// `trigger_end` are as the run has them; "RF OFF" is hand-placed: the run's RF OFF annotation is on frame
+// 65242 = 630.960 s, which is where the browser landed, but it is placed here at 631.06 (the last frame).
 const WALK_TS = [
   0.0, 0.066,
   4.0, 4.029,
