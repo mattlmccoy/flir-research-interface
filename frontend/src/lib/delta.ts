@@ -4,13 +4,15 @@ import type { Trace } from "../components/TimePlot.tsx";
 
 export const DELTA_ID = -1;
 
-/** A − B on A's time axis; B is sampled at the nearest time. Virtual id DELTA_ID. */
-export function deltaTrace(a: Trace, b: Trace): Trace {
+/** A − B on A's time axis; B is sampled at the nearest time. Virtual id DELTA_ID. With
+ *  `maxGapS`, an A sample whose nearest B sample is further away than that is a gap (NaN), so a
+ *  sparse or late-starting B (a 2 Hz live smart trace) is never paired with a stale sample. */
+export function deltaTrace(a: Trace, b: Trace, maxGapS = Infinity): Trace {
   const t = Array.from(a.t), v: number[] = [];
   for (let i = 0; i < t.length; i++) {
     if (b.t.length === 0) { v.push(NaN); continue; }
     const j = nearestIndex(b.t, t[i]);
-    v.push(a.v[i] - b.v[j]);
+    v.push(Math.abs(b.t[j] - t[i]) <= maxGapS ? a.v[i] - b.v[j] : NaN);
   }
   return { id: DELTA_ID, label: `${a.label} − ${b.label}`, color: "#ffffff", t, v };
 }

@@ -325,7 +325,8 @@ export function App() {
     const d = layout.delta;
     if (!d) return traces;
     const a = traces.find((x) => x.id === d.a), b = traces.find((x) => x.id === d.b);
-    return a && b ? [...traces, deltaTrace(a, b)] : traces;
+    // live: pair samples at most two smart-feed polls apart (a smart trace is 2 Hz and may start late)
+    return a && b ? [...traces, deltaTrace(a, b, (2 * SMART_FEED_INTERVAL_MS) / 1000)] : traces;
   })();
 
   // PNG snapshot of the live view (thermal + overlays), same as the display-controls camera button.
