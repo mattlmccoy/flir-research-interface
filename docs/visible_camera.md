@@ -214,7 +214,7 @@ blocks Stop.
 | `visible_sample.json` | Always written. `status` (`ok`, `skipped`, `failed`) and `reason`; for `ok` also the inputs (sample and bed ROI, alignment `saved_utc` / `rmsPx`, `threshold`, `dark_rule`, `margin_px`, flash rule and `flash_threshold`), `coverage`, `events`, `files`. A skipped or failed run keeps only `status`, `reason`, `software`, `files`: nothing was analysed, so there is no coverage block to misread. |
 | `visible_sample.csv` | One row per analysed frame: `t_s` (thermal clock), `segment`, `frame` (index in its file), `keyframe`, `sample_dark_px`, `sample_mean_luma`, `bed_clipped_frac`, `brightening` (empty on keyframes). |
 | `visible_sample_plot.png` | Four panels on the thermal time axis: RF forward power; sample ROI max and mean (°C, with the 250 °C case limit); `sample_dark_px` with a 31-frame rolling median; `brightening`. Flash events are drawn as vertical lines labelled with the peak value. |
-| `visible_sample_closeup.mp4` | A 3x crop around the sample with one fixed contrast stretch (luma 58-250 on the reference run). Later segments get `_001`, `_002`, ... |
+| `visible_sample_closeup.mp4` | A 3x crop around the sample with one fixed contrast stretch (luma 58-250 on the reference run). It holds every analysed frame at its time in `visible.mp4` (so it starts at the first analysed frame, not at 0), without B-frames. Later segments get `_001`, `_002`, ... |
 
 The sample is the ROI whose name contains "sample" (smallest wins). Reasons for `skipped`: `no visible
 video`, `no visible alignment`, `no sample ROI (name containing 'sample')`, `ffmpeg not found`,
@@ -266,9 +266,3 @@ that reason.
   never reads as zero.
 * **Only the sample region is watched.** Flashes at the cage, electrodes or cables are not looked
   for.
-* **The close-up is a viewing aid, not a frame-exact record.** On the reference run it holds 5,367
-  of the 6,189 analysed frames: with `-fps_mode vfr` its output times fall on a 98 ms grid (the
-  stream's 10.2 fps average) and ffmpeg drops the frames that land on the same grid point. `ffprobe` also lists the close-up's
-  frame timestamps out of order (x264 B-frames), so seeking to 601.77 s (627.77 s thermal) lands
-  next to the glow frame; the glow frame is labelled 601.48 s. Take times from the CSV and the
-  flash marks.

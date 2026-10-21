@@ -140,10 +140,11 @@ Frame 6141 is +5 (not flagged); 6143 is +27 (flagged, inside event 3). Alternati
 same data: a 0.5 s merge splits event 3 (its last frame at 629.41 s is 0.517 s after the previous
 one); a floor of 12 adds a one-frame event at 630.75 s (+12).
 
-**Known margin:** the 413.65 s decoding glitch peaks at +14 in this region, one level under the
-floor. Events 1 and 2 are only 4–5 levels above it. A noisier run (MAD 2–3) raises the threshold
-to 19–25 and could drop events that size. That's why the effective threshold is recorded with every
-result.
+**Known margin:** the 413.65 s decoding glitch frame itself is +0.0 in this region on this run;
+the +14 next to it is a keyframe at 413.84 s, which is excluded. Events 1 and 2 are only 4–5 levels
+above the 15-level floor. With median 1.0, `median + 6 × MAD` exceeds the floor only when MAD > 2.33
+(MAD 3 gives 19), so a noisier run raises the threshold and could drop events that size. That's why
+the effective threshold is recorded with every result.
 
 ### Coverage (no false green)
 
@@ -163,7 +164,8 @@ never an empty "no events".
 
 A crop around the analysis region (square, padded, even size). Luma is stretched linearly from the
 run's sample luma (1st percentile) to 250 → 0–255, the same stretch for every frame. Scale ×3 with
-Lanczos, original timing (`-fps_mode vfr`), H.264 CRF 20. Spike: a 200×200 crop at 3× gave a 4.6 MB
+Lanczos, original timing (every frame at its source time: `-fps_mode passthrough` on the source's
+time base, no B-frames), H.264 CRF 20. Spike: a 200×200 crop at 3× gave a 4.6 MB
 file at 10× speed.
 
 ### Plot
