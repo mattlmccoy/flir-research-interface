@@ -259,12 +259,6 @@ def test_fixture_20261020_locks_after_heating() -> None:
 
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="open controller decision: the lock frame's cold level (p20 of the drawn outline) and "
-    "the tracking frames' (median of the band outside the outline) differ, so on a still frame "
-    "the area jumps 809 -> 1023 px at 274 s and exceeds the 35 % jump check at 549/604 s (hold)",
-)
 def test_fixture_20261020_track_is_stable() -> None:
     """A still frame must give the same outline on the lock frame and every frame after it: the
     lock is measured in the same (outline + margin) area the tracker searches next frame."""
@@ -275,10 +269,11 @@ def test_fixture_20261020_track_is_stable() -> None:
     for k in (2, 3, 4):
         t = SmartTracker(SmartRoiSpec(id=1, name="cube", search=search), w, h)
         frame = fx["celsius"][k].astype(np.float64)
-        res = [t.update(frame, i / 30) for i in range(5)]
+        res = [t.update(frame, i / 30) for i in range(4)]  # the lock frame and 3 more
         assert all(r.state == "locked" for r in res), [r.state for r in res]
         areas = [r.dims["area_px"] for r in res if r.dims is not None]
         assert max(areas) - min(areas) <= 0.03 * areas[0], areas
+        assert res[-1].dims is not None and abs(res[-1].dims["area_change_pct"]) <= 3
 
 
 def _gauss_blob() -> np.ndarray:
@@ -310,3 +305,23 @@ def test_sample_clipped_by_frame_edge_stays_locked() -> None:
     assert all(r.state == "locked" for r in res), [r.state for r in res]
     want = int(((_rho(cx=10.0) <= 1.0)).sum())
     assert res[-1].dims is not None and abs(res[-1].dims["area_px"] - want) <= 0.03 * want
+
+
+def test_failed_refinement_keeps_previous_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    """If re-measuring the lock frame with the band rule fails, the previous pass stands."""
+    calls: list[int] = []
+    real = SmartTracker._detect
+
+    def detect(self: SmartTracker, *a: Any) -> Any:
+        calls.append(1)
+        out = real(self, *a)
+        return (None, out[1]) if len(calls) == 2 else out
+
+    monkeypatch.setattr(SmartTracker, "_detect", detect)
+    t = SmartTracker(_spec(), W, H)
+    r = t.update(_blob(), 0.0)
+    assert len(calls) == 2
+    assert r.state == "locked" and r.valid is True and r.dims is not None
+    r2 = t.update(_blob(1.09), 1 / 30)  # the area-jump check still runs against that lock
+    assert r2.state == "locked" and r2.dims is not None
+    assert abs(r2.dims["area_change_pct"] - 18.8) <= 2

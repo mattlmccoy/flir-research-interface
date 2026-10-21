@@ -19,6 +19,8 @@ SEARCH_MARGIN_PX = 15  # extra margin round the outline (beyond the outermost ri
 MIN_CONTRAST_C = 2.0  # core (p99) minus surroundings (p20) of the search area
 MIN_AREA_PX = 20
 MAX_AREA_JUMP = 0.35  # fractional area change vs the previous lock allowed in one frame
+LOCK_PASSES = 3  # lock-frame refinement passes (band-median rule) ...
+LOCK_SETTLE = 0.01  # ... until the area changes less than this between passes
 _HOT_PCT, _COLD_PCT = 99.0, 20.0  # core of the sample; drawn-outline surroundings
 
 DEFAULT_RINGS_PX: tuple[int, ...] = (5, 10, 25)
@@ -106,6 +108,8 @@ State = Literal["searching", "locked", "holding"]
 Box = tuple[int, int, int, int]  # x0, y0, x1, y1 half-open, frame coordinates
 BoolArr = npt.NDArray[np.bool_]
 FloatArr = npt.NDArray[np.float64]
+# inputs to SmartTracker._measure: sample, work box, sample °C, ring °C, over-range, edge level
+_Step = tuple[BoolArr, Box, FloatArr, FloatArr, BoolArr, float | None]
 
 
 @dataclass
@@ -353,14 +357,41 @@ class SmartTracker:
         """Find the sample in this frame (or hold / search) and measure it."""
         if self._state != "searching" and t_s - self._last_good_t > HOLD_S:
             self._state = "searching"  # the last lock is stale: search again from this frame
+        relock = self._state == "searching"
         step = self._step(celsius, t_s, over)
+        if relock and step is not None and self._state == "locked":
+            step = self._refine_lock(step, celsius, t_s, over)
         if step is None:
             return self._lost(self._level)
         return self._measure(*step)
 
+    def _refine_lock(
+        self,
+        step: _Step,
+        celsius: npt.NDArray[Any],
+        t_s: float,
+        over: npt.NDArray[np.bool_] | None,
+    ) -> _Step:
+        """Re-detect the lock frame with the tracking rule (cold = band median round the
+        provisional outline) until the area settles, so the lock frame and the frames after it
+        use the same estimator. A failed pass leaves the previous pass standing."""
+        for _ in range(LOCK_PASSES):
+            area = self._last_area
+            saved = (self._outline, self._outline_box, self._level)
+            self._last_area = 0  # no jump check between passes
+            again = self._step(celsius, t_s, over)
+            if again is None or self._state != "locked":
+                self._state, self._last_area = "locked", area
+                self._outline, self._outline_box, self._level = saved
+                return step
+            step = again
+            if abs(self._last_area - area) < LOCK_SETTLE * area:
+                break
+        return step
+
     def _step(
         self, celsius: npt.NDArray[Any], t_s: float, over: npt.NDArray[np.bool_] | None
-    ) -> tuple[BoolArr, Box, FloatArr, FloatArr, BoolArr, float | None] | None:
+    ) -> _Step | None:
         """Detect and advance the state; the inputs to ``_measure``, or None when searching."""
         self._level = None
         found = self._search()
