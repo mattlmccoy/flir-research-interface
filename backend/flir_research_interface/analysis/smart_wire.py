@@ -30,11 +30,22 @@ def encode_labels(labels: npt.NDArray[np.uint8]) -> str:
 
 
 def smart_overlay(result: SmartResult, roi_id: int) -> dict[str, Any]:
-    """The per-frame overlay payload for one smart ROI (``labels`` None when not located)."""
-    return {
+    """The per-frame overlay payload for one smart ROI (``labels`` None when not located).
+
+    ``over`` is present only while the sample or a ring has over-range pixels: the bounded
+    readings for the browser (``{"sample": stats, "rings": [stats, ...]}``, each stats
+    ``{mean_lb_c, min_c, min_is_bound, max_c, over_px, ceiling_c}``). It is a display channel only:
+    the control feed (``live_temps``) keeps such an ROI ``valid=False`` with null temperatures."""
+    out: dict[str, Any] = {
         "id": roi_id,
         "state": result.state,
         "valid": result.valid,
         "bbox": list(result.bbox) if result.bbox is not None else None,
         "labels": encode_labels(result.labels) if result.labels is not None else None,
     }
+    if result.over_stats is not None:
+        out["over"] = {
+            "sample": dict(result.over_stats["sample"]),
+            "rings": [dict(g) for g in result.over_stats["rings"]],
+        }
+    return out

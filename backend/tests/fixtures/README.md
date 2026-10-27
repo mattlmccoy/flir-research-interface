@@ -84,4 +84,15 @@ over-range pixels in the crops.
 192.168.255.255` (observed live, not captured), and `test_connect_hint.py` rebuilds that state by
 changing only that one line. `hardwareports.txt` is `networksetup -listallhardwareports`.
 `spinnaker_1023_log.txt` holds the operator log lines for the -1023 connect failures and two
-earlier -1024 ("Camera has been removed") disconnects. All three are unchanged.
+earlier -1024 ("Camera has been removed") disconnects. All three are unchanged except that MAC and global IPv6 addresses are
+redacted (the repo is public).
+
+`smart_overrange_20261020.npz` — six real A70 frames of the same run near the end of heating
+(frame indices 18780, 18788, 18789, 18820, 18845, 18850; t = 625.4…627.7 s) where the cube
+exceeded the active case (-20…250 °C): frames 18789 / 18820 / 18845 have 1 / 6 / 2 sample pixels
+that wrapped to counts ~19 300 (about -80 °C) and that `over_range_mask` flags; the others have
+none. Stored as the RAW uint16 counts (so the wrapped values are kept exactly), cropped to the run's
+stored smart series bbox + 40 px (origin x=79, y=134; 152×166 px), with `polygon` (the
+`smart_powder_sample` ROI 113 drawn outline, frame coordinates), `rings_px`, `indices`, `t_s`,
+`high_c` (the run's `active_case.high_c`, 250.00002 °C) and `ir_format`. Captured read-only by
+`scripts/capture_smart_overrange_fixture.py`.

@@ -50,7 +50,9 @@ _Step = tuple[BoolArr, Box, FloatArr, FloatArr, BoolArr, float | None]
 class SmartResult:
     """One frame's outcome. ``labels`` is a uint8 crop of ``bbox``: 0 none, 1 sample, 2.. ring i-2.
     Temperatures are ``None`` when not measured (searching) or when over-range pixels make them
-    untrustworthy (``over_range``)."""
+    untrustworthy (``over_range``). ``over_stats`` (UI only, never the control feed) is set when the
+    sample or a ring has over-range pixels: ``{"sample": stats, "rings": [stats, ...]}`` with the
+    bounded readings of ``_over_stats``."""
 
     state: State
     valid: bool
@@ -61,6 +63,7 @@ class SmartResult:
     dims: dict[str, Any] | None = None
     edge_level_c: float | None = None
     over_range: bool = False
+    over_stats: dict[str, Any] | None = None
     # host timestamp (ns) of the frame this result measured; set by the live path so the feed can
     # refuse a result left behind by a failed frame (None = unknown provenance)
     frame_ts_ns: int | None = None
@@ -75,6 +78,35 @@ def _stats(vals: FloatArr, over: bool) -> dict[str, float | None]:
     if over or vals.size == 0:
         return _no_stats()
     return {"mean_c": float(vals.mean()), "max_c": float(vals.max()), "min_c": float(vals.min())}
+
+
+def _over_stats(vals: FloatArr, over: BoolArr, ceiling: float | None) -> dict[str, Any]:
+    """Readings that stay honest with over-range pixels. Those pixels read wrapped / saturated
+    values, but their true temperature is above the camera's range, so each is counted at the
+    range ceiling (``ceiling``, or the in-range max when the ceiling is unknown: every over-range
+    pixel is hotter than any in-range one). The mean is then a lower bound, the in-range min is
+    exact (only a bound when no pixel is in range) and the max is unknown (``None``) whenever any
+    pixel is over range. With no over-range pixel these are the plain stats."""
+    sat = np.asarray(over, dtype=bool)
+    good = vals[~sat & np.isfinite(vals)]
+    n_over = int(sat.sum())
+    top = float(good.max()) if good.size else None
+    fill = top if ceiling is None else (ceiling if top is None else max(ceiling, top))
+    mean: float | None
+    if n_over == 0:
+        mean = float(good.mean()) if good.size else None
+    elif fill is None:
+        mean = None
+    else:
+        mean = float((good.sum() + n_over * fill) / (good.size + n_over))
+    return {
+        "mean_lb_c": mean,
+        "min_c": float(good.min()) if good.size else (fill if n_over else None),
+        "min_is_bound": bool(n_over and not good.size),
+        "max_c": top if n_over == 0 else None,
+        "over_px": n_over,
+        "ceiling_c": ceiling,
+    }
 
 
 def _bbox(mask: BoolArr, ox: int = 0, oy: int = 0) -> Box | None:
@@ -196,6 +228,7 @@ class SmartTracker:
         self._baseline: dict[str, float] | None = None
         self._level: float | None = None
         self._work: Box = (0, 0, 0, 0)
+        self._ceiling: tuple[float | None, float | None] = (None, None)
 
     # -- per frame ---------------------------------------------------------------------------
 
@@ -252,6 +285,13 @@ class SmartTracker:
         ring_roi = {**self._optics, "emissivity": self.spec.ring_emissivity}
         return sample, roi_field(crop, ring_roi, self._cam, True)
 
+    def _field_ceilings(self, ceiling_c: float | None) -> tuple[float | None, float | None]:
+        """The camera ceiling re-corrected like any pixel: (sample field, ring field)."""
+        if ceiling_c is None or not np.isfinite(ceiling_c):
+            return None, None
+        s, r = self._fields(np.full((1, 1), float(ceiling_c)))
+        return float(s[0, 0]), float(r[0, 0])
+
     def _choose(self, candidates: BoolArr) -> BoolArr | None:
         """The connected region of ``candidates`` with the largest overlap with the previous
         outline (the largest region on a first lock, or when none overlaps)."""
@@ -304,9 +344,17 @@ class SmartTracker:
         return sample, level
 
     def update(
-        self, celsius: npt.NDArray[Any], t_s: float, over: npt.NDArray[np.bool_] | None = None
+        self,
+        celsius: npt.NDArray[Any],
+        t_s: float,
+        over: npt.NDArray[np.bool_] | None = None,
+        *,
+        ceiling_c: float | None = None,
     ) -> SmartResult:
-        """Find the sample in this frame (or hold / search) and measure it."""
+        """Find the sample in this frame (or hold / search) and measure it. ``ceiling_c`` is the top
+        of the camera's measurement range (°C, camera emissivity) when known: over-range pixels
+        are counted at it for the bounded ``over_stats`` readings."""
+        self._ceiling = self._field_ceilings(ceiling_c)
         if self._state != "searching" and t_s - self._last_good_t > HOLD_S:
             self._state = "searching"  # the last lock is stale: search again from this frame
         relock = self._state == "searching"
@@ -403,14 +451,22 @@ class SmartTracker:
         dist = ndimage.distance_transform_edt(~sample)
         labels = np.where(sample, 1, 0).astype(np.uint8)
         rings: list[dict[str, Any]] = []
+        ring_over: list[dict[str, Any]] = []
         inner = 0
         for i, outer in enumerate(self.spec.rings_px):
             band = (dist > inner) & (dist <= outer)
             labels[band] = i + 2
             stats = _stats(ring_c[band], bool(over_c[band].any()))
             rings.append({"inner_px": inner, "outer_px": outer, **stats})
+            ring_over.append(_over_stats(ring_c[band], over_c[band], self._ceiling[1]))
             inner = outer
         over = bool(over_c[sample].any())
+        over_stats = None
+        if over or any(g["over_px"] for g in ring_over):
+            over_stats = {
+                "sample": _over_stats(sample_c[sample], over_c[sample], self._ceiling[0]),
+                "rings": ring_over,
+            }
         dims = _dims(sample, x0, y0, sample_c)
         if self._baseline is None:
             self._baseline = {k: dims[k] for k in ("area_px", "length_px", "width_px")}
@@ -429,6 +485,7 @@ class SmartTracker:
             dims=dims,
             edge_level_c=level,
             over_range=over,
+            over_stats=over_stats,
         )
 
 
