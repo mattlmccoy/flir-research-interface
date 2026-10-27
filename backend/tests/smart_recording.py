@@ -64,3 +64,32 @@ def make_smart_run(
         )
     rec.stop()
     return d
+
+
+OVERRANGE_FIXTURE = Path(__file__).parent / "fixtures" / "smart_overrange_20261020.npz"
+
+
+def make_overrange_run(root: Path, *, high_c: float | None = None) -> tuple[Path, dict[str, Any]]:
+    """A recording of the six real over-range frames (``smart_overrange_20261020.npz``, raw
+    counts, 33 ms apart) with the run's ROI 113 (crop coordinates) and camera case. ``high_c``
+    overrides the case ceiling; the camera info has no case at all when it is ``nan``."""
+    fx = np.load(OVERRANGE_FIXTURE)
+    ox, oy = (int(v) for v in fx["origin"])
+    roi = {"id": 113, "kind": "smart", "name": "cube",
+           "search": [[int(x) - ox, int(y) - oy] for x, y in fx["polygon"]],
+           "rings_px": [int(r) for r in fx["rings_px"]]}
+    high = float(fx["high_c"]) if high_c is None else high_c
+    fmt = str(fx["ir_format"])
+    cam: dict[str, Any] = {"backend": "simulated", "ir_format": fmt, "model": "Sim"}
+    if not np.isnan(high):
+        cam["active_case"] = {"index": 1, "low_c": -20.0, "high_c": high}
+    rec = Recorder(None, experiments_root=root, chunk_frames=4)
+    d = rec.start(name="overrange", metadata={}, camera_info=cam, extra={"rois": [roi]})
+    for i, counts in enumerate(fx["counts"]):
+        rec.submit(Frame(
+            frame_id=100 + i, device_timestamp_ns=1_000_000_000 + i * 33_000_000,
+            host_timestamp_ns=5_000_000_000 + i * 33_000_000, pixel_format="Mono16",
+            ir_format=str(fx["ir_format"]), counts=np.ascontiguousarray(counts), incomplete=False,
+        ))
+    rec.stop()
+    return d, roi

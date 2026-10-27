@@ -285,7 +285,7 @@ class SmartTracker:
         ring_roi = {**self._optics, "emissivity": self.spec.ring_emissivity}
         return sample, roi_field(crop, ring_roi, self._cam, True)
 
-    def _field_ceilings(self, ceiling_c: float | None) -> tuple[float | None, float | None]:
+    def field_ceilings(self, ceiling_c: float | None) -> tuple[float | None, float | None]:
         """The camera ceiling re-corrected like any pixel: (sample field, ring field)."""
         if ceiling_c is None or not np.isfinite(ceiling_c):
             return None, None
@@ -354,7 +354,7 @@ class SmartTracker:
         """Find the sample in this frame (or hold / search) and measure it. ``ceiling_c`` is the top
         of the camera's measurement range (°C, camera emissivity) when known: over-range pixels
         are counted at it for the bounded ``over_stats`` readings."""
-        self._ceiling = self._field_ceilings(ceiling_c)
+        self._ceiling = self.field_ceilings(ceiling_c)
         if self._state != "searching" and t_s - self._last_good_t > HOLD_S:
             self._state = "searching"  # the last lock is stale: search again from this frame
         relock = self._state == "searching"

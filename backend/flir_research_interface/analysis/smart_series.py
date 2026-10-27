@@ -13,6 +13,11 @@ Store, under ``<run>/smart_roi/``:
   ``ring_mean|max|min`` (n x k), one float column per numeric ``dims`` key (``DIM_KEYS``),
   ``bbox`` (n x 4 int32, -1 when not located) and the encoded label crops as
   ``labels_blob`` (ASCII bytes) + ``labels_off`` (n+1 offsets; an empty slice = not located).
+* over-range readings (``smart_roi._over_stats``; NaN / 0 on rows with no over-range pixel there):
+  ``sample_mean_lb`` / ``sample_min_over`` (n), ``sample_min_is_bound`` (bool), ``over_px``
+  (int32), the ring equivalents ``ring_mean_lb`` / ``ring_min_over`` / ``ring_min_is_bound`` /
+  ``ring_over_px`` (n x k), and ``ceiling_c`` = [sample, ring] range top in each field (NaN
+  unknown). Series computed before these columns existed have none of them.
 * ``<id>.spec.json``: the spec, optics and frame count the series was computed from.
 
 Missing values are NaN on disk; ``load_smart_series`` returns ``labels`` decoded to an object
@@ -87,6 +92,13 @@ def smart_series_stale(reader: ExperimentReader, spec: SmartRoiSpec, data: dict[
     )
 
 
+def run_ceiling(camera: dict[str, Any] | None) -> float | None:
+    """The top of the run's active measurement case (°C), or None when not recorded."""
+    case = (camera or {}).get("active_case")
+    v = case.get("high_c") if isinstance(case, dict) else None
+    return float(v) if isinstance(v, int | float) and not isinstance(v, bool) else None
+
+
 def compute_smart_series(
     reader: ExperimentReader,
     spec: SmartRoiSpec,
@@ -111,6 +123,7 @@ def compute_smart_series(
     n, k = reader.n_frames, len(spec.rings_px)
     _, h, w = reader.counts_block(0, 1).shape if n else (0, 0, 0)
     tracker = SmartTracker(spec, w, h, cam=reader.metadata.get("camera"), optics=optics)
+    ceiling = run_ceiling(reader.metadata.get("camera"))
 
     cols: dict[str, np.ndarray] = {
         "t_s": np.array([reader.t_s(i) for i in range(n)], dtype=np.float64),
@@ -125,6 +138,13 @@ def compute_smart_series(
         cols[f"ring_{s}"] = np.full((n, k), np.nan)
     for key in DIM_KEYS:
         cols[key] = np.full(n, np.nan)
+    for where, shape in (("sample", (n,)), ("ring", (n, k))):
+        cols[f"{where}_mean_lb"] = np.full(shape, np.nan)
+        cols[f"{where}_min_over"] = np.full(shape, np.nan)
+        cols[f"{where}_min_is_bound"] = np.zeros(shape, dtype=bool)
+    cols["over_px"] = np.zeros(n, dtype=np.int32)
+    cols["ring_over_px"] = np.zeros((n, k), dtype=np.int32)
+    cols["ceiling_c"] = np.array([_f(c) for c in tracker.field_ceilings(ceiling)])
     labels: list[bytes] = []
 
     for start in range(0, n, _BATCH):
@@ -132,7 +152,7 @@ def compute_smart_series(
         for j, counts in enumerate(block):
             i = start + j
             r = tracker.update(counts_to_celsius(counts, fmt), float(cols["t_s"][i]),
-                               over_range_mask(counts))
+                               over_range_mask(counts), ceiling_c=ceiling)
             cols["state"][i] = STATE_CODES[r.state]
             cols["valid"][i] = r.valid
             cols["over_range"][i] = r.over_range
@@ -146,6 +166,8 @@ def compute_smart_series(
             if r.dims is not None:
                 for key in DIM_KEYS:
                     cols[key][i] = _f(r.dims.get(key))
+            if r.over_stats is not None:
+                _store_over(cols, i, r.over_stats, k)
             labels.append(encode_labels(r.labels).encode("ascii") if r.labels is not None else b"")
         if on_progress is not None:
             on_progress(min(n, start + _BATCH), n)
@@ -156,6 +178,21 @@ def compute_smart_series(
     cols["labels_off"] = np.concatenate(([0], np.cumsum(sizes))).astype(np.int64)
     cols["labels_blob"] = np.frombuffer(b"".join(labels), dtype=np.uint8)
     return _write(out_dir if out_dir is not None else reader.path, spec, optics, n, cols)
+
+
+def _store_over(cols: dict[str, np.ndarray], i: int, over: dict[str, Any], k: int) -> None:
+    """Row ``i`` of the over-range columns; only regions that have over-range pixels are filled."""
+    cells: list[tuple[str, dict[str, Any], tuple[int, ...], str]] = [
+        ("sample", over["sample"], (i,), "over_px")
+    ]
+    cells += [("ring", g, (i, q), "ring_over_px") for q, g in enumerate(over["rings"][:k])]
+    for where, st, at, px in cells:
+        if not st["over_px"]:
+            continue
+        cols[px][at] = st["over_px"]
+        cols[f"{where}_mean_lb"][at] = _f(st["mean_lb_c"])
+        cols[f"{where}_min_over"][at] = _f(st["min_c"])
+        cols[f"{where}_min_is_bound"][at] = st["min_is_bound"]
 
 
 def _write(
@@ -232,6 +269,7 @@ def series_payload(data: dict[str, Any], max_points: int) -> dict[str, Any]:
     ]
     dims: dict[str, Any] = {key: _clean(data[key][idx]) for key in DIM_KEYS}
     dims["units"] = "px"
+    over_range = data.get("over_range")
     return {
         "index": [int(i) for i in idx],
         "t_s": [float(t) for t in data["t_s"][idx]],
@@ -241,6 +279,33 @@ def series_payload(data: dict[str, Any], max_points: int) -> dict[str, Any]:
         "rings": rings,
         "dims": dims,
         "computed_utc": data.get("computed_utc"),
+        # rows where the sample had over-range pixels (every stored series has this column)
+        "over_range": [bool(v) for v in over_range[idx]] if over_range is not None else None,
+        "over": _over_payload(data, idx, k),
+    }
+
+
+def _over_payload(data: dict[str, Any], idx: np.ndarray, k: int) -> dict[str, Any] | None:
+    """The bounded over-range readings at rows ``idx``, or None for a series computed before they
+    were stored (recompute to add them)."""
+    if "over_px" not in data or "ceiling_c" not in data:
+        return None
+
+    def block(where: str, px: np.ndarray, q: int | None) -> dict[str, Any]:
+        cut = (idx,) if q is None else (idx, q)
+        return {
+            "mean_lb": _clean(data[f"{where}_mean_lb"][cut]),
+            "min": _clean(data[f"{where}_min_over"][cut]),
+            "min_is_bound": [bool(v) for v in data[f"{where}_min_is_bound"][cut]],
+            "px": [int(v) for v in px[cut]],
+        }
+
+    ceil = _clean(np.asarray(data["ceiling_c"], dtype=np.float64))
+    return {
+        "ceiling_c": ceil[0] if ceil else None,
+        "ring_ceiling_c": ceil[1] if len(ceil) > 1 else None,
+        "sample": block("sample", data["over_px"], None),
+        "rings": [block("ring", data["ring_over_px"], q) for q in range(k)],
     }
 
 
@@ -271,6 +336,7 @@ __all__ = [
     "compute_smart_series",
     "load_smart_series",
     "overlay_window",
+    "run_ceiling",
     "series_payload",
     "series_path",
     "smart_series_stale",
