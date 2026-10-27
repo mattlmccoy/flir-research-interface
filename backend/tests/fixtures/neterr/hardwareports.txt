@@ -1,47 +1,47 @@
 
 Hardware Port: Ethernet Adapter (en4)
 Device: en4
-Ethernet Address: 86:1a:8f:4e:99:37
+Ethernet Address: 02:00:00:00:00:06
 
 Hardware Port: Ethernet Adapter (en5)
 Device: en5
-Ethernet Address: 86:1a:8f:4e:99:38
+Ethernet Address: 02:00:00:00:00:07
 
 Hardware Port: Ethernet Adapter (en6)
 Device: en6
-Ethernet Address: 86:1a:8f:4e:99:39
+Ethernet Address: 02:00:00:00:00:08
 
 Hardware Port: AX88772A
 Device: en16
-Ethernet Address: 8c:ae:4c:d2:8d:7c
+Ethernet Address: 02:00:00:00:00:09
 
 Hardware Port: AX88179A
 Device: en15
-Ethernet Address: 6c:6e:07:52:dc:81
+Ethernet Address: 02:00:00:00:00:04
 
 Hardware Port: USB 10/100/1000 LAN
 Device: en13
-Ethernet Address: 6c:1f:f7:d1:3d:33
+Ethernet Address: 02:00:00:00:00:03
 
 Hardware Port: Thunderbolt Bridge
 Device: bridge0
-Ethernet Address: 36:dc:67:c2:e9:c0
+Ethernet Address: 02:00:00:00:00:00
 
 Hardware Port: Wi-Fi
 Device: en0
-Ethernet Address: 6c:7e:67:d4:b7:b0
+Ethernet Address: 02:00:00:00:00:05
 
 Hardware Port: Thunderbolt 1
 Device: en1
-Ethernet Address: 36:dc:67:c2:e9:c0
+Ethernet Address: 02:00:00:00:00:00
 
 Hardware Port: Thunderbolt 2
 Device: en2
-Ethernet Address: 36:dc:67:c2:e9:c4
+Ethernet Address: 02:00:00:00:00:01
 
 Hardware Port: Thunderbolt 3
 Device: en3
-Ethernet Address: 36:dc:67:c2:e9:c8
+Ethernet Address: 02:00:00:00:00:02
 
 VLAN Configurations
 ===================
