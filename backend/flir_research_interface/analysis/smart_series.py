@@ -42,7 +42,11 @@ from flir_research_interface.analysis.smart_roi import SmartRoiSpec, SmartTracke
 from flir_research_interface.analysis.smart_wire import encode_labels
 from flir_research_interface.playback.reader import ExperimentReader
 from flir_research_interface.radiometry.overrange import over_range_mask
-from flir_research_interface.radiometry.temperature_linear import IRFormat, counts_to_celsius
+from flir_research_interface.radiometry.temperature_linear import (
+    IRFormat,
+    counts_to_celsius,
+    kelvin_per_count,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +122,7 @@ def compute_smart_series(
         raise ValueError(f"recording is not temperature-linear ({reader.ir_format!r})") from exc
     if fmt is IRFormat.RADIOMETRIC:
         raise ValueError("recording is not temperature-linear (Radiometric)")
+    kpc = kelvin_per_count(fmt)
     if optics is None:
         optics = stored_optics(reader, spec.id)
     n, k = reader.n_frames, len(spec.rings_px)
@@ -152,7 +157,7 @@ def compute_smart_series(
         for j, counts in enumerate(block):
             i = start + j
             r = tracker.update(counts_to_celsius(counts, fmt), float(cols["t_s"][i]),
-                               over_range_mask(counts), ceiling_c=ceiling)
+                               over_range_mask(counts, kelvin_per_count=kpc), ceiling_c=ceiling)
             cols["state"][i] = STATE_CODES[r.state]
             cols["valid"][i] = r.valid
             cols["over_range"][i] = r.over_range

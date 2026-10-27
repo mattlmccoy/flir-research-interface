@@ -23,8 +23,21 @@ test("in a hot frame, implausibly-cold (wrapped) pixels are flagged", () => {
   assert.ok(r.wrapped >= 1);
 });
 
-test("a cold scene is never touched (safety): sub-floor pixel without a hot frame is left alone", () => {
+test("a wrapped (sub-floor) pixel is flagged even when nothing else in the frame is hot", () => {
+  // An arc can wrap while the rest of the frame stays under ~177 °C; below -13 °C never occurs
+  // in this lab (88,771 real frames: no pixel <= 26000 counts unless the frame was also hot).
   const c = new Uint16Array(64).fill(30000);
-  c[27] = 19000; // a lone cold/dead pixel, but the frame is not hot
-  assert.equal(overRangeMask(c, 8, 8), null);
+  c[27] = 19000;
+  const r = overRangeMask(c, 8, 8)!;
+  assert.equal(r.mask[27], 1);
+  assert.equal(r.wrapped, 1);
+});
+
+test("a 100 mK frame is judged in its own units (40 °C is ~3131 counts there)", () => {
+  const c = new Uint16Array(64).fill(Math.round((40 + 273.15) / 0.1));
+  assert.equal(overRangeMask(c, 8, 8, 0.1), null);
+  c[27] = Math.round((-80 + 273.15) / 0.1); // a wrapped reading at 100 mK
+  const r = overRangeMask(c, 8, 8, 0.1)!;
+  assert.equal(r.mask[27], 1);
+  assert.equal(r.wrapped, 1);
 });

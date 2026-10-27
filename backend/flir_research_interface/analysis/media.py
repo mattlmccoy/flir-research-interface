@@ -548,7 +548,8 @@ def _compose(reader: ExperimentReader, idx: int, vmin: float, vmax: float, scale
              plot: list[dict[str, Any]] | None = None, cur_t: float = 0.0,
              visible: Any = None) -> np.ndarray:
     values, counts = _celsius(reader, idx)
-    over = over_range_mask(counts)
+    fmt = reader.metadata.get("conversion", {}).get("ir_format") or reader.ir_format
+    over = over_range_mask(counts, kelvin_per_count=kelvin_per_count(IRFormat(fmt)))
     stats_vals = values if over is None else np.where(over, np.nan, values)  # numbers: raw
     shown = values  # what gets coloured
     if opts.rf_notch:

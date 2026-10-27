@@ -16,7 +16,11 @@ from flir_research_interface.analysis.smart_series import (
 )
 from flir_research_interface.playback.reader import ExperimentReader
 from flir_research_interface.radiometry.overrange import over_range_mask
-from flir_research_interface.radiometry.temperature_linear import IRFormat, counts_to_celsius
+from flir_research_interface.radiometry.temperature_linear import (
+    IRFormat,
+    counts_to_celsius,
+    kelvin_per_count,
+)
 
 
 def _same(a: float | None, b: float) -> bool:
@@ -41,7 +45,8 @@ def test_overrange_columns_match_the_tracker(tmp_path: Path) -> None:
     seen_over = 0
     for i in range(reader.n_frames):
         counts = reader.frame(i).counts
-        r = ref.update(counts_to_celsius(counts, fmt), reader.t_s(i), over_range_mask(counts),
+        r = ref.update(counts_to_celsius(counts, fmt), reader.t_s(i),
+                       over_range_mask(counts, kelvin_per_count=kelvin_per_count(fmt)),
                        ceiling_c=250.00002441406252)
         o = r.over_stats
         if o is None:

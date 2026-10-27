@@ -51,7 +51,7 @@ def _real() -> tuple[list[np.ndarray], list[np.ndarray | None], SmartRoiSpec, fl
     spec = SmartRoiSpec(id=113, name="cube", search=search,
                         rings_px=tuple(int(r) for r in fx["rings_px"]))
     celsius = [counts_to_celsius(c, fmt) for c in fx["counts"]]
-    over = [over_range_mask(c) for c in fx["counts"]]
+    over = [over_range_mask(c, kelvin_per_count=0.01) for c in fx["counts"]]
     return celsius, over, spec, float(fx["high_c"])
 
 

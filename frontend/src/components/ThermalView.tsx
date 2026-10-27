@@ -215,7 +215,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
     const c = countsToCelsius(counts, header.kelvin_per_count, header.kelvin_offset);
     // Over-range pixels (scene exceeded the camera's range → saturated or 16-bit-wrapped) carry no
     // valid temperature: exclude them from stats/range (NaN) and paint them distinctly below.
-    const over = header.kelvin_per_count != null ? overRangeMask(counts, header.width, header.height) : null;
+    const over = header.kelvin_per_count != null ? overRangeMask(counts, header.width, header.height, header.kelvin_per_count) : null;
     if (over) for (let i = 0; i < c.length; i++) if (over.mask[i]) c[i] = NaN;
     celsiusRef.current = c;
     onField?.({ c, w: header.width, h: header.height, conv: header.kelvin_per_count != null ? { kelvin_per_count: header.kelvin_per_count, kelvin_offset: header.kelvin_offset } : undefined });

@@ -64,7 +64,7 @@ def frame_header(frame: Frame, stats: dict[str, Any] | None = None) -> dict[str,
         c = counts_to_celsius(frame.counts, IRFormat(frame.ir_format))
         # over-range (saturated / wrapped) pixels carry no valid temperature — exclude them from
         # the whole-frame stats so a wrapped hot-spot can't drag min_c to an impossible value
-        over = over_range_mask(frame.counts)
+        over = over_range_mask(frame.counts, kelvin_per_count=k)
         valid = c if over is None else np.where(over, np.nan, c)
         header["min_c"] = _finite(np.nanmin(valid))
         header["max_c"] = _finite(np.nanmax(valid))

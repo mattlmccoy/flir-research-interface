@@ -62,7 +62,7 @@ def rf_notch(
     if kelvin_per_count is None:
         return counts, {"applied": False, "reason": "not temperature-linear (raw counts)"}
     k = counts.astype(np.float64) * kelvin_per_count
-    over = over_range_mask(counts)
+    over = over_range_mask(counts, kelvin_per_count=kelvin_per_count)
     work = k.copy()
     if over is not None:
         work[over] = float(k[~over].mean()) if (~over).any() else 0.0

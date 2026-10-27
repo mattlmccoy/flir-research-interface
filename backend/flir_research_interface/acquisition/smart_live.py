@@ -27,7 +27,11 @@ from flir_research_interface.analysis.smart_roi import (
 from flir_research_interface.analysis.smart_wire import smart_overlay
 from flir_research_interface.camera.base import Frame
 from flir_research_interface.radiometry.overrange import over_range_mask
-from flir_research_interface.radiometry.temperature_linear import IRFormat, counts_to_celsius
+from flir_research_interface.radiometry.temperature_linear import (
+    IRFormat,
+    counts_to_celsius,
+    kelvin_per_count,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +144,8 @@ class SmartLive:
             self._store({rid: (trackers.get(rid), _invalid(s)) for rid, s in specs.items()},
                         specs, {}, frame.host_timestamp_ns)
             return
-        over = over_range_mask(frame.counts)
+        over = over_range_mask(
+            frame.counts, kelvin_per_count=kelvin_per_count(IRFormat(frame.ir_format)))
         ceiling = self._ceiling  # one read: a concurrent set_ceiling applies from the next frame
         t_s = frame.host_timestamp_ns / 1e9
         built: dict[int, SmartTracker] = {}

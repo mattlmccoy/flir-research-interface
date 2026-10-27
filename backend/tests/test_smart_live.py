@@ -224,7 +224,7 @@ def test_failure_outside_per_roi_guard_does_not_leave_a_valid_feed(monkeypatch: 
     live.on_frame(_frame(_blob_c(), 10.0))
     assert live.latest()[7].valid is True
 
-    def boom(_counts: Any) -> Any:
+    def boom(_counts: Any, **_kw: Any) -> Any:
         raise RuntimeError("over-range bug")
 
     monkeypatch.setattr(smart_live_mod, "over_range_mask", boom)

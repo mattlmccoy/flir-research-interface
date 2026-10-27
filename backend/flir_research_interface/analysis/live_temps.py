@@ -17,7 +17,11 @@ import numpy as np
 from flir_research_interface.analysis.series import roi_index
 from flir_research_interface.analysis.smart_spec import parse_smart_roi
 from flir_research_interface.radiometry.overrange import over_range_mask
-from flir_research_interface.radiometry.temperature_linear import IRFormat, counts_to_celsius
+from flir_research_interface.radiometry.temperature_linear import (
+    IRFormat,
+    counts_to_celsius,
+    kelvin_per_count,
+)
 
 if TYPE_CHECKING:
     from flir_research_interface.analysis.smart_roi import SmartResult
@@ -137,7 +141,9 @@ def live_roi_payload(
         payload["rois"] = [_invalid_roi(r) for r in rois]
         return payload
 
-    over = over_range_mask(counts)  # type: ignore[arg-type]  # counts is not None here
+    over = over_range_mask(
+        counts,  # type: ignore[arg-type]  # counts is not None here
+        kelvin_per_count=kelvin_per_count(IRFormat(ir_format)))
     h, w = celsius.shape
     out: list[dict[str, Any]] = []
     for roi in rois:
