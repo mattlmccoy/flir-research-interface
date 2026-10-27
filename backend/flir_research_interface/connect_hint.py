@@ -60,16 +60,19 @@ def _live_snapshot() -> tuple[list[IfaceAddr], dict[str, str]]:
 
 
 def camera_error_hint(
-    raw: str, camera_ip: str | None, *, snapshot: Snapshot = _live_snapshot
+    raw: str, camera_ip: str | None, *, snapshot: Snapshot | None = None
 ) -> dict[str, Any] | None:
-    """``{"kind", "message", "command"}`` explaining ``raw`` in plain words, or ``None``."""
+    """``{"kind", "message", "command"}`` explaining ``raw`` in plain words, or ``None``.
+
+    ``snapshot`` defaults to this machine's live adapters, looked up at call time.
+    """
     try:
         needs_adapters = "[-1023]" in raw or ("[-1024]" not in raw and bool(camera_ip))
         ifaces: list[IfaceAddr] = []
         names: dict[str, str] = {}
         if needs_adapters:
             try:
-                ifaces, names = snapshot()
+                ifaces, names = (snapshot or _live_snapshot)()
             except Exception:  # noqa: BLE001 - psutil/networksetup trouble -> generic wording
                 logger.warning("could not list network adapters for the connect hint",
                                exc_info=True)

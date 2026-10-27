@@ -345,6 +345,8 @@ def create_app(
         app.state.smart_listener = app.state.smart_live.on_frame
         app.state.control_last = None  # last control-telemetry the RF controller posted
         app.state.autoconnect_paused = False  # set by a user disconnect, cleared by a user connect
+        # last failed connect (manual or auto) while no camera is connected: raw error + hint
+        app.state.connect_failure = None
         # Auto-connect the real camera on startup and keep retrying while none is connected (best
         # effort, in the background so it never delays serving). Only the operator opts in
         # (autoconnect=True); tests never touch the hardware.
@@ -384,6 +386,15 @@ def create_app(
         """Run the live smart ROI trackers on this session's frames (camera thread)."""
         svc.add_listener(app.state.smart_listener)
 
+    def _connect_failed(exc: BaseException, svc: AcquisitionService | None) -> None:
+        """Keep the raw error and its plain-language hint for GET /api/camera/status. The service
+        diagnosed it on the failed connect; without one (enumerate failed) the raw text stands."""
+        st = svc.stats() if svc is not None else {}
+        app.state.connect_failure = {
+            "last_error": st.get("last_error") or str(exc),
+            "last_error_hint": st.get("last_error_hint"),
+        }
+
     def _make_service(cam: CameraBackend) -> AcquisitionService:
         """Every operator-owned camera runs resiliently: it retries the first connect and, if the
         stream drops or stalls, reconnects the same camera with backoff (state -> reconnecting)."""
@@ -394,11 +405,13 @@ def create_app(
         streaming with no clicks. Best-effort: no camera / no SDK / any error leaves it
         disconnected. Returns whether it connected."""
         cam: CameraBackend | None = None
+        svc: AcquisitionService | None = None
         try:
             cam = _make_backend(autoconnect_backend, sim_fps=app.state.sim_fps)
             devs = await run_in_threadpool(cam.enumerate)
             if not devs:
                 cam.disconnect()
+                app.state.connect_failure = None  # no camera: an older failure no longer applies
                 return False
             svc = _make_service(cam)
             await run_in_threadpool(svc.connect, devs[0])
@@ -409,10 +422,13 @@ def create_app(
             svc.start()
             app.state.service = svc
             app.state.backend_name = autoconnect_backend
+            app.state.connect_failure = None
             logger.info("auto-connected %s %s", devs[0].model, devs[0].serial)
             return True
         except Exception as exc:  # noqa: BLE001 - best effort; leave disconnected for manual connect
             logger.debug("auto-connect attempt failed: %s", exc)
+            if app.state.service is None and not app.state.autoconnect_paused:
+                _connect_failed(exc, svc)
             if cam is not None:
                 with contextlib.suppress(Exception):
                     cam.disconnect()
@@ -727,6 +743,7 @@ def create_app(
         if service() is not None:
             raise HTTPException(409, "already connected; disconnect first")
         cam = _make_backend(req.backend, sim_fps=app.state.sim_fps)
+        svc: AcquisitionService | None = None
         try:
             devs = await run_in_threadpool(cam.enumerate)
             if not devs:
@@ -742,6 +759,7 @@ def create_app(
             svc.start()
         except CameraError as exc:
             cam.disconnect()
+            _connect_failed(exc, svc)
             raise HTTPException(500, str(exc)) from exc
         except HTTPException:
             cam.disconnect()
@@ -749,6 +767,7 @@ def create_app(
         app.state.service = svc
         app.state.backend_name = req.backend
         app.state.autoconnect_paused = False
+        app.state.connect_failure = None
         return {"state": svc.state.value, "device": chosen.__dict__}
 
     @app.post("/api/camera/disconnect")
@@ -757,6 +776,7 @@ def create_app(
         # operator reconnects meanwhile, the new session is not ours to disconnect.
         svc = service()
         app.state.autoconnect_paused = True  # a deliberate disconnect must stick
+        app.state.connect_failure = None
         await _finalize_recording()  # never lose a recording because the operator disconnected
         if svc is None or service() is not svc:
             return {"state": ServiceState.DISCONNECTED.value}
@@ -774,7 +794,10 @@ def create_app(
     def status() -> dict[str, Any]:
         svc = service()
         if svc is None:
-            return {"state": ServiceState.DISCONNECTED.value, "backend": None, "device": None}
+            failure = getattr(app.state, "connect_failure", None) or {}
+            return {"state": ServiceState.DISCONNECTED.value, "backend": None, "device": None,
+                    "last_error": failure.get("last_error"),
+                    "last_error_hint": failure.get("last_error_hint")}
         st = svc.stats()
         try:
             st["transport"] = svc.backend.transport_stats()
