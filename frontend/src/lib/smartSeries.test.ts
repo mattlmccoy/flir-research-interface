@@ -302,7 +302,7 @@ function rampSeries(n: number): SmartSeries {
       area_px: c(() => 5025), length_px: c(() => 81), width_px: c(() => 81), perimeter_px: c(() => 224), centroid_x: c(() => 320), centroid_y: c(() => 240),
       sharpness_c_per_px: c(() => 15), area_change_pct: c(() => 0), length_change_pct: c(() => 0), width_change_pct: c(() => 0),
     },
-    stale: false, computed_utc: "2026-10-21T00:00:00Z",
+    stale: false, computed_utc: "2026-10-21T00:00:00Z", over_range: null, over: null,
   };
 }
 

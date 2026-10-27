@@ -13,8 +13,15 @@ Both fixtures come from the five real A70 frames in
   cold frame after it (holding) and the first frame after the hold lapses (searching) to
   ``frontend/src/lib/fixtures/smart_feed_20261020.json``.
 
-Run from ``backend/``:
-``uv run --no-sync python ../scripts/capture_smart_series_fixture.py [--only series|feed]``
+* overrange: from the six real over-range frames in
+  ``backend/tests/fixtures/smart_overrange_20261020.npz`` (same run, ~626 s, 1-6 sample pixels
+  wrapped past the 250 °C case), the real ``GET .../smart-roi/113`` payload of a recording made
+  of them, and per frame the real live overlay (``SmartLive.overlays()`` with the case ceiling)
+  and feed entry (``live_roi_payload``), to
+  ``frontend/src/lib/fixtures/smart_overrange_20261020.json``.
+
+Run from ``backend/`` (``--only`` one of series, feed, overrange):
+``uv run --no-sync python ../scripts/capture_smart_series_fixture.py [--only NAME]``
 """
 
 from __future__ import annotations
@@ -40,6 +47,8 @@ SRC = ROOT / "backend/tests/fixtures/smart_roi_20261020.npz"
 OUT = ROOT / "frontend/src/lib/fixtures/smart_series_20261020.json"
 FEED_OUT = ROOT / "frontend/src/lib/fixtures/smart_feed_20261020.json"
 FMT = "TemperatureLinear10mK"
+OVER_SRC = ROOT / "backend/tests/fixtures/smart_overrange_20261020.npz"
+OVER_OUT = ROOT / "frontend/src/lib/fixtures/smart_overrange_20261020.json"
 
 
 def _frames() -> tuple[list[np.ndarray], list[list[int]]]:
@@ -133,14 +142,74 @@ def capture_series() -> None:
     print(OUT, len(body["state"]), "rows;", {s: body["state"].count(s) for s in set(body["state"])})
 
 
+def capture_overrange() -> None:
+    z = np.load(OVER_SRC)
+    fmt, high = str(z["ir_format"]), float(z["high_c"])
+    ox, oy = (int(v) for v in z["origin"])
+    smart = {"id": 113, "kind": "smart", "name": "cube",
+             "search": [[int(x) - ox, int(y) - oy] for x, y in z["polygon"]],
+             "rings_px": [int(r) for r in z["rings_px"]]}
+    case = {"index": 1, "low_c": -20.0, "high_c": high}
+    live = SmartLive()
+    live.set_rois([smart])
+    live.set_ceiling(high)
+    frames: list[dict[str, object]] = []
+    for i, counts in enumerate(z["counts"]):
+        ts = 5_000_000_000 + i * 33_000_000
+        live.on_frame(Frame(
+            frame_id=100 + i, device_timestamp_ns=ts, host_timestamp_ns=ts,
+            pixel_format="Mono16", ir_format=fmt, counts=counts, incomplete=False,
+        ))
+        feed = live_roi_payload(
+            counts=counts, ir_format=fmt, rois=[smart], acquiring=True, frame_id=100 + i,
+            host_ts_ns=ts, now_ns=ts + 10_000_000, smart=live.latest(),
+        )
+        frames.append({"index": int(z["indices"][i]), "overlay": live.overlays()[0], "feed": feed})
+    with tempfile.TemporaryDirectory() as tmp:
+        rec = Recorder(None, experiments_root=Path(tmp), chunk_frames=4)
+        d = rec.start(name="overrange_fixture", metadata={},
+                      camera_info={"backend": "simulated", "ir_format": fmt, "model": "Sim",
+                                   "active_case": case},
+                      extra={"rois": [smart]})
+        for i, counts in enumerate(z["counts"]):
+            rec.submit(Frame(
+                frame_id=100 + i, device_timestamp_ns=1_000_000_000 + i * 33_000_000,
+                host_timestamp_ns=5_000_000_000 + i * 33_000_000, pixel_format="Mono16",
+                ir_format=fmt, counts=np.ascontiguousarray(counts), incomplete=False,
+            ))
+        rec.stop()
+        app = create_app(default_backend="simulated", experiments_root=Path(tmp), min_free_gb=0.0)
+        with TestClient(app) as cl:
+            base = f"/api/experiments/{d.name}/smart-roi/113"
+            cl.post(f"{base}/compute").raise_for_status()
+            while cl.get(f"{base}/status").json()["state"] == "running":
+                time.sleep(0.05)
+            series = cl.get(base).json()
+    out = {
+        "series": series,
+        "live": frames,
+        "_capture": {
+            "source": "backend/tests/fixtures/smart_overrange_20261020.npz (real frames 18780,"
+            " 18788, 18789, 18820, 18845, 18850 of 20261020_144402_Run) via"
+            " scripts/capture_smart_series_fixture.py --only overrange",
+            "ceiling_c": high,
+        },
+    }
+    OVER_OUT.parent.mkdir(exist_ok=True)
+    OVER_OUT.write_text(json.dumps(out, indent=1) + "\n")
+    print(OVER_OUT, [f["overlay"].get("over", {}).get("sample", {}).get("over_px") for f in frames])
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--only", choices=("series", "feed"), default=None)
+    ap.add_argument("--only", choices=("series", "feed", "overrange"), default=None)
     only = ap.parse_args().only
     if only in (None, "series"):
         capture_series()
     if only in (None, "feed"):
         capture_feed()
+    if only in (None, "overrange"):
+        capture_overrange()
 
 
 if __name__ == "__main__":

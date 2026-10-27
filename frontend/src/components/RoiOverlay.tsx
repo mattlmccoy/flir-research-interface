@@ -5,11 +5,11 @@ import { roiColor, roiLeaderAnchor, type Box, vertexHandles } from "../lib/overl
 import { layoutLabels, type LabelBox } from "../lib/labels.ts";
 import { type ChipRect, hitChip, loadOffsets, type Offsets, saveOffsets } from "../lib/labelDrag.ts";
 import { smartOutlineTokens, type Loop } from "../lib/smartOutline.ts";
-import { smartChip, type SmartReadoutEntry, type SmartState } from "../lib/smartReadout.ts";
+import { smartChip, type SmartOver, type SmartReadoutEntry, type SmartState } from "../lib/smartReadout.ts";
 
 /** A smart ROI's live/playback outline from the operator (null outline = nothing located). */
 /** `stale`: a stored playback outline whose ROI changed since it was computed (drawn muted). */
-export interface SmartDraw { state: SmartState; valid: boolean; stale?: boolean; outline: { sample: Loop[]; rings: Loop[][] } | null; }
+export interface SmartDraw { state: SmartState; valid: boolean; stale?: boolean; over?: SmartOver | null; outline: { sample: Loop[]; rings: Loop[][] } | null; }
 
 const storage = (() => { try { return typeof localStorage !== "undefined" ? localStorage : null; } catch { return null; } })();
 
@@ -299,7 +299,9 @@ export function RoiOverlay(p: Props) {
       const [ccx, ccy, reach] = roiLeaderAnchor(r, sx, sy); // a point the leader can connect to
       const c = toScr(ccx, ccy);
       const content = r.kind === "smart" ? smartContent(r, sd, p.smartFeed?.get(r.id)) : labelContent(r, p.stats.get(r.id));
-      const dot = r.kind === "smart" && smartChip(sd, p.smartFeed?.get(r.id)).muted ? cssVar("--muted") : color;  // smart: ROI colour only when valid
+      const chip = r.kind === "smart" ? smartChip(sd, p.smartFeed?.get(r.id)) : null;
+      // smart: ROI colour only when valid; over range is warn, never the healthy colour
+      const dot = chip?.warn ? cssVar("--warn") : chip?.muted ? cssVar("--muted") : color;
       labels.push({ id: r.id, content, color: dot, ax: scr.x, ay: scr.y, cx: c.x, cy: c.y, reach, selected: r.id === p.selected });
       if (r.id === p.selected) for (const [vx, vy] of vertexHandles(r)) {
         const hx = (vx + 0.5) * sx, hy = (vy + 0.5) * sy;

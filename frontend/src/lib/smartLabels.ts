@@ -7,6 +7,9 @@ export type SmartOverlay = {
   valid: boolean;
   bbox: [number, number, number, number] | null;
   labels: string | null;
+  /** Present while the sample or a ring has over-range pixels: the bounded readings for display
+   *  (smartReadout.ts parseSmartOver; backend smart_wire.smart_overlay). Never in the TC-POWER feed. */
+  over?: unknown;
 };
 
 export function decodeLabels(b64: string, w: number, h: number): Uint8Array {

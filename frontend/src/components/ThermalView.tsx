@@ -23,7 +23,7 @@ import { RoiOverlay, type Draft, type SmartDraw } from "./RoiOverlay.tsx";
 import type { SmartOverlay } from "../lib/smartLabels.ts";
 import { smartOutlines } from "../lib/smartOutline.ts";
 import { smartPrefs, visibleOutlineRings, type SmartViewPrefs } from "../lib/smartView.ts";
-import type { SmartReadoutEntry } from "../lib/smartReadout.ts";
+import { parseSmartOver, type SmartReadoutEntry } from "../lib/smartReadout.ts";
 import { displaySize, type Zoom } from "../lib/zoom.ts";
 import { toCssMatrix3d, type H3 } from "../lib/homography.ts";
 import { maskAt, maskField, type MaskAction, type MaskShape } from "../lib/mask.ts";
@@ -156,7 +156,7 @@ export function ThermalView({ frame, palette, scaleMode, manual, onScale, setMan
   const smartSrc = smartOverlays === undefined ? hdr?.smart : smartOverlays;
   const smartDecoded = useMemo(() => {
     const m = new Map<number, SmartDraw>();
-    for (const o of smartSrc ?? []) m.set(o.id, { state: o.state, valid: o.valid, stale: smartStale?.has(o.id) ?? false, outline: smartOutlines(o) });
+    for (const o of smartSrc ?? []) m.set(o.id, { state: o.state, valid: o.valid, stale: smartStale?.has(o.id) ?? false, over: parseSmartOver(o.over), outline: smartOutlines(o) });
     return m;
   }, [smartSrc, smartStale]);
   // hidden ring bands are left out after the decode, so a toggle never re-decodes the labels

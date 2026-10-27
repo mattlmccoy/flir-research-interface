@@ -1,6 +1,6 @@
 // The operator's live smart ROI feed as the rail shows it (pure; polling lives in useSmartFeed.ts).
 // No-false-green: a failed, stale or not-live feed never shows the last good numbers.
-import { smartFeedMap, smartSummary, type SmartReadoutEntry } from "./smartReadout.ts";
+import { isOverRange, parseSmartOver, smartFeedMap, smartSummary, type SmartReadoutEntry, type SmartState } from "./smartReadout.ts";
 
 /** One poll's result. `ok` false = the poll failed; `at` = when it completed (ms); `live` = the
  *  operator had a current camera frame (payload `live`). */
@@ -22,7 +22,9 @@ export function smartChipFeed(feed: SmartFeed | null, now: number, intervalMs: n
   return feed && feedFresh(feed, now, intervalMs) && feed.live ? feed.entries : undefined;
 }
 
-export type SmartTone = "locked" | "holding" | "searching" | "invalid" | "none";
+/** "over": located, but some pixels are over the camera's range: bounded numbers in the warn tone,
+ *  never the locked (healthy) one. */
+export type SmartTone = "locked" | "holding" | "searching" | "invalid" | "none" | "over";
 export interface SmartRowView {
   /** The collapsed row: one line (state, numbers only when valid, and the stale / ≈ markers). */
   summary: string;
@@ -41,13 +43,35 @@ export interface SmartRowView {
 
 const none = (line: string): SmartRowView => ({ summary: line, entry: null, notes: [], tone: "none", mean: null, marker: null });
 
-export function smartRowView(feed: SmartFeed | null, id: number, now: number, intervalMs: number): SmartRowView {
+/** The live frame's overlay for one smart ROI (WS frame header `smart[i]`); only its state and its
+ *  `over` block are read here. */
+export interface SmartFrameOverlay { state: SmartState; over?: unknown; }
+
+/** The over-range view of a row (live and playback): bounded numbers, warn tone, no plotted mean. */
+export function overRow(row: { summary: string; entry: SmartReadoutEntry; notes: string[] }, marks: string[] = []): SmartRowView {
+  return { ...row, tone: "over", mean: null, marker: ["over range", ...marks].join(" ") };
+}
+
+/** One live rail row. Normal readings come from the operator's feed; while the frame on screen has
+ *  over-range pixels in the sample, the bounded numbers come from that frame's overlay (`overlay`,
+ *  the UI-only channel: the feed keeps reporting such an ROI invalid with no numbers), and only
+ *  while the feed itself is fresh and live. */
+export function smartRowView(feed: SmartFeed | null, id: number, now: number, intervalMs: number, overlay?: SmartFrameOverlay | null): SmartRowView {
   if (!feed) return none("waiting for the operator…");
   if (!feedFresh(feed, now, intervalMs)) return none("no reading: the operator's live feed is unreachable");
   if (!feed.live) return none("operator not live: no current camera frame");
-  const e = feed.entries.get(id);
-  if (!e) return none("no reading from the operator yet");
+  const fe = feed.entries.get(id);
+  if (!fe) return none("no reading from the operator yet");
+  const over = overlay && overlay.state !== "searching" ? parseSmartOver(overlay.over) : null;
+  let e: SmartReadoutEntry = fe;
+  if (over && over.sample.over_px > 0) {
+    // the frame on screen is over range: never pair it with the (lagging) feed's numbers
+    e = { ...fe, state: overlay!.state, valid: false, over_range: true, dims: null, over };
+  } else if (over && fe.state === overlay!.state) {
+    e = { ...fe, over };  // only a ring is over range: its bounds for the details
+  }
   const row = { summary: smartSummary(e), entry: e, notes: [] };
+  if (isOverRange(e)) return overRow(row);
   if (!e.valid) return { ...row, tone: e.state === "searching" ? "searching" : "invalid", mean: null, marker: e.state === "searching" ? "searching" : "not valid" };
   return { ...row, tone: e.state === "holding" ? "holding" : "locked", mean: e.sample.mean_c, marker: e.state === "holding" ? "holding" : null };
 }

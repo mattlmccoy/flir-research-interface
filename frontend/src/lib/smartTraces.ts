@@ -14,17 +14,44 @@ export type SmartTrace = AxisTrace & { axis: "temp" | "size" };
 /** Ring bands are dashed in the ROI colour (as on the image); the size line has its own dash. */
 export const RING_DASH = [5, 3];
 export const SIZE_DASH = [10, 3, 2, 3];
+/** The sample mean's lower bound while pixels are over range: dotted, in the warn colour. */
+export const BOUND_DASH = [2, 3];
+export const BOUND_COLOR = "var(--warn)";
 const DIM_COLUMN = { area: "area_px", length: "length_px", width: "width_px" } as const;
 
 /** Trace ids that cannot collide with ROI ids (positive), control lines (-100…) or the delta trace. */
 const ringId = (roiId: number, q: number) => -(10_000 + roiId * 32 + q);
 const sizeId = (roiId: number) => -(10_000 + roiId * 32 + 31);
+const boundId = (roiId: number) => -(10_000 + roiId * 32 + 30);
+
+/** The stored lower-bound mean on located over-range rows (NaN elsewhere), joined to the plotted
+ *  mean at the valid rows either side, so the line runs on as a visibly different segment instead
+ *  of a gap. All NaN when the series has no over-range columns. */
+export function boundValues(series: SmartSeries, mean: number[]): number[] {
+  const px = series.over?.sample.px, lb = series.over?.sample.mean_lb;
+  const n = series.t_s.length;
+  const out: number[] = new Array(n).fill(NaN);
+  if (!px || !lb) return out;
+  const over = (k: number) => px[k] > 0 && lb[k] !== null && series.state[k] !== "searching";
+  for (let k = 0; k < n; k++) {
+    if (over(k)) out[k] = lb[k]!;
+    else if ((k > 0 && over(k - 1)) || (k + 1 < n && over(k + 1))) out[k] = mean[k];
+  }
+  return out;
+}
 
 export function smartTraces(series: SmartSeries, choose: SmartTraceChoice, roi: { id: number; label: string; color: string; stale?: boolean }): SmartTrace[] {
   const suffix = roi.stale ? " (stale)" : "";  // stale or edited since computed: never looks current
   const gap = (c: (number | null)[]): number[] => c.map((v, k) => (v === null || !rowValid(series, k) ? NaN : v));
   const out: SmartTrace[] = [];
-  if (choose.sample) out.push({ id: roi.id, label: `${roi.label} mean${suffix}`, color: roi.color, axis: "temp", t: series.t_s, v: gap(series.sample.mean) });
+  if (choose.sample) {
+    const mean = gap(series.sample.mean);
+    out.push({ id: roi.id, label: `${roi.label} mean${suffix}`, color: roi.color, axis: "temp", t: series.t_s, v: mean });
+    const bound = boundValues(series, mean);
+    if (bound.some((v) => Number.isFinite(v))) {
+      out.push({ id: boundId(roi.id), label: `${roi.label} mean ≥ lower bound (over range)${suffix}`, color: BOUND_COLOR, dash: [...BOUND_DASH], axis: "temp", t: series.t_s, v: bound });
+    }
+  }
   if (choose.rings) {
     series.rings.forEach((g, q) => {
       if (choose.hiddenRings?.includes(g.outer_px)) return;  // switched off in the rail; q keeps the id stable

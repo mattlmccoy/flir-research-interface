@@ -11,14 +11,54 @@ export interface SmartDims {
   area_change_pct: number | null; length_change_pct: number | null; width_change_pct: number | null;
   units: "px";
 }
+/** Readings that stay honest while pixels are over range (backend smart_roi._over_stats): the
+ *  over-range pixels counted at the camera's range top make `mean_lb_c` a lower bound; `min_c` is
+ *  the exact in-range min (a bound only when `min_is_bound`); `max_c` is null whenever `over_px` > 0
+ *  (the true max is above `ceiling_c`, null = range top unknown). With `over_px` 0 these are the
+ *  region's plain numbers. */
+export interface SmartOverStats {
+  mean_lb_c: number | null; min_c: number | null; min_is_bound: boolean; max_c: number | null;
+  over_px: number; ceiling_c: number | null;
+}
+/** The overlay's `over` block (live: WS frame `smart[i].over`; playback: the stored columns).
+ *  UI only: the TC-POWER feed never carries these numbers. Rings pair with `rings` by position. */
+export interface SmartOver { sample: SmartOverStats; rings: SmartOverStats[]; }
 export interface SmartReadoutEntry {
   state: SmartState; valid: boolean; over_range: boolean;
   sample: SmartStats; rings: SmartRing[]; dims: SmartDims | null;
+  /** Present while the sample or a ring has over-range pixels. */
+  over?: SmartOver | null;
 }
 
 const STATES: readonly SmartState[] = ["searching", "locked", "holding"];
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const stats = (o: Record<string, unknown>): SmartStats => ({ mean_c: num(o.mean_c), max_c: num(o.max_c), min_c: num(o.min_c) });
+
+function overStats(v: unknown): SmartOverStats | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const px = o.over_px;
+  if (typeof px !== "number" || !Number.isInteger(px) || px < 0 || typeof o.min_is_bound !== "boolean") return null;
+  const nullable = ["mean_lb_c", "min_c", "max_c", "ceiling_c"] as const;
+  if (!nullable.every((k) => o[k] === null || num(o[k]) !== null)) return null;
+  return { mean_lb_c: num(o.mean_lb_c), min_c: num(o.min_c), min_is_bound: o.min_is_bound, max_c: num(o.max_c), over_px: px, ceiling_c: num(o.ceiling_c) };
+}
+
+/** An overlay's `over` block, or null when absent or malformed (never a partial reading). */
+export function parseSmartOver(raw: unknown): SmartOver | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const sample = overStats(r.sample);
+  if (!sample || !Array.isArray(r.rings)) return null;
+  const rings = r.rings.map(overStats);
+  return rings.every((g): g is SmartOverStats => g !== null) ? { sample, rings } : null;
+}
+
+/** True when the entry is located (not searching) and its sample has over-range pixels with
+ *  bounded readings to show. */
+export function isOverRange(e: SmartReadoutEntry): boolean {
+  return e.state !== "searching" && !!e.over && e.over.sample.over_px > 0;
+}
 
 function asDims(v: unknown): SmartDims | null {
   if (!v || typeof v !== "object") return null;
@@ -61,6 +101,15 @@ function t(v: number | null): string {
 }
 const temps = (s: SmartStats): string =>
   s.mean_c === null && s.max_c === null && s.min_c === null ? "n/a" : `mean ${t(s.mean_c)} °C · max ${t(s.max_c)} · min ${t(s.min_c)}`;
+/** `max > 250 (over range)`, or `max over range` when the range top is unknown. */
+const overMax = (o: SmartOverStats): string => (o.ceiling_c === null ? "max over range" : `max > ${t(o.ceiling_c)} (over range)`);
+/** A region with over-range pixels: lower-bound mean, exact (or bound) min, max above the range.
+ *  Padded like the summary so the row keeps its shape; `min ≥` only when no pixel is in range. */
+const bounded = (o: SmartOverStats): string =>
+  `mean ≥ ${pad(t(o.mean_lb_c), 5)} °C · min ${o.min_is_bound ? "≥ " : ""}${pad(t(o.min_c), 5)} · ${overMax(o)}`;
+/** A region's numbers from its over block: bounded when it has over-range pixels, plain otherwise. */
+const overTemps = (o: SmartOverStats): string =>
+  o.over_px > 0 ? `${bounded(o)} · ${o.over_px} px` : temps({ mean_c: o.mean_lb_c, max_c: o.max_c, min_c: o.min_c });
 const pct = (v: number | null): string => {
   if (v === null) return "n/a";
   const r = Math.abs(v).toFixed(1);
@@ -72,6 +121,7 @@ const pct = (v: number | null): string => {
  *  keeps its numbers; an invalid entry shows only its status, never a number. */
 export function smartReadoutLines(e: SmartReadoutEntry): string[] {
   const badge = smartBadge(e.state);
+  if (isOverRange(e)) return [smartSummary(e)];
   if (!e.valid) {
     if (e.state === "searching") return [badge];
     return [`${badge} · not valid${e.over_range ? " (over-range pixels)" : ""}`];
@@ -90,6 +140,7 @@ export function smartReadoutLines(e: SmartReadoutEntry): string[] {
 /** The collapsed rail row: one line, state · sample mean · max · area. Not valid: the badge text
  *  only (the same status as smartReadoutLines), never a number. */
 export function smartSummary(e: SmartReadoutEntry): string {
+  if (isOverRange(e)) return `${smartBadge(e.state)} · ${bounded(e.over!.sample)}`;
   if (!e.valid) return smartReadoutLines(e)[0];
   const d = e.dims;
   return `${smartBadge(e.state)} · ${pad(t(e.sample.mean_c), 5)} °C · max ${pad(t(e.sample.max_c), 5)}${d ? ` · area ${pad(String(d.area_px), 6)} px` : ""}`;
@@ -104,9 +155,19 @@ export interface SmartDetailRow { label: string; value: string; }
 /** The expanded rail row as label/value rows: sample, each shown ring band (`hiddenRings` = outer
  *  offsets left out), then the thermal-edge size. Not valid: no rows (no numbers). */
 export function smartDetails(e: SmartReadoutEntry, hiddenRings: readonly number[] = []): SmartDetailRow[] {
-  if (!e.valid) return [];
-  const rows: SmartDetailRow[] = [{ label: "sample", value: temps(e.sample) }];
-  for (const g of e.rings) if (!hiddenRings.includes(g.outer_px)) rows.push({ label: `ring ${g.inner_px}–${g.outer_px} px`, value: temps(g) });
+  const over = isOverRange(e) ? e.over! : null;
+  if (!e.valid && !over) return [];
+  const rows: SmartDetailRow[] = over
+    ? [{ label: "sample", value: bounded(over.sample) }, { label: "over-range px", value: `${over.sample.over_px} px` }]
+    : [{ label: "sample", value: temps(e.sample) }];
+  e.rings.forEach((g, q) => {
+    if (hiddenRings.includes(g.outer_px)) return;
+    // a ring's own over block (live: the overlay; playback: the stored columns) when it has one:
+    // bounded where the ring has over-range pixels, else its plain numbers
+    const go = e.over?.rings[q];
+    const value = go && (over || go.over_px > 0) ? overTemps(go) : temps(g);
+    rows.push({ label: `ring ${g.inner_px}–${g.outer_px} px`, value });
+  });
   const d = e.dims;
   if (!d) return rows;
   // one short value per row: a long row would wrap differently as its digits change frame to frame
@@ -140,10 +201,16 @@ export function smartFeedMap(payload: unknown): Map<number, SmartReadoutEntry> {
 /** On-image chip text (`muted`: dot in --muted, not the ROI colour, when not valid): state from the frame's overlay (per frame), numbers from the operator's feed
  *  only when it reports the same state and is valid (the polled feed may lag the frames). A stale
  *  stored outline (playback: the ROI changed since its series was computed) is muted, numberless. */
-export function smartChip(draw: { state: SmartState; valid: boolean; stale?: boolean } | undefined, feed: SmartReadoutEntry | undefined): { value: string; range: string | null; muted: boolean } {
+export function smartChip(draw: { state: SmartState; valid: boolean; stale?: boolean; over?: SmartOver | null } | undefined, feed: SmartReadoutEntry | undefined): { value: string; range: string | null; muted: boolean; warn?: true } {
   const cur = draw ?? feed;
   if (!cur) return { value: "no outline", range: null, muted: true };
   if (draw?.stale) return { value: `${smartBadge(draw.state)} · stale`, range: null, muted: true };
+  // over range at this frame (the overlay's own block, never the feed): the bound, in warn
+  const o = draw && draw.state !== "searching" && draw.over && draw.over.sample.over_px > 0 ? draw.over.sample : null;
+  if (o) {
+    const max = o.ceiling_c === null ? "max over range" : `max > ${Math.round(o.ceiling_c)}`;
+    return { value: `${smartBadge(draw!.state)} · over range`, range: o.mean_lb_c === null ? max : `mean ≥ ${o.mean_lb_c.toFixed(1)}  ${max}`, muted: false, warn: true };
+  }
   const value = cur.valid || cur.state === "searching" ? smartBadge(cur.state) : `${smartBadge(cur.state)} · not valid`;
   const s = feed && feed.valid && feed.state === cur.state && cur.valid ? feed.sample : null;
   return { value, range: s && s.mean_c !== null && s.max_c !== null ? `mean ${s.mean_c.toFixed(1)}  max ${s.max_c.toFixed(1)}` : null, muted: !cur.valid };

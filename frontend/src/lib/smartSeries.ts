@@ -1,12 +1,17 @@
 // A recorded run's stored smart ROI series (GET /api/experiments/{name}/smart-roi/{id}, backend
 // analysis/smart_series.py series_payload + `stale`) and the playback readout / compute-job view
 // built from it. Pure: fetching and polling live in components/useSmartSeries.ts.
-import { smartSummary, type SmartReadoutEntry, type SmartState } from "./smartReadout.ts";
-import type { SmartRowView } from "./smartFeed.ts";
+import { isOverRange, smartSummary, type SmartOver, type SmartOverStats, type SmartReadoutEntry, type SmartState } from "./smartReadout.ts";
+import { overRow, type SmartRowView } from "./smartFeed.ts";
 import { roiLabel, smartTracking, type Smart } from "./roi.ts";
 
 type Col = (number | null)[];
 export interface SmartSeriesRing { inner_px: number; outer_px: number; mean: Col; max: Col; min: Col; }
+/** One region's stored over-range columns (backend smart_series; null / 0 where it had none). */
+export interface SmartSeriesOverCols { mean_lb: Col; min: Col; min_is_bound: boolean[]; px: number[]; }
+/** The stored over-range readings (`over` in the payload); null for a series computed before they
+ *  were stored. */
+export interface SmartSeriesOver { ceiling_c: number | null; ring_ceiling_c: number | null; sample: SmartSeriesOverCols; rings: SmartSeriesOverCols[]; }
 export interface SmartSeries {
   /** Frame index of each stored point (every stride-th frame when downsampled). */
   index: number[];
@@ -20,6 +25,9 @@ export interface SmartSeries {
   stale: boolean;
   /** When the stored series was computed (sidecar computed_utc); null when unknown. */
   computed_utc: string | null;
+  /** Rows where the sample had over-range pixels (null: not in the payload). */
+  over_range: boolean[] | null;
+  over: SmartSeriesOver | null;
 }
 const DIM_KEYS = ["area_px", "length_px", "width_px", "perimeter_px", "centroid_x", "centroid_y", "sharpness_c_per_px", "area_change_pct", "length_change_pct", "width_change_pct"] as const;
 const STATES: readonly SmartState[] = ["searching", "locked", "holding"];
@@ -38,6 +46,24 @@ const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 
 function col(v: unknown, n: number): Col | null {
   if (!Array.isArray(v) || v.length !== n) return null;
   return v.map((x) => (typeof x === "number" && Number.isFinite(x) ? x : null));
+}
+
+const finite = (x: unknown): number | null => (typeof x === "number" && Number.isFinite(x) ? x : null);
+function overCols(v: unknown, n: number): SmartSeriesOverCols | null {
+  if (!isObj(v)) return null;
+  const mean_lb = col(v.mean_lb, n), min = col(v.min, n);
+  const bound = v.min_is_bound, px = v.px;
+  if (!mean_lb || !min || !Array.isArray(bound) || bound.length !== n || !Array.isArray(px) || px.length !== n) return null;
+  if (!px.every((x) => typeof x === "number" && Number.isInteger(x) && x >= 0)) return null;
+  return { mean_lb, min, min_is_bound: bound.map((b) => b === true), px: px as number[] };
+}
+/** The payload's `over` block, or null when absent or malformed (shown as an older series). */
+function parseOver(v: unknown, n: number, k: number): SmartSeriesOver | null {
+  if (!isObj(v) || !Array.isArray(v.rings) || v.rings.length !== k) return null;
+  const sample = overCols(v.sample, n);
+  const rings = v.rings.map((g) => overCols(g, n));
+  if (!sample || !rings.every((g): g is SmartSeriesOverCols => g !== null)) return null;
+  return { ceiling_c: finite(v.ceiling_c), ring_ceiling_c: finite(v.ring_ceiling_c), sample, rings };
 }
 
 /** The payload as typed columns, or null when it is not a well-formed series. */
@@ -66,6 +92,8 @@ export function parseSmartSeries(raw: unknown): SmartSeries | null {
     index: raw.index.map(Number), t_s: raw.t_s.map(Number), state: raw.state as SmartState[],
     valid: raw.valid.map((v) => v === true), sample: { mean, max, min }, rings, dims, stale: raw.stale === true,
     computed_utc: typeof raw.computed_utc === "string" ? raw.computed_utc : null,
+    over_range: Array.isArray(raw.over_range) && raw.over_range.length === n ? raw.over_range.map((v) => v === true) : null,
+    over: parseOver(raw.over, n, rings.length),
   };
 }
 
@@ -85,11 +113,14 @@ export function downsampleSmartSeries(s: SmartSeries, maxPoints: number): SmartS
   const pick = <T,>(a: T[]): T[] => a.filter((_, i) => i % stride === 0);
   const dims = {} as SmartSeries["dims"];
   for (const k of DIM_KEYS) dims[k] = pick(s.dims[k]);
+  const pickOver = (c: SmartSeriesOverCols): SmartSeriesOverCols => ({ mean_lb: pick(c.mean_lb), min: pick(c.min), min_is_bound: pick(c.min_is_bound), px: pick(c.px) });
   return {
     ...s, index: pick(s.index), t_s: pick(s.t_s), state: pick(s.state), valid: pick(s.valid),
     sample: { mean: pick(s.sample.mean), max: pick(s.sample.max), min: pick(s.sample.min) },
     rings: s.rings.map((g) => ({ ...g, mean: pick(g.mean), max: pick(g.max), min: pick(g.min) })),
     dims,
+    over_range: s.over_range ? pick(s.over_range) : null,
+    over: s.over ? { ...s.over, sample: pickOver(s.over.sample), rings: s.over.rings.map(pickOver) } : null,
   };
 }
 
@@ -128,12 +159,28 @@ export function smartRowAt(s: SmartSeries, frame: number): { frame: number; exac
     units: "px" as const,
   } : null;
   const entry: SmartReadoutEntry = {
-    state: s.state[k], valid, over_range: false,  // over-range is not part of the plot payload
+    state: s.state[k], valid, over_range: s.over_range?.[k] ?? false,
     sample: { mean_c: s.sample.mean[k], max_c: s.sample.max[k], min_c: s.sample.min[k] },
     rings: s.rings.map((g) => ({ inner_px: g.inner_px, outer_px: g.outer_px, mean_c: g.mean[k], max_c: g.max[k], min_c: g.min[k] })),
     dims,
+    over: storedOver(s, k),
   };
   return { frame: s.index[k], exact: s.index[k] === frame, entry };
+}
+
+/** Row `k`'s over block from the stored columns (null when nothing there was over range). A region
+ *  without over-range pixels gets its plain stored numbers (`mean_lb_c` = its mean). */
+function storedOver(s: SmartSeries, k: number): SmartOver | null {
+  const o = s.over;
+  if (!o || (o.sample.px[k] === 0 && o.rings.every((g) => g.px[k] === 0))) return null;
+  const one = (c: SmartSeriesOverCols, plain: { mean: Col; max: Col; min: Col }, ceiling: number | null): SmartOverStats =>
+    c.px[k] > 0
+      ? { mean_lb_c: c.mean_lb[k], min_c: c.min[k], min_is_bound: c.min_is_bound[k], max_c: null, over_px: c.px[k], ceiling_c: ceiling }
+      : { mean_lb_c: plain.mean[k], min_c: plain.min[k], min_is_bound: false, max_c: plain.max[k], over_px: 0, ceiling_c: ceiling };
+  return {
+    sample: one(o.sample, s.sample, o.ceiling_c),
+    rings: o.rings.map((c, q) => one(c, s.rings[q], o.ring_ceiling_c)),
+  };
 }
 
 const none = (line: string): SmartRowView => ({ summary: line, entry: null, notes: [], tone: "none", mean: null, marker: null });
@@ -167,6 +214,10 @@ export function smartPlaybackRow(st: SmartSeriesState, frame: number, ctx: Smart
   const stale = st.series.stale || !!ctx.edited;
   if (stale) summary += " · stale";
   const row = { summary, entry: e, notes };
+  if (isOverRange(e)) return overRow(row, [stale ? "stale" : null, r.exact ? null : "≈"].filter((m): m is string => m !== null));
+  if (!e.valid && e.over_range && e.state !== "searching" && !st.series.over) {
+    notes.push("recompute this smart ROI to see its mean (a lower bound) and min while pixels are over range");
+  }
   if (!e.valid) return { ...row, tone: e.state === "searching" ? "searching" : "invalid", mean: null, marker: e.state === "searching" ? "searching" : "not valid" };
   const marks = [stale ? "stale" : null, r.exact ? null : "≈", e.state === "holding" ? "holding" : null].filter((m): m is string => m !== null);
   const tone = stale || !r.exact ? "invalid" : e.state === "holding" ? "holding" : "locked";
