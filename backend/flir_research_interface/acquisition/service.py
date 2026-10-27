@@ -17,6 +17,7 @@ from collections.abc import Callable
 from typing import Any
 
 from flir_research_interface.camera.base import CameraBackend, DeviceDescriptor, Frame
+from flir_research_interface.connect_hint import camera_error_hint
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,10 @@ class AcquisitionService:
     stalls (no frame for ``stall_timeout_s``), it disconnects, waits with backoff, reconnects the
     same device, and resumes — surfacing ``RECONNECTING`` so the UI shows the self-healing. Default
     off, so the bare service keeps its simple connect→acquire→error semantics.
+
+    Whenever an error is recorded, ``diagnose(raw_error, camera_ip)`` (default
+    :func:`camera_error_hint`) turns it into ``last_error_hint``, a plain-language cause and fix
+    shown next to the raw ``last_error``. It runs only on failures, never per frame.
     """
 
     def __init__(
@@ -52,6 +57,7 @@ class AcquisitionService:
         reconnect_delays: tuple[float, ...] = _RECONNECT_DELAYS,
         max_reconnect_attempts: int | None = None,
         connect_retries: int = 0,
+        diagnose: Callable[[str, str | None], dict[str, Any] | None] | None = None,
     ) -> None:
         self._backend = backend
         self._state = ServiceState.DISCONNECTED
@@ -65,6 +71,8 @@ class AcquisitionService:
         self._frames_received = 0
         self._viz_dropped = 0
         self._last_error: str | None = None
+        self._last_error_hint: dict[str, Any] | None = None
+        self._diagnose = diagnose or camera_error_hint
         self._ts_window: deque[int] = deque(maxlen=fps_window)
         self._device: DeviceDescriptor | None = None
         self._listeners: list[Callable[[Frame], None]] = []
@@ -104,16 +112,19 @@ class AcquisitionService:
                 break
             except Exception as exc:  # noqa: BLE001 - retry transient connect failures
                 if i + 1 >= attempts:
+                    self._record_connect_failure(exc, descriptor)
                     raise
                 delay = self._reconnect_delays[min(i, len(self._reconnect_delays) - 1)]
                 logger.warning("connect attempt %d/%d failed (%s); retrying in %.1fs",
                                i + 1, attempts, exc, delay)
                 if self._stop_evt.wait(delay):
+                    self._record_connect_failure(exc, descriptor)
                     raise
         self._device = descriptor
         with self._lock:
             self._state = ServiceState.CONNECTED
             self._last_error = None
+            self._last_error_hint = None
         logger.info("connected to %s %s", descriptor.model, descriptor.serial)
 
     def start(self) -> None:
@@ -203,18 +214,39 @@ class AcquisitionService:
                 "viz_dropped": self._viz_dropped,
                 "camera_fps": fps,
                 "last_error": self._last_error,
+                "last_error_hint": self._last_error_hint,
                 "latest_frame_id": self._latest.frame_id if self._latest else None,
             }
 
     # -- camera thread -------------------------------------------------------------------
 
+    def _hint_for(self, error: str, camera_ip: str | None) -> dict[str, Any] | None:
+        try:
+            return self._diagnose(error, camera_ip)
+        except Exception:  # noqa: BLE001 - a hint must never break error handling
+            logger.exception("connect hint failed")
+            return None
+
+    def _record_connect_failure(self, exc: BaseException, descriptor: DeviceDescriptor) -> None:
+        error = str(exc)
+        hint = self._hint_for(error, descriptor.ip_address)
+        with self._lock:
+            self._last_error = error
+            self._last_error_hint = hint
+
     def _set_state(self, state: ServiceState, error: str | None = None) -> None:
+        # diagnose outside the lock: it may list adapters (psutil / networksetup)
+        hint = None
+        if error is not None:
+            hint = self._hint_for(error, self._device.ip_address if self._device else None)
         with self._cond:
             self._state = state
             if error is not None:
                 self._last_error = error
+                self._last_error_hint = hint
             elif state == ServiceState.ACQUIRING:
                 self._last_error = None
+                self._last_error_hint = None
             self._cond.notify_all()
 
     def _acquire_frames(self) -> int:
