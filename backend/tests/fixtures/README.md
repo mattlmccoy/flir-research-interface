@@ -77,3 +77,11 @@ PA12 powder, TemperatureLinear10mK) at t = 0.0, 55.0, 274.0, 549.0 and 604.0 s (
 (origin x=89, y=157; 128×127 px of the 640×480 frame). Stored as °C (`counts × 0.01 − 273.15`,
 float32) with `origin`, `frame_shape`, `polygon` (frame coordinates), `indices` and `t_s`; no
 over-range pixels in the crops.
+
+`neterr/` — real captures from the lab Mac on 2026-10-27, the day Connect failed with Spinnaker
+-1023. `ifconfig_now.txt` is `ifconfig` output taken AFTER the fix, so en15 (AX88179A) is
+192.168.9.1/24 in it; while broken it was `inet 192.168.9.1 netmask 0xffff0000 broadcast
+192.168.255.255` (observed live, not captured), and `test_connect_hint.py` rebuilds that state by
+changing only that one line. `hardwareports.txt` is `networksetup -listallhardwareports`.
+`spinnaker_1023_log.txt` holds the operator log lines for the -1023 connect failures and two
+earlier -1024 ("Camera has been removed") disconnects. All three are unchanged.

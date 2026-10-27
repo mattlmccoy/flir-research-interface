@@ -1,0 +1,5 @@
+2026-10-27 14:47:52,960 WARNING flir_research_interface.acquisition.service: connect attempt 1/4 failed (Spinnaker: Spinnaker: Camera is on an adapter with conflicting IP and subnet address range. [-1023]); retrying in 1.0s
+2026-10-27 14:47:57,436 WARNING flir_research_interface.acquisition.service: connect attempt 2/4 failed (Spinnaker: Spinnaker: Camera is on an adapter with conflicting IP and subnet address range. [-1023]); retrying in 2.0s
+2026-10-27 14:48:02,904 WARNING flir_research_interface.acquisition.service: connect attempt 3/4 failed (Spinnaker: Spinnaker: Camera is on an adapter with conflicting IP and subnet address range. [-1023]); retrying in 5.0s
+2026-09-15 12:07:51,441 ERROR flir_research_interface.camera.spinnaker: disconnect: Spinnaker: Camera has been removed from the list and is no longer valid. [-1024]
+2026-09-15 18:11:03,982 ERROR flir_research_interface.camera.spinnaker: disconnect: Spinnaker: Camera has been removed from the list and is no longer valid. [-1024]
