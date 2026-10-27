@@ -101,3 +101,21 @@ def test_old_series_without_over_columns_still_loads(tmp_path: Path) -> None:
     p = series_payload(s_old, 1000)
     assert p["over"] is None
     assert p["over_range"] == [False, False, True, True, True, False]
+
+
+def test_stored_overlay_carries_the_over_block_like_live(tmp_path: Path) -> None:
+    """Playback's per-frame overlays get the same ``over`` block as the live overlay, so the image
+    chip reads the bound there too (and only on over-range rows)."""
+    from flir_research_interface.analysis.smart_series import overlay_window
+
+    _, s = _computed(tmp_path)
+    win = overlay_window(s, 113, 0, 6)
+    assert ["over" in o for o in win] == [False, False, True, True, True, False]
+    o = win[3]["over"]
+    assert o["sample"]["over_px"] == 6 and o["sample"]["max_c"] is None
+    assert math.isclose(o["sample"]["mean_lb_c"], float(s["sample_mean_lb"][3]))
+    assert math.isclose(o["sample"]["ceiling_c"], 250.00002441406252)
+    assert o["sample"]["min_is_bound"] is False
+    g = o["rings"][0]
+    assert g["over_px"] == 0 and math.isclose(g["max_c"], float(s["ring_max"][3, 0]))
+    assert math.isclose(g["mean_lb_c"], float(s["ring_mean"][3, 0]))

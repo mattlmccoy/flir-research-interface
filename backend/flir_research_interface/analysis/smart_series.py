@@ -318,14 +318,48 @@ def overlay_window(
     out: list[dict[str, Any]] = []
     for i in range(max(0, start), min(n, start + count)):
         box = [int(v) for v in data["bbox"][i]]
-        out.append({
+        row: dict[str, Any] = {
             "id": roi_id,
             "state": STATE_NAMES[int(data["state"][i])],
             "valid": bool(data["valid"][i]),
             "bbox": box if box[0] >= 0 else None,
             "labels": data["labels"][i],
-        })
+        }
+        over = _stored_over(data, i)
+        if over is not None:
+            row["over"] = over
+        out.append(row)
     return out
+
+
+def _stored_over(data: dict[str, Any], i: int) -> dict[str, Any] | None:
+    """Row ``i``'s ``over`` block in the live overlay's shape (``smart_wire.smart_overlay``), or
+    None when nothing there was over range or the series predates the over-range columns. A region
+    without over-range pixels gets its plain stored numbers."""
+    if "over_px" not in data or "ceiling_c" not in data:
+        return None
+    ring_px = data["ring_over_px"][i]
+    if int(data["over_px"][i]) == 0 and not bool(np.any(ring_px)):
+        return None
+    ceil = _clean(np.asarray(data["ceiling_c"], dtype=np.float64))
+
+    def one(where: str, at: tuple[int, ...], px: int, ceiling: float | None) -> dict[str, Any]:
+        def v(col: str) -> float | None:
+            return _clean(np.asarray([data[col][at]], dtype=np.float64))[0]
+
+        if px:
+            return {"mean_lb_c": v(f"{where}_mean_lb"), "min_c": v(f"{where}_min_over"),
+                    "min_is_bound": bool(data[f"{where}_min_is_bound"][at]), "max_c": None,
+                    "over_px": px, "ceiling_c": ceiling}
+        return {"mean_lb_c": v(f"{where}_mean"), "min_c": v(f"{where}_min"),
+                "min_is_bound": False, "max_c": v(f"{where}_max"), "over_px": 0,
+                "ceiling_c": ceiling}
+
+    return {
+        "sample": one("sample", (i,), int(data["over_px"][i]), ceil[0] if ceil else None),
+        "rings": [one("ring", (i, q), int(px), ceil[1] if len(ceil) > 1 else None)
+                  for q, px in enumerate(ring_px)],
+    }
 
 
 __all__ = [
