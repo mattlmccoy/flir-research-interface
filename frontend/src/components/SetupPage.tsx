@@ -5,10 +5,13 @@ import { CredentialsHelp } from "./CredentialsHelp.tsx";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api.ts";
 import { useControlStatus } from "../lib/useControlStatus.ts";
+import { connectHint } from "../lib/connectHint.ts";
+import type { Status } from "../lib/api.ts";
+import { ConnectHintBox } from "./ConnectHintBox.tsx";
 
 type Any = Record<string, unknown>;
 
-export function SetupPage({ onConnected }: { onConnected: () => void }) {
+export function SetupPage({ onConnected, status, onConnectFailed }: { onConnected: () => void; status?: Status; onConnectFailed?: () => void }) {
   const [sdk, setSdk] = useState<Any | null>(null);
   const [disc, setDisc] = useState<Any | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -25,7 +28,7 @@ export function SetupPage({ onConnected }: { onConnected: () => void }) {
   }
   async function connect(backend: string, serial?: string) {
     setBusy("connecting"); setErr(null);
-    try { await api.connect(backend, serial); onConnected(); } catch (e) { setErr(String(e)); } finally { setBusy(null); }
+    try { await api.connect(backend, serial); onConnected(); } catch (e) { setErr(String(e)); onConnectFailed?.(); } finally { setBusy(null); }
   }
   const [forceResult, setForceResult] = useState<string | null>(null);
   async function forceIp(mac: string, f: { ip: string; subnet_mask: string; gateway: string }) {
@@ -41,6 +44,7 @@ export function SetupPage({ onConnected }: { onConnected: () => void }) {
   const pyspinOk = sdk?.pyspin_importable === true;
   const gvcp = (disc?.gvcp_devices as Any[] | undefined) ?? [];
   const spin = (disc?.spinnaker_devices as Any[] | undefined) ?? [];
+  const hint = status ? connectHint(status) : null;
 
   return (
     <div className="page-body">
@@ -71,6 +75,7 @@ export function SetupPage({ onConnected }: { onConnected: () => void }) {
           <button className="primary" onClick={discover} disabled={busy !== null}>{busy === "discovering" ? "Scanning…" : "Scan network"}</button>
           <span className="muted">Raw GigE Vision discovery on every adapter, then Spinnaker.</span>
         </div>
+        {hint && <ConnectHintBox hint={hint} />}
         {((disc?.warnings as Any[] | undefined) ?? []).map((w, i) => {
           const kind = String((w as Any).kind);
           const title = kind === "no_host_on_camera_subnet" ? "Camera unreachable" : "Network conflict";

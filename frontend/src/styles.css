@@ -490,3 +490,11 @@ button:disabled .spinner { opacity: 0.7; }
 .roi-rows .smart-compute { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
 .roi-rows .smart-compute progress { flex: 1 1 80px; min-width: 60px; }
 .smart-plot-choice { margin-right: 10px; white-space: nowrap; }
+/* plain-language connect error (Setup page, card 2) */
+.connect-hint { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; font-size: 13px; }
+.connect-hint .msg { color: var(--fg); font-weight: 600; }
+.connect-hint .cmd-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.connect-hint .cmd { font-family: var(--font-mono); font-size: 12px; background: var(--bg-deep);
+  border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 8px; user-select: all; overflow-wrap: anywhere; }
+.connect-hint .raw { font-size: 11px; font-family: var(--font-mono); }
+.conn .badge { cursor: pointer; border: none; }

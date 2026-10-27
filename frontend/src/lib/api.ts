@@ -7,6 +7,7 @@ import type { AdjustSource, RecordStamp } from "./visibleAdjustUi.ts";
 import type { Preset, PresetsDoc, ThermalValue } from "./presets.ts";
 import type { SmartOverlay } from "./smartLabels.ts";
 import type { SmartJob } from "./smartSeries.ts";
+import type { ErrorHint } from "./connectHint.ts";
 
 /** Site mode: the UI is served from GitHub Pages and talks to a local operator (spec §6.3). */
 export const SITE_MODE = import.meta.env.VITE_SITE_MODE === "1";
@@ -27,7 +28,7 @@ function req(path: string, init: RequestInit = {}): Promise<Response> {
 export interface Device { backend: string; model: string; serial: string; ip_address: string | null; mac_address: string | null; firmware: string | null; interface: string; }
 /** Cumulative GigE transport counters from the driver (null/absent without a real camera). */
 export interface Transport { lost?: number | null; dropped?: number | null; incomplete?: number | null; missed_packets?: number | null; resend_requests?: number | null; incomplete_seen_by_app?: number | null; }
-export interface Status { state: string; backend?: string | null; device?: Device | null; frames_received?: number; viz_dropped?: number; camera_fps?: number | null; last_error?: string | null; transport?: Transport | null; }
+export interface Status { state: string; backend?: string | null; device?: Device | null; frames_received?: number; viz_dropped?: number; camera_fps?: number | null; last_error?: string | null; last_error_hint?: ErrorHint | null; transport?: Transport | null; }
 
 async function j<T>(r: Promise<Response>): Promise<T> {
   const res = await r;

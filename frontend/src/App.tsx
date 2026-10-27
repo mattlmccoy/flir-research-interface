@@ -53,6 +53,7 @@ import { initMaskHistory, maskHistoryReducer, type MaskHistoryAction } from "./l
 import type { RoiAction } from "./lib/roi.ts";
 import { SMART_FEED_INTERVAL_MS, useSmartFeed } from "./lib/useSmartFeed.ts";
 import { smartChipFeed, smartLiveValue } from "./lib/smartFeed.ts";
+import { connectHint } from "./lib/connectHint.ts";
 
 type Page = "live" | "setup" | "experiments" | "playback";
 const storage = (() => {
@@ -323,6 +324,8 @@ export function App() {
   const dot = status.state === "acquiring" && !stale ? "live" : status.state === "error" ? "err"
     : status.state === "disconnected" ? "" : "warn";
 
+  const hint = connectHint(status);
+
   async function disconnect() {
     await api.disconnect();
     setFrame(null);
@@ -406,6 +409,7 @@ export function App() {
         <span className={`dot ${dot}`} />
         <span className="who">{status.device ? `${status.device.model} · ${status.device.serial}` : "no camera"}</span>
         <span>· {stale ? "no frames" : status.state}</span>
+        {hint && <button type="button" className={`badge ${hint.level === "err" ? "bad" : "warn"}`} title={hint.message} onClick={() => setPage("setup")}>{hint.short} · fix</button>}
         {status.state !== "disconnected" && status.state !== "unreachable" && <button className="secondary" onClick={disconnect}>disconnect</button>}
       </span>
     </>
@@ -418,7 +422,7 @@ export function App() {
 
   if (page === "setup") {
     return <StudioFrame layout={layout} page topbar={topbar} statusbar={statusbar}
-      center={<SetupPage onConnected={() => { void refresh(); setPage("live"); }} />} />;
+      center={<SetupPage status={status} onConnectFailed={() => { void refresh(); }} onConnected={() => { void refresh(); setPage("live"); }} />} />;
   }
   if (page === "experiments") {
     return <StudioFrame layout={layout} page topbar={topbar} statusbar={statusbar}
