@@ -382,8 +382,21 @@ def create_app(
 
     app.include_router(make_presets_router(lambda: app.state.experiments_root, service))
 
+    def _smart_ceiling(svc: AcquisitionService) -> None:
+        """Give the live smart trackers the top of the camera's active case (°C), for the bounded
+        over-range readings; unknown (None) when the backend does not report one."""
+        high: float | None = None
+        try:
+            case = svc.backend.camera_info().get("active_case") or {}
+            v = case.get("high_c") if isinstance(case, dict) else None
+            high = float(v) if isinstance(v, int | float) and not isinstance(v, bool) else None
+        except Exception:  # noqa: BLE001 - a missing case only drops the ceiling, never the stream
+            logger.debug("camera case unavailable for the smart ROI ceiling", exc_info=True)
+        app.state.smart_live.set_ceiling(high)
+
     def _attach_smart(svc: AcquisitionService) -> None:
         """Run the live smart ROI trackers on this session's frames (camera thread)."""
+        _smart_ceiling(svc)
         svc.add_listener(app.state.smart_listener)
 
     def _connect_failed(exc: BaseException, svc: AcquisitionService | None) -> None:
@@ -829,6 +842,8 @@ def create_app(
             raise HTTPException(400, str(exc)) from exc
         except CameraError as exc:
             raise HTTPException(500, str(exc)) from exc
+        if "CurrentCase" in req.values:  # the measurement range moved: so does the ceiling
+            await run_in_threadpool(_smart_ceiling, svc)
         return {"applied": applied}
 
     @app.post("/api/camera/nuc")

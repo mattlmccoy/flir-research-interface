@@ -62,6 +62,9 @@ class SmartLive:
         # ROIs whose tracker is failing -> monotonic time of the last log line. Written by the
         # camera thread; set_rois/clear empty it (single dict ops, so no lock is needed).
         self._failing: dict[int, float] = {}
+        # top of the camera's active measurement case (°C), or None when unknown: the bounded
+        # over-range readings count saturated pixels at it (display only, never the feed)
+        self._ceiling: float | None = None
 
     # -- request threads -----------------------------------------------------------------------
 
@@ -89,6 +92,14 @@ class SmartLive:
                 self._broken.discard(rid)
             self._specs = specs
             self._failing.clear()
+
+    @property
+    def ceiling(self) -> float | None:
+        return self._ceiling
+
+    def set_ceiling(self, ceiling_c: float | None) -> None:
+        """The camera's measurement range top (°C) for the over-range readings (None = unknown)."""
+        self._ceiling = float(ceiling_c) if ceiling_c is not None else None
 
     def latest(self) -> dict[int, SmartResult]:
         """The latest result per smart ROI id (absent until a frame has been tracked)."""
@@ -130,6 +141,7 @@ class SmartLive:
                         specs, {}, frame.host_timestamp_ns)
             return
         over = over_range_mask(frame.counts)
+        ceiling = self._ceiling  # one read: a concurrent set_ceiling applies from the next frame
         t_s = frame.host_timestamp_ns / 1e9
         built: dict[int, SmartTracker] = {}
         out: dict[int, tuple[SmartTracker | None, SmartResult]] = {}
@@ -148,7 +160,7 @@ class SmartLive:
                     continue
                 built[rid] = tr
             try:
-                out[rid] = (tr, tr.update(celsius, t_s, over))
+                out[rid] = (tr, tr.update(celsius, t_s, over, ceiling_c=ceiling))
             except Exception:  # noqa: BLE001 - the feed reports this ROI invalid instead
                 self._log_failure(rid, frame.frame_id)
                 out[rid] = (tr, _invalid(spec))

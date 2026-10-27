@@ -296,3 +296,56 @@ def test_failing_tracker_warns_one_line_a_minute(monkeypatch: Any, caplog: Any) 
             live.on_frame(frame)
     levels = [(r.levelname, bool(r.exc_info)) for r in caplog.records]
     assert levels == [("ERROR", True), ("WARNING", False), ("WARNING", False)]
+
+
+def test_ceiling_reaches_the_tracker_and_the_overlay() -> None:
+    """Over-range pixels in the live sample: the overlay carries the bounded readings, counted at
+    the camera ceiling set with ``set_ceiling``; the feed result stays invalid and numberless."""
+    live = SmartLive()
+    live.set_rois([SMART])
+    live.set_ceiling(250.0)
+    # the A70's 10 mK format (``_frame`` encodes 100 mK): a 200 °C sample in 40..150 °C powder
+    hot = np.where(_blob_c() >= 600.0, 200.0, np.minimum(_blob_c(), 150.0))
+    counts = np.round((hot + 273.15) / 0.01).astype(np.uint16)
+
+    def a70(fid: int, t_s: float, c: np.ndarray) -> Frame:
+        return Frame(frame_id=fid, device_timestamp_ns=int(t_s * 1e9),
+                     host_timestamp_ns=int(t_s * 1e9), pixel_format="Mono16",
+                     ir_format="TemperatureLinear10mK", counts=c, incomplete=False)
+
+    live.on_frame(a70(1, 10.0, counts))  # lock
+    ys, xs = np.mgrid[0:H, 0:W]
+    core = np.sqrt(((xs - 200.0) / 10.0) ** 2 + ((ys - 180.0) / 8.0) ** 2) <= 1.0
+    sat = counts.copy()
+    sat[core] = 65535  # saturated
+    fr = a70(2, 10.05, sat)
+    live.on_frame(fr)
+    (res,) = live.latest().values()
+    assert res.valid is False and res.over_range is True and res.sample["mean_c"] is None
+    (ov,) = live.overlays()
+    s = ov["over"]["sample"]
+    assert s["ceiling_c"] == 250.0 and s["over_px"] == int(core.sum())
+    # the min comes from the in-range pixels (the sample edge), never the saturated value
+    assert s["min_c"] is not None and 40.0 < s["min_c"] <= 200.0 and s["min_is_bound"] is False
+    assert s["mean_lb_c"] is not None and s["max_c"] is None
+    live.set_ceiling(None)
+    live.on_frame(fr)
+    (ov,) = live.overlays()
+    assert ov["over"]["sample"]["ceiling_c"] is None
+
+
+def test_api_sets_the_ceiling_from_the_active_case(tmp_path: Path) -> None:
+    from fastapi.testclient import TestClient
+
+    from flir_research_interface.api.app import create_app
+
+    app = create_app(default_backend="simulated", sim_fps=60.0, viz_fps=30.0,
+                     experiments_root=tmp_path, min_free_gb=0.0)
+    with TestClient(app) as c:
+        devs = c.get("/api/camera/devices").json()
+        c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        assert app.state.smart_live.ceiling == 250.0  # the simulated A70's default case
+        r = c.post("/api/camera/parameters", json={"values": {"CurrentCase": 0}})
+        assert r.status_code == 200, r.text
+        assert app.state.smart_live.ceiling == 175.0  # a case change moves the ceiling
+        c.post("/api/camera/disconnect")
