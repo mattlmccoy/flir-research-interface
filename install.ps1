@@ -19,6 +19,10 @@ Say "Checkout at $Dest"
 if (Test-Path (Join-Path $Dest ".git")) { git -C $Dest pull --ff-only } else { git clone $Repo $Dest }
 
 Say "Python environment"
+# A running operator holds .venv\Scripts\fri-serve.exe open, so uv can't replace it on update.
+# Stop it first; the service step at the end starts it again.
+Stop-ScheduledTask -TaskName "FLIR Research Interface operator" -ErrorAction SilentlyContinue
+Get-Process fri-serve -ErrorAction SilentlyContinue | Stop-Process -Force
 Push-Location (Join-Path $Dest "backend"); uv sync --inexact -q; Pop-Location
 
 Say "GIF optimizer (gifsicle)"
@@ -43,7 +47,11 @@ if (-not (Get-Command gifsicle -ErrorAction SilentlyContinue)) {
 
 Say "Spinnaker SDK"
 $pyspinOk = $false
-try { Push-Location (Join-Path $Dest "backend"); uv run python -c "import PySpin" 2>$null; $pyspinOk = ($LASTEXITCODE -eq 0) } finally { Pop-Location }
+# Windows PowerShell 5.1 turns redirected native stderr into an error record, which
+# $ErrorActionPreference = "Stop" makes fatal — so a missing PySpin would kill the script here.
+Push-Location (Join-Path $Dest "backend")
+try { $ErrorActionPreference = "Continue"; uv run python -c "import PySpin" 2>$null | Out-Null; $pyspinOk = ($LASTEXITCODE -eq 0) }
+finally { $ErrorActionPreference = "Stop"; Pop-Location }
 if (-not $pyspinOk) {
   $tmp = Join-Path $env:TEMP "fri-sdk"; New-Item -ItemType Directory -Force $tmp | Out-Null
   try {
