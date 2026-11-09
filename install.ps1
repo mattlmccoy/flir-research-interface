@@ -52,17 +52,25 @@ $pyspinOk = $false
 Push-Location (Join-Path $Dest "backend")
 try { $ErrorActionPreference = "Continue"; uv run python -c "import PySpin" 2>$null | Out-Null; $pyspinOk = ($LASTEXITCODE -eq 0) }
 finally { $ErrorActionPreference = "Stop"; Pop-Location }
-if (-not $pyspinOk) {
+# The PySpin wheel bundles the Spinnaker runtime, so it imports without the SDK — but only the full
+# SDK registers GigE Vision support; without it Spinnaker lists USB3 interfaces only and never sees
+# the A70 on the Ethernet adapter. Check for each separately.
+$sdkOk = Test-Path (Join-Path $env:ProgramFiles "Teledyne\Spinnaker\bin64")
+if (-not ($pyspinOk -and $sdkOk)) {
   $tmp = Join-Path $env:TEMP "fri-sdk"; New-Item -ItemType Directory -Force $tmp | Out-Null
   try {
-    Write-Host "downloading $SdkExe (~270 MB) from the internal mirror…"
-    Invoke-WebRequest "$SdkBase/$SdkExe" -OutFile (Join-Path $tmp $SdkExe)
-    Write-Host "installing Spinnaker silently (a UAC prompt may appear)…"
-    Start-Process (Join-Path $tmp $SdkExe) -ArgumentList '/S','/v"/qn"' -Wait
-    Invoke-WebRequest "$SdkBase/$PySpinZip" -OutFile (Join-Path $tmp $PySpinZip)
-    Expand-Archive (Join-Path $tmp $PySpinZip) -DestinationPath (Join-Path $tmp "pyspin") -Force
-    $whl = Get-ChildItem (Join-Path $tmp "pyspin") -Recurse -Filter "*.whl" | Select-Object -First 1
-    Push-Location (Join-Path $Dest "backend"); uv pip install $whl.FullName; Pop-Location
+    if (-not $sdkOk) {
+      Write-Host "downloading $SdkExe (~270 MB) from the internal mirror…"
+      Invoke-WebRequest "$SdkBase/$SdkExe" -OutFile (Join-Path $tmp $SdkExe)
+      Write-Host "installing Spinnaker silently (a UAC prompt may appear)…"
+      Start-Process (Join-Path $tmp $SdkExe) -ArgumentList '/S','/v"/qn"' -Wait
+    }
+    if (-not $pyspinOk) {
+      Invoke-WebRequest "$SdkBase/$PySpinZip" -OutFile (Join-Path $tmp $PySpinZip)
+      Expand-Archive (Join-Path $tmp $PySpinZip) -DestinationPath (Join-Path $tmp "pyspin") -Force
+      $whl = Get-ChildItem (Join-Path $tmp "pyspin") -Recurse -Filter "*.whl" | Select-Object -First 1
+      Push-Location (Join-Path $Dest "backend"); uv pip install $whl.FullName; Pop-Location
+    }
   } catch {
     Write-Warning "Could not fetch the SDK from $SdkBase ($($_.Exception.Message))."
     Write-Warning "Download 'Spinnaker 4.4 Full SDK (Windows x64)' and 'PySpin cp312 win_amd64' from"
