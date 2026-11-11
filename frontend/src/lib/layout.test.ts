@@ -340,3 +340,20 @@ test("smart ROI rows: a malformed stored smartView falls back to defaults, not t
   assert.deepEqual(s.smartView, {});
   assert.equal(s.units, "K");
 });
+
+test("renameSmartViewScopes re-keys run scopes and leaves live and unmatched keys alone", () => {
+  const row = { expanded: true, hiddenRings: [10] };
+  const s: LayoutState = { ...DEFAULT_LAYOUT, smartView: { "exp.r:3": row, "live:1": row, "exp.other:2": row } };
+  const out = layoutReducer(s, { type: "renameSmartViewScopes", rename: { "exp.r": "exp.mattmccoy/r" } });
+  assert.deepEqual(out.smartView, { "exp.mattmccoy/r:3": row, "live:1": row, "exp.other:2": row });
+});
+
+test("renameSmartViewScopes never overwrites an existing new key and is a no-op when nothing matches", () => {
+  const a = { expanded: true, hiddenRings: [] };
+  const b = { expanded: false, hiddenRings: [5] };
+  const s: LayoutState = { ...DEFAULT_LAYOUT, smartView: { "exp.r:3": a, "exp.mattmccoy/r:3": b } };
+  const out = layoutReducer(s, { type: "renameSmartViewScopes", rename: { "exp.r": "exp.mattmccoy/r" } });
+  assert.deepEqual(out.smartView, { "exp.r:3": a, "exp.mattmccoy/r:3": b });
+  const same = layoutReducer(s, { type: "renameSmartViewScopes", rename: { "exp.zzz": "exp.c/zzz" } });
+  assert.equal(same, s, "unchanged state keeps its identity (no re-render, no save)");
+});

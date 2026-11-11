@@ -6,7 +6,7 @@ import { isZoom, type Zoom } from "./zoom.ts";
 import { NEUTRAL_ADJUST, clampAdjust, type VisibleAdjust } from "./visibleAdjust.ts";
 import { PALETTE_NAMES, type PaletteName } from "./palette.ts";
 import type { Range, ScaleMode } from "./scale.ts";
-import { parseSmartView, toggleSmartExpanded, toggleSmartRing, type SmartViewPrefs } from "./smartView.ts";
+import { parseSmartView, renameSmartScopes, toggleSmartExpanded, toggleSmartRing, type SmartViewPrefs } from "./smartView.ts";
 export const TOOLS = ["select", "spot", "rect", "circle", "ellipse", "line", "polyline", "polygon", "freehand", "smart"] as const;
 const isDelta = (v: unknown): v is { a: number; b: number } => !!v && typeof v === "object" && Number.isInteger((v as { a: unknown }).a) && Number.isInteger((v as { b: unknown }).b);
 export interface Agc { mode: "linear" | "plateau"; plateau: number; }
@@ -197,6 +197,8 @@ export type LayoutAction =
   | { type: "setDisplay"; patch: Partial<DisplayState> }
   | { type: "toggleSmartExpanded"; scope: string; id: number }
   | { type: "toggleSmartRing"; scope: string; id: number; px: number }
+  /** Runs moved into collections: `exp.<name>` → `exp.<collection>/<name>` (lib/scopeMigration.ts). */
+  | { type: "renameSmartViewScopes"; rename: Readonly<Record<string, string>> }
   | { type: "collapseAll" }
   | { type: "restoreAll" };
 
@@ -233,6 +235,10 @@ export function layoutReducer(s: LayoutState, a: LayoutAction): LayoutState {
     case "setDisplay": return { ...s, display: parseDisplay({ ...s.display, ...a.patch }, s.display) };
     case "toggleSmartExpanded": return { ...s, smartView: toggleSmartExpanded(s.smartView, a.scope, a.id) };
     case "toggleSmartRing": return { ...s, smartView: toggleSmartRing(s.smartView, a.scope, a.id, a.px) };
+    case "renameSmartViewScopes": {
+      const smartView = renameSmartScopes(s.smartView, a.rename);
+      return smartView === s.smartView ? s : { ...s, smartView };
+    }
     case "collapseAll": return { ...s, strip: true, rail: false, dock: false };
     case "restoreAll": return { ...s, strip: true, rail: true, dock: true };
   }

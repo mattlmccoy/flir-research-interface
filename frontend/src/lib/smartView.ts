@@ -41,6 +41,25 @@ export function toggleSmartRing(v: SmartViewPrefs, scope: string, id: number, ou
   return { ...v, [keyOf(scope, id)]: { ...p, hiddenRings: hidden } };
 }
 
+/** Re-keys `<old scope>:<id>` to `<new scope>:<id>` for each `rename` entry (runs moved into a
+ *  collection, lib/scopeMigration.ts). An existing new key is never overwritten; the old one then
+ *  stays. Returns `v` itself when nothing changes. */
+export function renameSmartScopes(v: SmartViewPrefs, rename: Readonly<Record<string, string>>): SmartViewPrefs {
+  let out: Record<string, SmartRowPrefs> | null = null;
+  for (const [k, prefs] of Object.entries(v)) {
+    const i = k.lastIndexOf(":");
+    if (i < 0) continue;
+    const to = Object.prototype.hasOwnProperty.call(rename, k.slice(0, i)) ? rename[k.slice(0, i)] : undefined;
+    if (to === undefined) continue;
+    const nk = `${to}${k.slice(i)}`;
+    if (nk in v) continue;
+    out ??= { ...v };
+    out[nk] = prefs;
+    delete out[k];
+  }
+  return out ?? v;
+}
+
 /** Ring bands still shown (readout rows, plot traces). */
 export function visibleRings<T extends { outer_px: number }>(rings: T[], hidden: readonly number[]): T[] {
   return hidden.length ? rings.filter((g) => !hidden.includes(g.outer_px)) : rings;

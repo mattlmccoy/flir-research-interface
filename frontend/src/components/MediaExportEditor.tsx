@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { runName } from "../lib/runKey.ts";
 import { NumberField } from "./NumberField.tsx";
 import { defaultMaxMbForFormat, mediaRoiSupported } from "../lib/mediaDefaults.ts";
 import { api, type MediaJob, type RangeJob } from "../lib/api.ts";
@@ -171,7 +172,7 @@ export function MediaExportEditor({ name, nFrames, index, tS, markers, rois, has
   return (
     <div className="media-editor" role="dialog" aria-label="Media export">
       <div className="media-editor-head">
-        <b>Media export</b><span className="muted">{name}</span>
+        <b>Media export</b><span className="muted">{runName(name)}</span>
         {rfNotch && <span className="muted" title="Display → remove RF banding is on, so the clip shows the cleaned frames and its file name ends in _rf-filtered. ROI values in it stay raw.">· RF-banding filter on</span>}
         <button className="secondary" style={{ marginLeft: "auto" }} onClick={onClose}>close</button>
       </div>

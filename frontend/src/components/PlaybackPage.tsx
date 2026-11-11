@@ -1,5 +1,6 @@
 import { rangeFromRoi, saturationCount } from "../lib/enhance.ts";
 import { saveSnapshot, snapshotFilename, snapshotFooter } from "../lib/snapshot.ts";
+import { runName, type RunKey } from "../lib/runKey.ts";
 import { DeltaPicker } from "../components/DeltaPicker.tsx";
 import { deltaTrace } from "../lib/delta.ts";
 import { ProfilePanel, type FieldSnapshot } from "../components/ProfilePanel.tsx";
@@ -59,7 +60,8 @@ import { PlotDock } from "./studio/PlotDock.tsx";
 import { StatusBar } from "./studio/StatusBar.tsx";
 
 interface Props {
-  name: string;
+  /** The open run (lib/runKey.ts); show or name files with runName(name). */
+  name: RunKey;
   layout: LayoutState; dispatch: Dispatch<LayoutAction>; topbar: ReactNode;
   rois: RoiState; roiDispatch: Dispatch<RoiHistoryAction>;
   masks: MaskState; maskDispatch: Dispatch<MaskAction>; maskMode: boolean; onMaskMode: (on: boolean) => void;
@@ -116,7 +118,7 @@ export function PlaybackPage(p: Props) {
   // this run's scope has been persisted, the user's own edits are kept instead.
   const seededRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!info || info.name !== p.name || seededRef.current === p.name) return;
+    if (!info || info.name !== runName(p.name) || seededRef.current === p.name) return;
     seededRef.current = p.name;
     if (!hasRois(roiStorage, `exp.${p.name}`) && info.rois && info.rois.length) {
       p.roiDispatch({ type: "load", rois: storedToRois(info.rois) });
@@ -235,7 +237,7 @@ export function PlaybackPage(p: Props) {
   const seg = playVis ? visibleSegmentAt(playVis, t) : null;
   if (seg) segRef.current.index = seg.index;
   const segIdx = segRef.current.index;
-  const segUrl = hasVideo && info?.name === p.name ? (segIdx === 0 ? api.visibleVideoUrl(p.name) : api.visibleSegmentUrl(p.name, segIdx)) : null;
+  const segUrl = hasVideo && info?.name === runName(p.name) ? (segIdx === 0 ? api.visibleVideoUrl(p.name) : api.visibleSegmentUrl(p.name, segIdx)) : null;
   const vRange = useVisibleRange(segUrl, info?.visible_range);
   const vRangeNote = segUrl ? rangeNote(vRange) : null; // unknown range is "not confirmed", never quiet
   const overlayH = recordedH ?? loadAlignment(typeof localStorage !== "undefined" ? localStorage : null).H;
@@ -291,7 +293,7 @@ export function PlaybackPage(p: Props) {
 
   function saveImage(): void {
     const v = document.querySelector<HTMLElement>(".view");
-    if (v) saveSnapshot(v, snapshotFilename(p.name, index, t, { rfFiltered }), snapshotFooter({ name: p.name, tS: t, index, range: shown, palette: p.palette, rois: p.rois.rois.length, reference: !!reference, rfFiltered }));
+    if (v) saveSnapshot(v, snapshotFilename(runName(p.name), index, t, { rfFiltered }), snapshotFooter({ name: runName(p.name), tS: t, index, range: shown, palette: p.palette, rois: p.rois.rois.length, reference: !!reference, rfFiltered }));
   }
   function toggleVisibleOverlay(): void {
     // toggle the overlay on the image; its opacity slider pops up next to the button (below)
@@ -432,7 +434,7 @@ export function PlaybackPage(p: Props) {
             {err && <div className="errbox">{err}</div>}
           </RailSection>
           <RailSection id="display" title="display" open={p.layout.sections.display} onToggle={() => p.dispatch({ type: "toggleSection", section: "display" })} tag="visualization only">
-            <DisplayControls palette={p.palette} setPalette={p.setPalette} scaleMode={p.scaleMode} setScaleMode={p.setScaleMode} manual={p.manual} setManual={p.setManual} shown={shown} isotherm={p.layout.isotherm} setIsotherm={(isotherm) => p.dispatch({ type: "setIsotherm", isotherm })} hasReference={!!reference} onSetReference={() => { if (field) setReference(new Float32Array(field.c)); }} onClearReference={() => setReference(null)} onRangeFromRoi={(() => { const sel = p.rois.rois.find((r) => r.id === p.rois.selected); if (!field || !sel || sel.kind === "spot") return null; return () => { const rg = rangeFromRoi(field.c, field.w, field.h, sel); if (rg) { p.setManual({ min: Math.floor(rg.min * 10) / 10, max: Math.ceil(rg.max * 10) / 10 }); p.setScaleMode("manual"); } }; })()} hold={p.layout.hold} setHold={(hold) => p.dispatch({ type: "setHold", hold })} flipH={p.layout.flipH} flipV={p.layout.flipV} setFlip={(h, v) => p.dispatch({ type: "setFlip", h, v })} agc={p.layout.agc} setAgc={(agc) => p.dispatch({ type: "setAgc", agc })} units={p.layout.units} setUnits={(units) => p.dispatch({ type: "setUnits", units })} conv={field?.conv ?? null} filter={p.layout.filter} setFilter={(filter) => p.dispatch({ type: "setFilter", filter })} rfNotch={p.layout.rfNotch} setRfNotch={(on) => p.dispatch({ type: "setRfNotch", on })} rfStatus={rfNotchStatus(p.layout.rfNotch, frame?.header.display?.rf_notch)} segment={p.layout.segment} setSegment={(segment) => p.dispatch({ type: "setSegment", segment })} saturation={(() => { const cs = (info?.camera as Record<string, unknown> | null | undefined)?.active_case as { low_c?: number; high_c?: number } | undefined; if (!field || !cs || typeof cs.low_c !== "number" || typeof cs.high_c !== "number") return null; const n = saturationCount(field.c, { low: cs.low_c, high: cs.high_c }); return { ...n, lowC: cs.low_c, highC: cs.high_c }; })()} onSnapshot={() => { const v = document.querySelector<HTMLElement>(".view"); if (v) saveSnapshot(v, snapshotFilename(p.name, index, t, { rfFiltered }), snapshotFooter({ name: p.name, tS: t, index: index, range: shown, palette: p.palette, rois: p.rois.rois.length, reference: !!reference, rfFiltered })); }} />
+            <DisplayControls palette={p.palette} setPalette={p.setPalette} scaleMode={p.scaleMode} setScaleMode={p.setScaleMode} manual={p.manual} setManual={p.setManual} shown={shown} isotherm={p.layout.isotherm} setIsotherm={(isotherm) => p.dispatch({ type: "setIsotherm", isotherm })} hasReference={!!reference} onSetReference={() => { if (field) setReference(new Float32Array(field.c)); }} onClearReference={() => setReference(null)} onRangeFromRoi={(() => { const sel = p.rois.rois.find((r) => r.id === p.rois.selected); if (!field || !sel || sel.kind === "spot") return null; return () => { const rg = rangeFromRoi(field.c, field.w, field.h, sel); if (rg) { p.setManual({ min: Math.floor(rg.min * 10) / 10, max: Math.ceil(rg.max * 10) / 10 }); p.setScaleMode("manual"); } }; })()} hold={p.layout.hold} setHold={(hold) => p.dispatch({ type: "setHold", hold })} flipH={p.layout.flipH} flipV={p.layout.flipV} setFlip={(h, v) => p.dispatch({ type: "setFlip", h, v })} agc={p.layout.agc} setAgc={(agc) => p.dispatch({ type: "setAgc", agc })} units={p.layout.units} setUnits={(units) => p.dispatch({ type: "setUnits", units })} conv={field?.conv ?? null} filter={p.layout.filter} setFilter={(filter) => p.dispatch({ type: "setFilter", filter })} rfNotch={p.layout.rfNotch} setRfNotch={(on) => p.dispatch({ type: "setRfNotch", on })} rfStatus={rfNotchStatus(p.layout.rfNotch, frame?.header.display?.rf_notch)} segment={p.layout.segment} setSegment={(segment) => p.dispatch({ type: "setSegment", segment })} saturation={(() => { const cs = (info?.camera as Record<string, unknown> | null | undefined)?.active_case as { low_c?: number; high_c?: number } | undefined; if (!field || !cs || typeof cs.low_c !== "number" || typeof cs.high_c !== "number") return null; const n = saturationCount(field.c, { low: cs.low_c, high: cs.high_c }); return { ...n, lowC: cs.low_c, highC: cs.high_c }; })()} onSnapshot={() => { const v = document.querySelector<HTMLElement>(".view"); if (v) saveSnapshot(v, snapshotFilename(runName(p.name), index, t, { rfFiltered }), snapshotFooter({ name: runName(p.name), tS: t, index: index, range: shown, palette: p.palette, rois: p.rois.rois.length, reference: !!reference, rfFiltered })); }} />
           </RailSection>
           <RailSection id="visible" title="visible camera" open={p.layout.sections.visible} onToggle={() => p.dispatch({ type: "toggleSection", section: "visible" })} tag="recorded video">
             <VisiblePanel mode="playback" picker={<PresetPicker store={p.presets} mode="playback"

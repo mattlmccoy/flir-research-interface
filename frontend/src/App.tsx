@@ -11,6 +11,8 @@ import { decodeFrameMessage, type FrameMessage } from "./lib/protocol.ts";
 import type { PaletteName } from "./lib/palette.ts";
 import type { Range, ScaleMode } from "./lib/scale.ts";
 import { DEFAULT_LAYOUT, layoutHasKey, layoutReducer, loadLayout, saveLayout } from "./lib/layout.ts";
+import { runName, type RunKey } from "./lib/runKey.ts";
+import { migrateRunScopes } from "./lib/scopeMigration.ts";
 import { usePresets } from "./lib/usePresets.ts";
 import { displayFromView, presetMarker, startupRestore, thermalFromInfo, type ViewDisplay } from "./lib/presets.ts";
 import { isNeutral } from "./lib/visibleAdjust.ts";
@@ -83,10 +85,23 @@ function beep(): void {
 
 export function App() {
   const [page, setPage] = useState<Page>("setup");
-  const [openExp, setOpenExp] = useState<string | null>(null);
+  const [openExp, setOpenExp] = useState<RunKey | null>(null);
   const [openTitle, setOpenTitle] = useState<string | null>(null);  // display name, if renamed
   const [layout, dispatch] = useReducer(layoutReducer, DEFAULT_LAYOUT, () => loadLayout(storage));
   useEffect(() => { saveLayout(storage, layout); }, [layout]);
+  // Once per load: per-run browser state keyed `exp.<name>` moves to `exp.<collection>/<name>` for
+  // runs that now live in a collection (lib/scopeMigration.ts). Idempotent; a failed fetch skips it.
+  useEffect(() => {
+    if (!storage) return;
+    let alive = true;
+    api.runLocations().then((locs) => {
+      if (!alive) return;
+      const r = migrateRunScopes(storage, locs);
+      if (Object.keys(r.rename).length) dispatch({ type: "renameSmartViewScopes", rename: r.rename });
+      if (r.ambiguous.length) console.warn(`Saved ROI/mask state left under the bare run name (the name is in more than one collection): ${r.ambiguous.join(", ")}`);
+    }).catch(() => undefined);
+    return () => { alive = false; };
+  }, []);
   const presets = usePresets();
   // Startup: each part this browser had nothing stored for (palette/range, visible sliders) starts
   // from the last applied preset. Nothing is sent to the camera. A part already changed while the
@@ -399,7 +414,7 @@ export function App() {
       {page === "playback" && openExp && (
         <span className="crumb">
           <button className="secondary" onClick={() => setPage("experiments")} title="Back to the experiments list" aria-label="Back to experiments">← experiments</button>
-          <span className="open-name" title={openTitle ? `${openTitle} — folder ${openExp}` : openExp}>{openTitle || openExp}</span>
+          <span className="open-name" title={openTitle ? `${openTitle} — folder ${openExp}` : openExp}>{openTitle || runName(openExp)}</span>
           <button className="secondary" title="Show this run's folder in Finder / Explorer" aria-label="Reveal run folder"
             onClick={() => { setRevealNote(null); api.reveal(openExp).then((r) => { if (!r.ok) setRevealNote(r.error ?? "reveal failed"); }).catch((e) => setRevealNote(String(e))); }}>reveal</button>
           {revealNote && <span className="bad" role="alert">{revealNote}</span>}
@@ -426,7 +441,7 @@ export function App() {
   }
   if (page === "experiments") {
     return <StudioFrame layout={layout} page topbar={topbar} statusbar={statusbar}
-      center={<ExperimentsPage onOpen={(name, title) => { setOpenExp(name); setOpenTitle(title ?? null); setPage("playback"); }}/>} />;
+      center={<ExperimentsPage onOpen={(key, title) => { setOpenExp(key); setOpenTitle(title ?? null); setPage("playback"); }}/>} />;
   }
   if (page === "playback" && openExp) {
     return <PlaybackPage name={openExp} layout={layout} dispatch={dispatch} topbar={topbar}

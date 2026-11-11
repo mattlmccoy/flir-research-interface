@@ -1,4 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from "react";
+import { runName } from "../lib/runKey.ts";
 import type { CSSProperties, ReactNode } from "react";
 import { api, type ExperimentInfo } from "../lib/api.ts";
 import { ADJUST_LIMITS, NEUTRAL_ADJUST, clampAdjust, isNeutral, type VisibleAdjust } from "../lib/visibleAdjust.ts";
@@ -93,7 +94,7 @@ export function useRunVisibleAdjust(name: string, info: ExperimentInfo | null): 
 
   // Seed once per run (a later info refresh must not undo slider moves that are still being saved).
   useEffect(() => {
-    if (!info || info.name !== name || cur?.name === name) return;
+    if (!info || info.name !== runName(name) || cur?.name === name) return;
     const eff = info.visible_adjust;
     setCur({ name, adjust: clampAdjust(eff ?? NEUTRAL_ADJUST), source: eff?.source ?? "neutral" });
     dispatch({ type: "clear" });
@@ -116,7 +117,7 @@ export function useRunVisibleAdjust(name: string, info: ExperimentInfo | null): 
     },
     reset: () => {
       if (!shown) return;
-      const recorded = recordedAdjust(info?.name === name ? info.visible_adjust_recorded : null);
+      const recorded = recordedAdjust(info?.name === runName(name) ? info.visible_adjust_recorded : null);
       setCur({ name, adjust: recorded ?? { ...NEUTRAL_ADJUST }, source: recorded ? "recorded" : "neutral" });
       w.reset(name);
     },

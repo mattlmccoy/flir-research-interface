@@ -148,11 +148,11 @@ export function maskedStats(c: Float32Array, used: Uint8Array): { min: number; m
   return n ? { min, max, mean: sum / n, n } : null;
 }
 
-const keyFor = (scope: string) => `flir.masks.v1.${scope}`;
+export const maskKeyFor = (scope: string): string => `flir.masks.v1.${scope}`;
 
 export function loadMasks(storage: Storage | null, scope = "live"): MaskState {
   try {
-    const raw = storage?.getItem(keyFor(scope));
+    const raw = storage?.getItem(maskKeyFor(scope));
     if (!raw) return EMPTY_MASKS;
     const p = JSON.parse(raw) as { shapes?: unknown; enabled?: unknown; drawMode?: unknown };
     const s = maskReducer(EMPTY_MASKS, { type: "load", shapes: Array.isArray(p.shapes) ? p.shapes : [] });
@@ -163,9 +163,9 @@ export function loadMasks(storage: Storage | null, scope = "live"): MaskState {
 }
 
 export function saveMasks(storage: Storage | null, s: MaskState, scope = "live"): void {
-  try { storage?.setItem(keyFor(scope), JSON.stringify({ shapes: s.shapes, enabled: s.enabled })); } catch { /* ignore */ }
+  try { storage?.setItem(maskKeyFor(scope), JSON.stringify({ shapes: s.shapes, enabled: s.enabled })); } catch { /* ignore */ }
 }
 
 export function hasMasks(storage: Storage | null, scope: string): boolean {
-  try { return storage?.getItem(keyFor(scope)) != null; } catch { return false; }
+  try { return storage?.getItem(maskKeyFor(scope)) != null; } catch { return false; }
 }

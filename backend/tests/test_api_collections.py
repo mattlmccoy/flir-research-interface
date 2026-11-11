@@ -95,3 +95,45 @@ def test_unsorted_listing_excludes_collection_folders(tmp_path: Path) -> None:
     items = c.get("/api/experiments", params={"collection": ""}).json()
     assert [i["name"] for i in items] == ["20260102_000000_top"]
     assert items[0]["collection"] is None
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_run_locations_cover_all_libraries(tmp_path: Path) -> None:
+    # Hand-made run folders (as above); the offline index is the captured v1 fixture, plus one
+    # hand-made entry shaped like a v2 entry (Task 7 adds ``collection`` to offline entries).
+    root = tmp_path / "experiments"
+    _run(root, "20260101_000000_top")
+    _run(root / "mattmccoy", "20260102_000000_in")
+    (root / "empty-coll").mkdir()
+    (root / "Old Stuff").mkdir()  # unexpected: not a run, never reported
+    drive = tmp_path / "Drive"
+    drive.mkdir()
+    register_drive(root, str(drive))
+    _run(drive / "FLIR-recordings" / "rf-sintering", "20260103_000000_d")
+    _run(drive / "FLIR-recordings" / "mattmccoy", "20260102_000000_in")  # same place on both
+    c = _client(root)
+
+    got = c.get("/api/collections/runs").json()
+    assert sorted(got, key=lambda r: (r["collection"] or "", r["name"])) == [
+        {"collection": None, "name": "20260101_000000_top"},
+        {"collection": "mattmccoy", "name": "20260102_000000_in"},
+        {"collection": "rf-sintering", "name": "20260103_000000_d"},
+    ]
+
+    drive.rename(tmp_path / "unplugged")
+    idx = json.loads((FIXTURES / "drive_index_v1_20261109.json").read_text())
+    idx["runs"].append({"name": "20260104_000000_v2", "collection": "rf-sintering"})
+    (root / ".drive-index.json").write_text(json.dumps(idx))
+
+    got = c.get("/api/collections/runs").json()
+    offline_v1 = {(None, r["name"]) for r in idx["runs"] if "collection" not in r}
+    pairs = {(r["collection"], r["name"]) for r in got}
+    assert pairs == {
+        (None, "20260101_000000_top"),
+        ("mattmccoy", "20260102_000000_in"),
+        ("rf-sintering", "20260104_000000_v2"),
+        *offline_v1,
+    }
+    assert len(got) == len(pairs), "each location is listed once"

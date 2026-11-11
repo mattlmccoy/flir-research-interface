@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { api, type Experiment, type Previews } from "../lib/api.ts";
+import { keyOf } from "../lib/runKey.ts";
 import { formatSeconds, keyframeBackgroundPosition, keyframeIndex } from "../lib/keyframes.ts";
 import { hasRois, loadRois, roisDifferFromStored } from "../lib/roi.ts";
 import { displayName } from "../lib/organize.ts";
@@ -24,7 +25,8 @@ export function ExperimentCard({
 }: Props) {
   // Flag runs whose ROIs have been edited since their exports were built: the run has a saved
   // working set that differs from the ROIs stored (and exported) with the recording.
-  const scope = `exp.${exp.name}`;
+  const rk = keyOf(exp);
+  const scope = `exp.${rk}`;
   const roisDiffer = hasRois(roiStorage, scope) && roisDifferFromStored(loadRois(roiStorage, scope).rois, exp.rois ?? null);
   const [k, setK] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -42,7 +44,7 @@ export function ExperimentCard({
   // Persist star/tags to this run's sidecar (the card's own library copy). Optimistic via onChanged.
   async function saveLabels(next: { starred?: boolean; tags?: string[]; title?: string; notes?: string }) {
     try {
-      await api.setLabels(exp.name, {
+      await api.setLabels(rk, {
         starred: next.starred ?? !!exp.starred, tags: next.tags ?? tags, library: lib,
         ...(next.title !== undefined ? { title: next.title } : {}),
         ...(next.notes !== undefined ? { notes: next.notes } : {}),
@@ -68,10 +70,10 @@ export function ExperimentCard({
   async function moveTo(to: "drive" | "local") {
     setBusy(true); setNote(null); setMove({ done: 0, total: 0 });
     try {
-      await api.moveExperiment(exp.name, to);
+      await api.moveExperiment(rk, to);
       for (;;) {
         await new Promise((r) => setTimeout(r, 600));
-        const jb = await api.moveStatus(exp.name);
+        const jb = await api.moveStatus(rk);
         setMove({ done: jb.done ?? 0, total: jb.total ?? 0 });
         if (jb.state === "done") { onChanged(); break; }
         if (jb.state === "error") { setNote(jb.error ?? "move failed"); break; }
@@ -103,14 +105,14 @@ export function ExperimentCard({
     const ok = window.confirm(`Delete "${exp.name}" for good?\n\nThis removes the whole run folder (thermal.zarr, visible video, exports). There is no undo.`);
     if (!ok) return;
     setBusy(true); setNote(null);
-    try { await api.deleteExperiment(exp.name); onChanged(); } catch (err) { setNote(String(err)); } finally { setBusy(false); }
+    try { await api.deleteExperiment(rk); onChanged(); } catch (err) { setNote(String(err)); } finally { setBusy(false); }
   }
   async function reveal(e: React.MouseEvent) {
     e.stopPropagation();
     setBusy(true);
     setNote(null);
     try {
-      const r = await api.reveal(exp.name);
+      const r = await api.reveal(rk);
       if (!r.ok) setNote(`${r.error ?? "reveal failed"} — ${r.path}`);
     } catch (err) {
       setNote(String(err));
@@ -123,7 +125,7 @@ export function ExperimentCard({
     setBusy(true);
     setNote(null);
     try {
-      const r = await api.exportHdf5(exp.name);
+      const r = await api.exportHdf5(rk);
       setNote(`HDF5 written (${(r.size_bytes / 1e6).toFixed(1)} MB): ${r.path}`);
     } catch (err) {
       setNote(String(err));
@@ -136,7 +138,7 @@ export function ExperimentCard({
     setBusy(true);
     setNote(null);
     try {
-      setLocal(await api.regeneratePreviews(exp.name));
+      setLocal(await api.regeneratePreviews(rk));
       onChanged();
     } catch (err) {
       setNote(String(err));
@@ -193,12 +195,12 @@ export function ExperimentCard({
           onClick={(e) => { e.stopPropagation(); saveLabels({ starred: !exp.starred }); }}>★</button>
         {previews ? (
           <>
-            <img src={`${api.previewUrl(exp.name)}?v=${v}`} alt="" />
+            <img src={`${api.previewUrl(rk)}&v=${v}`} alt="" />
             {k !== null && kf && (
               <div
                 className="kf"
                 style={{
-                  backgroundImage: `url(${api.keyframesUrl(exp.name)}?v=${kv})`,
+                  backgroundImage: `url(${api.keyframesUrl(rk)}&v=${kv})`,
                   backgroundPosition: keyframeBackgroundPosition(k, count),
                   backgroundSize: `${count * 100}% 100%`,
                 }}

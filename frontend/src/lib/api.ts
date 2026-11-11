@@ -8,6 +8,7 @@ import type { Preset, PresetsDoc, ThermalValue } from "./presets.ts";
 import type { SmartOverlay } from "./smartLabels.ts";
 import type { SmartJob } from "./smartSeries.ts";
 import type { ErrorHint } from "./connectHint.ts";
+import { runPath, type RunKey } from "./runKey.ts";
 
 /** Site mode: the UI is served from GitHub Pages and talks to a local operator (spec §6.3). */
 export const SITE_MODE = import.meta.env.VITE_SITE_MODE === "1";
@@ -91,6 +92,8 @@ export interface ControlSeries { t_s: number[]; forward_w?: (number | null)[]; r
 
 export interface Experiment {
   name: string;
+  /** The collection the run lives in (null = top level of its root); see lib/runKey.ts keyOf. */
+  collection?: string | null;
   path: string;
   size_bytes?: number;
   starred?: boolean;
@@ -139,62 +142,62 @@ export interface RoiSeries {
 }
 
 export const api = {
-  experiment: (name: string) => j<ExperimentInfo>(req(`/api/experiments/${encodeURIComponent(name)}`)),
-  timeline: (name: string) => j<Timeline>(req(`/api/experiments/${encodeURIComponent(name)}/timeline`)),
-  series: (name: string, rois: unknown[], valid?: { min: number; max: number } | null, maxPoints = 0) =>
-    j<RoiSeries>(req(`/api/experiments/${encodeURIComponent(name)}/series?rois=${encodeURIComponent(JSON.stringify(rois))}${valid ? `&valid=${valid.min},${valid.max}` : ""}${maxPoints ? `&max_points=${maxPoints}` : ""}`)),
-  seriesCsvUrl: (name: string, rois: unknown[]) =>
-    u(`/api/experiments/${encodeURIComponent(name)}/export/series.csv?rois=${encodeURIComponent(JSON.stringify(rois))}`),
-  frameExportUrl: (name: string, index: number, format: "csv" | "tiff" | "png" | "npy") =>
-    u(`/api/experiments/${encodeURIComponent(name)}/frames/${index}/export?format=${format}`),
-  exportHdf5: (name: string) =>
-    j<Hdf5Export>(req(`/api/experiments/${encodeURIComponent(name)}/export/hdf5`, { method: "POST" })),
-  exportFrames: (name: string, start: number, stop: number, step: number, format: string) =>
-    j<{ path: string; frames: number[]; n: number; format: string; size_bytes: number }>(req(`/api/experiments/${encodeURIComponent(name)}/export/frames`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ start, stop, step, format }) })),
-  exportReport: (name: string) => j<{ path: string; pages: number; size_bytes: number }>(req(`/api/experiments/${encodeURIComponent(name)}/export/report`, { method: "POST" })),
-  reportUrl: (name: string) => u(`/api/experiments/${encodeURIComponent(name)}/report.pdf`),
-  exportThermalVideo: (name: string) =>
-    j<ThermalVideoExport>(req(`/api/experiments/${encodeURIComponent(name)}/export/thermal-video`, { method: "POST" })),
+  experiment: (name: RunKey) => j<ExperimentInfo>(req(runPath(name))),
+  timeline: (name: RunKey) => j<Timeline>(req(runPath(name, `/timeline`))),
+  series: (name: RunKey, rois: unknown[], valid?: { min: number; max: number } | null, maxPoints = 0) =>
+    j<RoiSeries>(req(runPath(name, `/series?rois=${encodeURIComponent(JSON.stringify(rois))}${valid ? `&valid=${valid.min},${valid.max}` : ""}${maxPoints ? `&max_points=${maxPoints}` : ""}`))),
+  seriesCsvUrl: (name: RunKey, rois: unknown[]) =>
+    u(runPath(name, `/export/series.csv?rois=${encodeURIComponent(JSON.stringify(rois))}`)),
+  frameExportUrl: (name: RunKey, index: number, format: "csv" | "tiff" | "png" | "npy") =>
+    u(runPath(name, `/frames/${index}/export?format=${format}`)),
+  exportHdf5: (name: RunKey) =>
+    j<Hdf5Export>(req(runPath(name, `/export/hdf5`), { method: "POST" })),
+  exportFrames: (name: RunKey, start: number, stop: number, step: number, format: string) =>
+    j<{ path: string; frames: number[]; n: number; format: string; size_bytes: number }>(req(runPath(name, `/export/frames`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ start, stop, step, format }) })),
+  exportReport: (name: RunKey) => j<{ path: string; pages: number; size_bytes: number }>(req(runPath(name, `/export/report`), { method: "POST" })),
+  reportUrl: (name: RunKey) => u(runPath(name, `/report.pdf`)),
+  exportThermalVideo: (name: RunKey) =>
+    j<ThermalVideoExport>(req(runPath(name, `/export/thermal-video`), { method: "POST" })),
   /** Persist the ROIs currently on screen into the recording so derived files can match them. */
-  putMasks: (name: string, masks: unknown[]) =>
-    j<{ masks: number }>(req(`/api/experiments/${encodeURIComponent(name)}/masks`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ masks }) })),
-  putRois: (name: string, rois: unknown[]) =>
-    j<{ rois: number }>(req(`/api/experiments/${encodeURIComponent(name)}/rois`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ rois }) })),
+  putMasks: (name: RunKey, masks: unknown[]) =>
+    j<{ masks: number }>(req(runPath(name, `/masks`), { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ masks }) })),
+  putRois: (name: RunKey, rois: unknown[]) =>
+    j<{ rois: number }>(req(runPath(name, `/rois`), { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ rois }) })),
   /** Start a background regenerate of the ROI-dependent derived files; poll exportDerivedStatus.
    * `video=false` is the quick option: it skips the slow ROI video encode but still reruns the
    * visible-camera analysis (with its close-up video), plus the ROI plot, CSV and images.
    * `visibleAdjusted` also analyses the adjusted visible video (the run's adjustment), after the raw one. */
-  exportDerived: (name: string, video = true, visibleAdjusted = false) => {
+  exportDerived: (name: RunKey, video = true, visibleAdjusted = false) => {
     const q = [...(video ? [] : ["video=false"]), ...(visibleAdjusted ? ["visible_adjusted=true"] : [])].join("&");
-    return j<DerivedJob>(req(`/api/experiments/${encodeURIComponent(name)}/export/derived${q ? `?${q}` : ""}`, { method: "POST" }));
+    return j<DerivedJob>(req(runPath(name, `/export/derived${q ? `?${q}` : ""}`), { method: "POST" }));
   },
-  exportDerivedStatus: (name: string) =>
-    j<DerivedJob>(req(`/api/experiments/${encodeURIComponent(name)}/export/derived/status`)),
+  exportDerivedStatus: (name: RunKey) =>
+    j<DerivedJob>(req(runPath(name, `/export/derived/status`))),
   /** Start a media-export render (windowed MP4/GIF with overlays); poll mediaStatus. */
-  exportMedia: (name: string, opts: MediaOptions) =>
-    j<MediaJob>(req(`/api/experiments/${encodeURIComponent(name)}/export/media`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(opts) })),
-  mediaStatus: (name: string) =>
-    j<MediaJob>(req(`/api/experiments/${encodeURIComponent(name)}/export/media/status`)),
+  exportMedia: (name: RunKey, opts: MediaOptions) =>
+    j<MediaJob>(req(runPath(name, `/export/media`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(opts) })),
+  mediaStatus: (name: RunKey) =>
+    j<MediaJob>(req(runPath(name, `/export/media/status`))),
   /** Precompute the display temperature range (the slow whole-run scan) as a job with progress. */
-  computeRange: (name: string) =>
-    j<RangeJob>(req(`/api/experiments/${encodeURIComponent(name)}/range/compute`, { method: "POST" })),
-  rangeStatus: (name: string) =>
-    j<RangeJob>(req(`/api/experiments/${encodeURIComponent(name)}/range/status`)),
-  clipUrl: (name: string, file: string) =>
-    u(`/api/experiments/${encodeURIComponent(name)}/exports/clips/${encodeURIComponent(file)}`),
+  computeRange: (name: RunKey) =>
+    j<RangeJob>(req(runPath(name, `/range/compute`), { method: "POST" })),
+  rangeStatus: (name: RunKey) =>
+    j<RangeJob>(req(runPath(name, `/range/status`))),
+  clipUrl: (name: RunKey, file: string) =>
+    u(runPath(name, `/exports/clips/${encodeURIComponent(file)}`)),
   /** A composed preview frame (PNG) for the editor: same overlays as the export, at `index`. */
-  mediaPreviewUrl: (name: string, index: number, o: MediaPreviewOptions) =>
-    u(`/api/experiments/${encodeURIComponent(name)}/export/media/preview${mediaPreviewQuery(index, o)}`),
-  exportFileUrl: (name: string, file: string) => u(`/api/experiments/${encodeURIComponent(name)}/exports/${encodeURIComponent(file)}`),
-  thermalVideoUrl: (name: string) => u(`/api/experiments/${encodeURIComponent(name)}/thermal_preview.mp4`),
-  frameBuffer: async (name: string, index: number): Promise<ArrayBuffer> => {
-    const res = await req(`/api/experiments/${encodeURIComponent(name)}/frames/${index}`);
+  mediaPreviewUrl: (name: RunKey, index: number, o: MediaPreviewOptions) =>
+    u(runPath(name, `/export/media/preview${mediaPreviewQuery(index, o)}`)),
+  exportFileUrl: (name: RunKey, file: string) => u(runPath(name, `/exports/${encodeURIComponent(file)}`)),
+  thermalVideoUrl: (name: RunKey) => u(runPath(name, `/thermal_preview.mp4`)),
+  frameBuffer: async (name: RunKey, index: number): Promise<ArrayBuffer> => {
+    const res = await req(runPath(name, `/frames/${index}`));
     if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
     return res.arrayBuffer();
   },
   /** `signal` aborts the download when the playhead no longer needs the block (lib/frameBlocks.ts). */
-  frameBlock: async (name: string, start: number, count: number, rfNotch = false, signal?: AbortSignal): Promise<ArrayBuffer> => {
-    const res = await req(`/api/experiments/${encodeURIComponent(name)}/frames?start=${start}&count=${count}${rfNotch ? "&rf_notch=1" : ""}`, { signal });
+  frameBlock: async (name: RunKey, start: number, count: number, rfNotch = false, signal?: AbortSignal): Promise<ArrayBuffer> => {
+    const res = await req(runPath(name, `/frames?start=${start}&count=${count}${rfNotch ? "&rf_notch=1" : ""}`), { signal });
     if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
     return res.arrayBuffer();
   },
@@ -208,18 +211,22 @@ export const api = {
   recordingStatus: () => j<RecordingStatus>(req("/api/recording/status")),
   recordingEvent: (name: string, note?: string) =>
     j<ExperimentEvent>(req("/api/recording/event", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, note: note || null }) })),
-  patchMetadata: (name: string, experiment: Record<string, unknown>) =>
-    j<{ experiment: Record<string, unknown> }>(req(`/api/experiments/${encodeURIComponent(name)}/metadata`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ experiment }) })),
-  experiments: () => j<Experiment[]>(req("/api/experiments")),
-  previewUrl: (name: string) => u(`/api/experiments/${encodeURIComponent(name)}/preview.png`),
-  visibleVideoUrl: (name: string) => u(`/api/experiments/${encodeURIComponent(name)}/visible.mp4`),
-  visibleSegmentUrl: (name: string, index: number) => u(`/api/experiments/${encodeURIComponent(name)}/visible/${index}`),
+  patchMetadata: (name: RunKey, experiment: Record<string, unknown>) =>
+    j<{ experiment: Record<string, unknown> }>(req(runPath(name, `/metadata`), { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ experiment }) })),
+  /** Runs in a collection: omitted = the operator's selected collection, null = the top level. */
+  experiments: (collection?: string | null) =>
+    j<Experiment[]>(req(collection === undefined ? "/api/experiments" : `/api/experiments?collection=${encodeURIComponent(collection ?? "")}`)),
+  /** Every run's location (local, connected drive, offline index); collection null = top level. */
+  runLocations: () => j<{ collection: string | null; name: string }[]>(req("/api/collections/runs")),
+  previewUrl: (name: RunKey) => u(runPath(name, `/preview.png`)),
+  visibleVideoUrl: (name: RunKey) => u(runPath(name, `/visible.mp4`)),
+  visibleSegmentUrl: (name: RunKey, index: number) => u(runPath(name, `/visible/${index}`)),
   visibleLiveUrl: () => u("/api/visible/live.mjpeg"),
   /** The run's saved visible adjustment (sidecar). `library` omitted = the folder playback reads (local first). */
-  setVisibleAdjust: (name: string, a: VisibleAdjust, library?: "local" | "drive") =>
-    j<Record<string, unknown>>(req(`/api/experiments/${encodeURIComponent(name)}/visible-adjust`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ exposure_ev: a.exposure_ev, brightness: a.brightness, contrast: a.contrast, library }) })),
-  clearVisibleAdjust: (name: string, library?: "local" | "drive") =>
-    j<{ removed: boolean }>(req(`/api/experiments/${encodeURIComponent(name)}/visible-adjust${library ? `?library=${library}` : ""}`, { method: "DELETE" })),
+  setVisibleAdjust: (name: RunKey, a: VisibleAdjust, library?: "local" | "drive") =>
+    j<Record<string, unknown>>(req(runPath(name, `/visible-adjust`), { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ exposure_ev: a.exposure_ev, brightness: a.brightness, contrast: a.contrast, library }) })),
+  clearVisibleAdjust: (name: RunKey, library?: "local" | "drive") =>
+    j<{ removed: boolean }>(req(runPath(name, library ? `/visible-adjust?library=${library}` : "/visible-adjust"), { method: "DELETE" })),
   /** The X-Visible-Range header of a visible video URL (reads the headers, then drops the body). */
   visibleRangeHeader: async (url: string): Promise<string | null> => {
     const ctl = new AbortController();
@@ -231,27 +238,27 @@ export const api = {
   getAlignment: () => j<Record<string, unknown>>(req("/api/calibration/visible")),
   putAlignment: (doc: Record<string, unknown>) =>
     j<Record<string, unknown>>(req("/api/calibration/visible", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(doc) })),
-  keyframesUrl: (name: string) => u(`/api/experiments/${encodeURIComponent(name)}/keyframes.png`),
-  regeneratePreviews: (name: string) => j<Previews>(req(`/api/experiments/${encodeURIComponent(name)}/previews`, { method: "POST" })),
-  reveal: (name: string) => j<RevealResult>(req(`/api/experiments/${encodeURIComponent(name)}/reveal`, { method: "POST" })),
+  keyframesUrl: (name: RunKey) => u(runPath(name, `/keyframes.png`)),
+  regeneratePreviews: (name: RunKey) => j<Previews>(req(runPath(name, `/previews`), { method: "POST" })),
+  reveal: (name: RunKey) => j<RevealResult>(req(runPath(name, `/reveal`), { method: "POST" })),
   experimentsSummary: () => j<{ count: number; size_bytes: number; free_space_gb: number }>(req("/api/experiments/summary")),
   profile: () => j<Profile>(req("/api/profile")),
   profileSuggest: (q: string) => j<ProfileSuggestion>(req(`/api/profile/suggest?q=${encodeURIComponent(q)}`)),
   saveProfile: (p: Profile) => j<Profile>(req("/api/profile", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(p) })),
-  deleteExperiment: (name: string) =>
-    j<{ deleted: string }>(req(`/api/experiments/${encodeURIComponent(name)}`, { method: "DELETE" })),
+  deleteExperiment: (name: RunKey) =>
+    j<{ deleted: string }>(req(runPath(name), { method: "DELETE" })),
   // -- external-drive storage (offload) --
   storage: () => j<StorageInfo>(req("/api/storage")),
   storageVolumes: () => j<Volume[]>(req("/api/storage/volumes")),
   registerDrive: (mount: string) =>
     j<StorageInfo>(req("/api/storage/drive", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ mount }) })),
   forgetDrive: () => j<StorageInfo>(req("/api/storage/drive", { method: "DELETE" })),
-  moveExperiment: (name: string, to: "drive" | "local") =>
-    j<MoveJob>(req(`/api/experiments/${encodeURIComponent(name)}/move`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ to }) })),
-  moveStatus: (name: string) =>
-    j<MoveJob>(req(`/api/experiments/${encodeURIComponent(name)}/move/status`)),
-  setLabels: (name: string, body: { starred: boolean; tags: string[]; library?: "local" | "drive"; title?: string; notes?: string }) =>
-    j<{ starred: boolean; tags: string[]; title?: string; notes?: string }>(req(`/api/experiments/${encodeURIComponent(name)}/labels`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })),
+  moveExperiment: (name: RunKey, to: "drive" | "local") =>
+    j<MoveJob>(req(runPath(name, `/move`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ to }) })),
+  moveStatus: (name: RunKey) =>
+    j<MoveJob>(req(runPath(name, `/move/status`))),
+  setLabels: (name: RunKey, body: { starred: boolean; tags: string[]; library?: "local" | "drive"; title?: string; notes?: string }) =>
+    j<{ starred: boolean; tags: string[]; title?: string; notes?: string }>(req(runPath(name, `/labels`), { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })),
   revealRoot: () => j<RevealResult>(req("/api/experiments/reveal-root", { method: "POST" })),
   health: () => j<Health>(req("/api/health")),
   sdk: () => j<Record<string, unknown>>(req("/api/setup/sdk")),
@@ -274,16 +281,16 @@ export const api = {
   /** The operator's per-ROI live feed (smart ROI numbers come only from here; see lib/smartReadout.ts). */
   liveRoiTemps: (signal?: AbortSignal) => j<unknown>(req("/api/live/roi-temps", { signal })),
   /** Stored smart ROI outlines for frame indices [start, start + count) of a recorded run (404 until computed). */
-  smartOverlay: (name: string, roiId: number, start: number, count: number, signal?: AbortSignal) =>
-    j<SmartOverlay[]>(req(`/api/experiments/${encodeURIComponent(name)}/smart-roi/${roiId}/overlay?start=${start}&count=${count}`, { signal })),
+  smartOverlay: (name: RunKey, roiId: number, start: number, count: number, signal?: AbortSignal) =>
+    j<SmartOverlay[]>(req(runPath(name, `/smart-roi/${roiId}/overlay?start=${start}&count=${count}`), { signal })),
   /** A recorded run's stored smart ROI series for the plot (404 until computed; parse with lib/smartSeries.ts). */
-  smartSeries: (name: string, roiId: number, maxPoints: number) =>
-    j<unknown>(req(`/api/experiments/${encodeURIComponent(name)}/smart-roi/${roiId}?max_points=${maxPoints}`)),
+  smartSeries: (name: RunKey, roiId: number, maxPoints: number) =>
+    j<unknown>(req(runPath(name, `/smart-roi/${roiId}?max_points=${maxPoints}`))),
   /** Start (or join) the full-rate smart ROI compute job for a stored smart ROI; poll smartStatus. */
-  smartCompute: (name: string, roiId: number) =>
-    j<SmartJob>(req(`/api/experiments/${encodeURIComponent(name)}/smart-roi/${roiId}/compute`, { method: "POST" })),
-  smartStatus: (name: string, roiId: number) =>
-    j<SmartJob>(req(`/api/experiments/${encodeURIComponent(name)}/smart-roi/${roiId}/status`)),
+  smartCompute: (name: RunKey, roiId: number) =>
+    j<SmartJob>(req(runPath(name, `/smart-roi/${roiId}/compute`), { method: "POST" })),
+  smartStatus: (name: RunKey, roiId: number) =>
+    j<SmartJob>(req(runPath(name, `/smart-roi/${roiId}/status`))),
   controlStatus: () => j<ControlStatus>(req("/api/control/status")),
   // -- presets (visible adjustment + thermal camera settings + display) --
   presets: () => j<PresetsDoc>(req("/api/presets")),
@@ -297,6 +304,6 @@ export const api = {
     j<PresetsDoc>(req("/api/presets/last-applied", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) })),
   /** The connected camera's writable values; 409 without a camera. */
   currentThermal: () => j<{ thermal: Record<string, ThermalValue | null>; left_out: string[] }>(req("/api/presets/current-thermal")),
-  controlSeries: (name: string) =>
-    j<ControlSeries>(req(`/api/experiments/${encodeURIComponent(name)}/control`)),
+  controlSeries: (name: RunKey) =>
+    j<ControlSeries>(req(runPath(name, `/control`))),
 };

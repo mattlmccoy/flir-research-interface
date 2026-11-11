@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
 import { api, type Experiment } from "../lib/api.ts";
+import { keyOf, type RunKey } from "../lib/runKey.ts";
 import { isOffline, storageBreakdown, summaryLabel } from "../lib/storageSummary.ts";
 import {
   filterExperiments, mergeTags, selectionReducer, sortExperiments, tagUniverse,
@@ -10,13 +11,13 @@ import { SelectionBar } from "./SelectionBar.tsx";
 import { BulkRenamePopover } from "./BulkRenamePopover.tsx";
 import { TagPopover } from "./TagPopover.tsx";
 
-const cardId = (e: { library?: string; name: string }) => `${e.library ?? "local"}:${e.name}`;
+const cardId = (e: { library?: string; collection?: string | null; name: string }) => `${e.library ?? "local"}:${keyOf(e)}`;
 const ls = {
   get: (k: string, d: string) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
   set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } },
 };
 
-export function ExperimentsPage({ onOpen }: { onOpen: (name: string, title?: string) => void }) {
+export function ExperimentsPage({ onOpen }: { onOpen: (key: RunKey, title?: string) => void }) {
   const [items, setItems] = useState<Experiment[] | null>(null);
   const [driveConnected, setDriveConnected] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -66,7 +67,7 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string, title?: str
   const selectedItems = () => [...sel.selected].map((id) => byId.get(id)).filter(Boolean) as Experiment[];
   const clearSelection = () => dispatch({ type: "clear" });
 
-  async function moveOne(name: string, to: "drive" | "local") {
+  async function moveOne(name: RunKey, to: "drive" | "local") {
     await api.moveExperiment(name, to);
     for (;;) {
       await new Promise((r) => setTimeout(r, 600));
@@ -98,26 +99,26 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string, title?: str
     // only runs on the opposite side can move that direction; skip the rest to avoid "already there"
     const targets = selectedItems().filter((e) => (to === "drive" ? e.library !== "drive" : e.library === "drive"));
     if (targets.length === 0) { setErr(`nothing selected is on ${to === "drive" ? "local disk" : "the drive"}`); return; }
-    await runBulk(targets, to === "drive" ? "move to drive" : "restore to local", (e) => moveOne(e.name, to));
+    await runBulk(targets, to === "drive" ? "move to drive" : "restore to local", (e) => moveOne(keyOf(e), to));
   }
 
   async function bulkStar(on: boolean) {
     await runBulk(selectedItems(), on ? "star" : "unstar",
-      (e) => api.setLabels(e.name, { starred: on, tags: e.tags ?? [], library: libOf(e) }).then(() => {}));
+      (e) => api.setLabels(keyOf(e), { starred: on, tags: e.tags ?? [], library: libOf(e) }).then(() => {}));
   }
 
   async function bulkAddTags(add: string[]) {
     setBulkTagOpen(false);
     if (add.length === 0) return;
     await runBulk(selectedItems(), "tag",
-      (e) => api.setLabels(e.name, { starred: !!e.starred, tags: mergeTags(e.tags ?? [], add), library: libOf(e) }).then(() => {}));
+      (e) => api.setLabels(keyOf(e), { starred: !!e.starred, tags: mergeTags(e.tags ?? [], add), library: libOf(e) }).then(() => {}));
   }
 
   async function bulkRename(plan: { name: string; title: string }[]) {
     setBulkRenameOpen(false);
     const titleOf = new Map(plan.map((p) => [p.name, p.title]));
     const targets = selectedItems().filter((e) => titleOf.has(e.name));
-    await runBulk(targets, "rename", (e) => api.setLabels(e.name, {
+    await runBulk(targets, "rename", (e) => api.setLabels(keyOf(e), {
       starred: !!e.starred, tags: e.tags ?? [], library: libOf(e), title: titleOf.get(e.name) ?? "",
     }).then(() => {}));
   }
@@ -127,7 +128,7 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string, title?: str
     if (targets.length === 0) return;
     const names = targets.map((e) => e.name).join("\n");
     if (!window.confirm(`Delete ${targets.length} run(s) for good?\n\n${names}\n\nThis removes each run folder entirely. There is no undo.`)) return;
-    await runBulk(targets, "delete", (e) => api.deleteExperiment(e.name).then(() => {}));
+    await runBulk(targets, "delete", (e) => api.deleteExperiment(keyOf(e)).then(() => {}));
   }
 
   return (
@@ -182,7 +183,7 @@ export function ExperimentsPage({ onOpen }: { onOpen: (name: string, title?: str
           const id = cardId(e);
           return (
             <ExperimentCard
-              key={id} exp={e} onOpen={() => onOpen(e.name, e.title)} onChanged={load}
+              key={id} exp={e} onOpen={() => onOpen(keyOf(e), e.title)} onChanged={load}
               driveConnected={driveConnected} universe={universe}
               selecting={selecting} selected={sel.selected.has(id)}
               onToggleSelect={isOffline(e) ? undefined : (ev) => dispatch(ev.shiftKey ? { type: "range", name: id, order: shownIds } : { type: "toggle", name: id })}

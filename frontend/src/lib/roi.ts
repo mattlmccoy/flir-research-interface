@@ -544,7 +544,7 @@ function asRoi(v: unknown): Roi | null {
  * The `"live"` scope reuses the legacy key (so existing state migrates unchanged); every other
  * scope (e.g. `"exp.<name>"`) gets its own key.
  */
-function roiKeyFor(scope: string): string {
+export function roiKeyFor(scope: string): string {
   return scope === "live" ? KEY : `fri.rois.${scope}`;
 }
 

@@ -12,6 +12,7 @@ from typing import Annotated, Any
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
+from flir_research_interface import storage
 from flir_research_interface.collections import (
     RunQuery,
     collection_name_error,
@@ -37,6 +38,16 @@ def run_query(name: str, collection: str | None = None) -> RunQuery:
 
 
 RunDep = Annotated[RunQuery, Depends(run_query)]
+
+
+def _collection_runs(folder: Path) -> list[str]:
+    """Run folder names inside a collection (the same children the listing reads)."""
+    if not folder.is_dir():
+        return []
+    return [
+        p.name for p in folder.iterdir()
+        if p.is_dir() and not p.name.startswith(".") and not p.name.endswith(".partial")
+    ]
 
 
 class _NameBody(BaseModel):
@@ -80,6 +91,25 @@ def register_collections_routes(
     @app.get("/api/collections")
     def get_collections() -> dict[str, Any]:
         return _doc()
+
+    @app.get("/api/collections/runs")
+    def get_run_locations() -> list[dict[str, str | None]]:
+        """Every run's ``{collection, name}`` across local, the connected drive and (while the
+        registered drive is unplugged) its offline index; ``collection`` None = top level.
+        The browser re-keys its per-run state from this (lib/scopeMigration.ts)."""
+        seen: set[tuple[str | None, str]] = set()
+        for _lib, root in roots():
+            scan = scan_root(root)
+            seen.update((None, n) for n in scan.runs)
+            for c in scan.collections:
+                seen.update((c, n) for n in _collection_runs(root / c))
+        libs = {lib for lib, _ in roots()}
+        if "drive" not in libs and storage.load_storage_config(_base())["drive"]:
+            for r in storage.offline_runs(_base()):
+                coll = r.get("collection")  # absent from v1 index entries: top level
+                seen.add((coll if isinstance(coll, str) and coll else None, str(r["name"])))
+        ordered = sorted(seen, key=lambda p: (p[0] or "", p[1]))
+        return [{"collection": c, "name": n} for c, n in ordered]
 
     @app.post("/api/collections")
     def add_collection(body: _NameBody) -> dict[str, Any]:
