@@ -7,6 +7,7 @@ playback, palettes, ROIs and exports can never modify the canonical data (brief 
 from __future__ import annotations
 
 import json
+from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
@@ -174,17 +175,23 @@ class ExperimentReader:
         return block
 
 
-def list_experiments(root: Path, library: str = "local") -> list[dict[str, Any]]:
+def list_experiments(
+    root: Path, library: str = "local", *, names: Collection[str] | None = None
+) -> list[dict[str, Any]]:
     """Summaries of all experiment directories under ``root``, newest first.
 
     Each summary is tagged with ``library`` (e.g. "local" / "drive") and its ``root`` so the caller
-    can union runs that live in different storage locations.
+    can union runs that live in different storage locations. ``names`` limits the listing to those
+    child directories (None lists every child).
     """
     root = Path(root)
     if not root.is_dir():
         return []
     out: list[dict[str, Any]] = []
+    keep = None if names is None else set(names)
     for d in sorted((p for p in root.iterdir() if p.is_dir()), reverse=True):
+        if keep is not None and d.name not in keep:
+            continue
         # Skip transient / non-experiment dirs: a "<name>.partial" half-copy left by an interrupted
         # move, and macOS/exFAT dot-directories (.Trashes, .Spotlight-V100, ._* AppleDouble).
         if d.name.endswith(".partial") or d.name.startswith("."):

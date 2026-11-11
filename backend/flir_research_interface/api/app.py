@@ -33,6 +33,7 @@ from flir_research_interface import labels as labels_mod
 from flir_research_interface import visible_adjust_store as vadj_store
 from flir_research_interface.acquisition.service import AcquisitionService, ServiceState
 from flir_research_interface.acquisition.smart_live import SmartLive
+from flir_research_interface.api.collections_routes import register_collections_routes
 from flir_research_interface.api.frames import encode_frame_message
 from flir_research_interface.api.presets_routes import make_presets_router
 from flir_research_interface.api.reveal import Runner, contained, reveal
@@ -43,6 +44,7 @@ from flir_research_interface.api.smart_roi_routes import (
 from flir_research_interface.camera import CAMERA_BACKENDS, create_backend
 from flir_research_interface.camera.base import CameraBackend, CameraError, DeviceDescriptor, Frame
 from flir_research_interface.camera.simulated import HotspotRampScene
+from flir_research_interface.collections import collection_name_error, load_selection, scan_root
 from flir_research_interface.concurrency import KeyedLocks
 from flir_research_interface.playback.reader import ExperimentReader, list_experiments
 from flir_research_interface.recording.recorder import Recorder, RecorderState
@@ -1405,18 +1407,36 @@ def create_app(
             roots.append(("drive", Path(drive["root"])))
         return roots
 
+    def _scoped_roots(
+        collection: str | None,
+    ) -> list[tuple[str, Path, list[str] | None, str | None]]:
+        """(library, dir to list, child-name filter, collection) per root for a listing scope.
+
+        ``None`` means the selected collection; ``""`` (or nothing selected) is the top level,
+        filtered to run folders; a name is that folder in each root.
+        """
+        base = Path(app.state.experiments_root)
+        if collection is None:
+            collection = load_selection(base) or ""
+        if collection:
+            err = collection_name_error(collection)
+            if err:
+                raise HTTPException(400, err)
+            return [(lib, root / collection, None, collection) for lib, root in _roots()]
+        return [(lib, root, list(scan_root(root).runs), None) for lib, root in _roots()]
+
     @app.get("/api/experiments")
-    def experiments() -> list[dict[str, Any]]:
+    def experiments(collection: str | None = None) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         local_root = app.state.experiments_root
-        roots = _roots()
-        for lib, root in roots:
-            for it in list_experiments(root, library=lib):
+        for lib, root, names, coll in _scoped_roots(collection):
+            for it in list_experiments(root, library=lib, names=names):
                 run_dir = root / str(it.get("name", ""))
                 it["size_bytes"] = _dir_size(run_dir)
                 it.update(labels_mod.read_labels(run_dir))  # starred + tags
+                it["collection"] = coll
                 items.append(it)
-        drive_root = next((r for lib, r in roots if lib == "drive"), None)
+        drive_root = next((r for lib, r in _roots() if lib == "drive"), None)
         if drive_root is not None:  # connected: remember what is on it for when it is unplugged
             storage.remember_drive_runs(
                 local_root, [it for it in items if it.get("library") == "drive"],
@@ -1430,10 +1450,13 @@ def create_app(
         return items
 
     @app.get("/api/experiments/summary")
-    def experiments_summary() -> dict[str, Any]:
+    def experiments_summary(collection: str | None = None) -> dict[str, Any]:
         """Runs on disk and how much of the disk they use (for the experiments page header)."""
         root: Path = app.state.experiments_root
-        dirs = [p for p in root.iterdir() if p.is_dir()] if root.is_dir() else []
+        dirs: list[Path] = []
+        for lib, d, names, _coll in _scoped_roots(collection):
+            if lib == "local" and d.is_dir():
+                dirs = [p for p in d.iterdir() if p.is_dir() and (names is None or p.name in names)]
         probe = root if root.exists() else root.parent
         free = shutil.disk_usage(probe).free / 1e9 if probe.exists() else 0.0
         return {
@@ -1456,6 +1479,7 @@ def create_app(
         raise HTTPException(404, f"experiment {name!r} not found")
 
     register_smart_roi_routes(app, _exp_dir)
+    register_collections_routes(app, _roots)
 
     # -- external-drive storage (offload) ------------------------------------------------------
 

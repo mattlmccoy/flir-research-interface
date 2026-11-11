@@ -32,7 +32,9 @@ def test_put_labels_writes_sidecar_and_normalizes(tmp_path: Path) -> None:
 
 
 def test_get_experiments_includes_starred_and_tags(tmp_path: Path) -> None:
+    # Hand-made run: a bare dir would now classify as a collection folder, so give it metadata.json.
     (tmp_path / "run1").mkdir()
+    (tmp_path / "run1" / "metadata.json").write_text("{}")
     c = _client(tmp_path)
     c.put("/api/experiments/run1/labels", json={"starred": True, "tags": ["a"]}, headers=H)
     items = c.get("/api/experiments").json()
