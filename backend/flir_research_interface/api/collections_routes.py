@@ -7,19 +7,36 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
 from flir_research_interface.collections import (
+    RunQuery,
     collection_name_error,
     load_selection,
+    run_name_error,
     save_selection,
     scan_root,
 )
 
-__all__ = ["register_collections_routes"]
+__all__ = ["RunDep", "register_collections_routes", "run_query"]
+
+
+def run_query(name: str, collection: str | None = None) -> RunQuery:
+    """FastAPI dependency for ``/api/experiments/{name}...``: the run name and the optional
+    ``?collection=`` ("" = top level, omitted = legacy unique lookup), both validated (400)."""
+    if run_name_error(name):
+        raise HTTPException(400, "invalid experiment name")
+    if collection:
+        err = collection_name_error(collection)
+        if err:
+            raise HTTPException(400, err)
+    return RunQuery(name, collection)
+
+
+RunDep = Annotated[RunQuery, Depends(run_query)]
 
 
 class _NameBody(BaseModel):

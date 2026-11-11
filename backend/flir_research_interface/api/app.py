@@ -33,7 +33,10 @@ from flir_research_interface import labels as labels_mod
 from flir_research_interface import visible_adjust_store as vadj_store
 from flir_research_interface.acquisition.service import AcquisitionService, ServiceState
 from flir_research_interface.acquisition.smart_live import SmartLive
-from flir_research_interface.api.collections_routes import register_collections_routes
+from flir_research_interface.api.collections_routes import (
+    RunDep,
+    register_collections_routes,
+)
 from flir_research_interface.api.frames import encode_frame_message
 from flir_research_interface.api.presets_routes import make_presets_router
 from flir_research_interface.api.reveal import Runner, contained, reveal
@@ -44,7 +47,14 @@ from flir_research_interface.api.smart_roi_routes import (
 from flir_research_interface.camera import CAMERA_BACKENDS, create_backend
 from flir_research_interface.camera.base import CameraBackend, CameraError, DeviceDescriptor, Frame
 from flir_research_interface.camera.simulated import HotspotRampScene
-from flir_research_interface.collections import collection_name_error, load_selection, scan_root
+from flir_research_interface.collections import (
+    RunQuery,
+    RunRef,
+    collection_name_error,
+    load_selection,
+    run_name_error,
+    scan_root,
+)
 from flir_research_interface.concurrency import KeyedLocks
 from flir_research_interface.playback.reader import ExperimentReader, list_experiments
 from flir_research_interface.recording.recorder import Recorder, RecorderState
@@ -481,12 +491,14 @@ def create_app(
 
     def _compute_smart_rois(exp_dir: Path) -> None:
         """Full-rate smart ROI series for every smart ROI stored with the recording."""
-        compute_stored_smart_rois(app, exp_dir)
+        compute_stored_smart_rois(app, exp_dir, key=_dir_key(exp_dir))
 
     def _refresh_smart_rois(exp_dir: Path) -> list[str]:
         """Regenerate: compute only the smart series that is missing or stale (ROI edited).
         Returns the failed computes (one line each)."""
-        return compute_stored_smart_rois(app, exp_dir, only_missing_or_stale=True)
+        return compute_stored_smart_rois(
+            app, exp_dir, key=_dir_key(exp_dir), only_missing_or_stale=True
+        )
 
     def _write_run_summary(exp_dir: Path) -> None:
         """README.txt + exports/roi_plot.png + peak_frame(.png|_rois.png), derived, regenerable."""
@@ -525,10 +537,11 @@ def create_app(
 
     app.state.render_tasks = set()
     app.state.finalizing = set()  # recorders a _finalize_recording is stopping right now
-    app.state.derived_jobs = {}  # experiment name -> progress record for on-demand regenerate
-    app.state.move_jobs = {}  # experiment name -> progress record for an offload/restore move
-    app.state.media_jobs = {}  # experiment name -> progress record for a media-export render
-    app.state.range_jobs = {}  # experiment name -> progress record for the display-range scan
+    # job records and render locks are keyed by RunRef.key ("<collection>/<name>" or "<name>")
+    app.state.derived_jobs = {}  # run key -> progress record for on-demand regenerate
+    app.state.move_jobs = {}  # run key -> progress record for an offload/restore move
+    app.state.media_jobs = {}  # run key -> progress record for a media-export render
+    app.state.range_jobs = {}  # run key -> progress record for the display-range scan
     # one lock per experiment so the post-stop auto-render and an on-demand regenerate never write
     # that run's thermal-video files at the same time
     app.state.render_locks = KeyedLocks()
@@ -549,7 +562,7 @@ def create_app(
         regenerable from the run's store."""
 
         async def _job() -> None:
-            async with app.state.render_locks.get(exp_dir.name):
+            async with app.state.render_locks.get(_dir_key(exp_dir)):
                 for step, fn in (
                     # smart series first: the ROI CSV and run summary read them (Task 6)
                     ("smart ROI series", _compute_smart_rois),
@@ -1466,19 +1479,68 @@ def create_app(
             "experiments_root": str(root),
         }
 
-    def _exp_dir(name: str) -> Path:
-        if "/" in name or "\\" in name or name in ("", ".", ".."):
+    def _resolve(q: RunQuery, library: str | None = None) -> tuple[RunRef, Path]:
+        """A run's reference and folder. An explicit ``q.collection`` ("" = top level) is looked
+        up in that folder of each root, local first. An omitted one is the legacy unique lookup
+        over the top level and every collection of every root: the same name in two or more
+        collections is 409 (pass ``?collection=``). ``library`` restricts the roots searched."""
+        if run_name_error(q.name):
             raise HTTPException(400, "invalid experiment name")
-        for _lib, root in _roots():
-            d = root / name
-            if not d.is_dir():
-                continue
-            if not contained(root, d):  # a symlink escaping the root
-                raise HTTPException(400, "experiment path is outside the experiments root")
-            return d
-        raise HTTPException(404, f"experiment {name!r} not found")
+        roots = _roots()
+        if library is not None:
+            roots = [(lib, r) for lib, r in roots if lib == library]
+            if not roots:
+                raise HTTPException(404, f"library {library!r} is not available")
+        if q.collection is not None:
+            refs = [RunRef(q.collection or None, q.name)]
+        else:
+            refs = [RunRef(None, q.name)]
+            for _lib, root in roots:
+                refs += [RunRef(c, q.name) for c in scan_root(root).collections]
+        found: list[tuple[RunRef, Path]] = []
+        for _lib, root in roots:
+            for ref in refs:
+                d = root / ref.rel()
+                if not d.is_dir():
+                    continue
+                if not contained(root, d):  # a symlink escaping the root
+                    raise HTTPException(400, "experiment path is outside the experiments root")
+                found.append((ref, d))
+        distinct = sorted({ref for ref, _d in found}, key=lambda r: r.collection or "")
+        if len(distinct) > 1:
+            names = ", ".join(r.collection or "top level" for r in distinct)
+            raise HTTPException(
+                409,
+                f"{q.name} exists in more than one collection ({names}); pass ?collection=",
+            )
+        if not found:
+            where = f" in {library}" if library is not None else ""
+            raise HTTPException(404, f"experiment {q.name!r} not found{where}")
+        return found[0]
 
-    register_smart_roi_routes(app, _exp_dir)
+    def _exp_dir(q: RunQuery) -> Path:
+        return _resolve(q)[1]
+
+    def _job_key(q: RunQuery) -> str:
+        """The key of this run's job records and render lock (``RunRef.key``)."""
+        if q.collection is not None:
+            return RunRef(q.collection or None, q.name).key
+        try:
+            return _resolve(q)[0].key
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                return q.name
+            raise
+
+    def _dir_key(exp_dir: Path) -> str:
+        """``RunRef.key`` for a run folder (post-stop exports and stored smart ROI computes)."""
+        return RunRef.from_dir(exp_dir, [r for _lib, r in _roots()]).key
+
+    def _pinned(ref: RunRef) -> RunQuery:
+        """An explicit query for a resolved run, so later re-resolution finds exactly it."""
+        return RunQuery(ref.name, ref.collection or "")
+
+    register_smart_roi_routes(app, _exp_dir, _job_key)
     register_collections_routes(app, _roots)
 
     # -- external-drive storage (offload) ------------------------------------------------------
@@ -1529,7 +1591,7 @@ def create_app(
         return _storage_state()
 
     @app.post("/api/experiments/{name}/move")
-    async def move_experiment_route(name: str, req: MoveRequest) -> dict[str, Any]:
+    async def move_experiment_route(run: RunDep, req: MoveRequest) -> dict[str, Any]:
         """Offload a run to the drive (``to:"drive"``) or bring it back (``to:"local"``).
 
         Copy → verify → delete-source, in the background; poll ``…/move/status``. Guarded by the
@@ -1538,14 +1600,15 @@ def create_app(
         if req.to not in ("drive", "local"):
             raise HTTPException(400, "to must be 'drive' or 'local'")
         rec = recorder()
-        src = _exp_dir(name)  # 404 if unknown
+        ref, src = _resolve(run)  # 404 if unknown
+        key = ref.key
         if (
             rec is not None
             and rec.experiment_dir is not None
             and rec.experiment_dir.resolve() == src.resolve()
         ):
             raise HTTPException(409, "this run is being recorded right now")
-        existing: dict[str, Any] | None = app.state.move_jobs.get(name)
+        existing: dict[str, Any] | None = app.state.move_jobs.get(key)
         if existing is not None and existing["state"] == "running":
             return existing
         cfg = storage.connected_drive(app.state.experiments_root)
@@ -1554,13 +1617,13 @@ def create_app(
         await run_in_threadpool(storage.adopt_marker, app.state.experiments_root)
         dst_root = Path(cfg["root"]) if req.to == "drive" else Path(app.state.experiments_root)
         if contained(dst_root, src):
-            raise HTTPException(409, f"{name} is already on the {req.to} storage")
+            raise HTTPException(409, f"{run.name} is already on the {req.to} storage")
 
         job: dict[str, Any] = {
             "state": "running", "to": req.to, "done": 0, "total": 0, "error": None,
             "full_verify": req.full_verify,
         }
-        app.state.move_jobs[name] = job
+        app.state.move_jobs[key] = job
 
         def _work() -> None:
             def _cb(done: int, total: int) -> None:
@@ -1572,14 +1635,14 @@ def create_app(
 
         async def _job() -> None:
             try:
-                async with app.state.render_locks.get(name):
+                async with app.state.render_locks.get(key):
                     await run_in_threadpool(_work)
                 job["state"] = "done"
             except ValueError as exc:  # not enough space
                 job["state"], job["error"] = "error", str(exc)
             except Exception as exc:  # noqa: BLE001 - surface to the poller; source is left intact
                 job["state"], job["error"] = "error", str(exc)
-                logger.exception("move failed for %s", name)
+                logger.exception("move failed for %s", key)
 
         task = asyncio.create_task(_job())
         app.state.render_tasks.add(task)
@@ -1587,48 +1650,38 @@ def create_app(
         return job
 
     @app.get("/api/experiments/{name}/move/status")
-    def move_status(name: str) -> dict[str, Any]:
-        return app.state.move_jobs.get(name) or {"state": "idle"}
+    def move_status(run: RunDep) -> dict[str, Any]:
+        return app.state.move_jobs.get(_job_key(run)) or {"state": "idle"}
 
-    def _exp_dir_in(name: str, library: str | None) -> Path:
+    def _exp_dir_in(q: RunQuery, library: str | None) -> Path:
         """Resolve a run's folder in a specific library (a run can exist on both local and drive,
         with independent sidecars); ``None`` falls back to local-first ``_exp_dir``."""
-        if "/" in name or "\\" in name or name in ("", ".", ".."):
-            raise HTTPException(400, "invalid experiment name")
-        if library is None:
-            return _exp_dir(name)
-        for lib, root in _roots():
-            if lib == library:
-                d = root / name
-                if d.is_dir() and contained(root, d):
-                    return d
-                raise HTTPException(404, f"experiment {name!r} not found in {library}")
-        raise HTTPException(404, f"library {library!r} is not available")
+        return _resolve(q, library)[1]
 
     @app.put("/api/experiments/{name}/labels")
-    def set_labels(name: str, req: LabelsRequest) -> dict[str, Any]:
-        run = _exp_dir_in(name, req.library)
+    def set_labels(run: RunDep, req: LabelsRequest) -> dict[str, Any]:
+        d = _exp_dir_in(run, req.library)
         extra = {k: getattr(req, k) for k in ("title", "notes") if k in req.model_fields_set}
-        return labels_mod.write_labels(run, starred=req.starred, tags=req.tags, **extra)
+        return labels_mod.write_labels(d, starred=req.starred, tags=req.tags, **extra)
 
     @app.put("/api/experiments/{name}/visible-adjust")
-    def set_visible_adjust(name: str, req: VisibleAdjustRequest) -> dict[str, Any]:
-        run = _exp_dir_in(name, req.library)
+    def set_visible_adjust(run: RunDep, req: VisibleAdjustRequest) -> dict[str, Any]:
+        d = _exp_dir_in(run, req.library)
         try:
-            return vadj_store.write_sidecar(run, req.model_dump(exclude={"library"}))
+            return vadj_store.write_sidecar(d, req.model_dump(exclude={"library"}))
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
     @app.delete("/api/experiments/{name}/visible-adjust")
-    def clear_visible_adjust(name: str, library: str | None = None) -> dict[str, Any]:
-        return {"removed": vadj_store.delete_sidecar(_exp_dir_in(name, library))}
+    def clear_visible_adjust(run: RunDep, library: str | None = None) -> dict[str, Any]:
+        return {"removed": vadj_store.delete_sidecar(_exp_dir_in(run, library))}
 
-    def _open(name: str) -> ExperimentReader:
-        d = _exp_dir(name)
+    def _open(q: RunQuery) -> ExperimentReader:
+        d = _exp_dir(q)
         try:
             return ExperimentReader(d)
         except (FileNotFoundError, KeyError, ValueError) as exc:
-            raise HTTPException(404, f"experiment {name!r} is not readable: {exc}") from exc
+            raise HTTPException(404, f"experiment {q.name!r} is not readable: {exc}") from exc
 
     def _reveal(path: Path) -> dict[str, Any]:
         if not any(contained(root, path) for _lib, root in _roots()):
@@ -1648,8 +1701,8 @@ def create_app(
         return _reveal(root)
 
     @app.post("/api/experiments/{name}/reveal")
-    def reveal_experiment(name: str) -> dict[str, Any]:
-        return _reveal(_exp_dir(name))
+    def reveal_experiment(run: RunDep) -> dict[str, Any]:
+        return _reveal(_exp_dir(run))
 
     def _visible_sample_json(run: Path, file: str = "visible_sample.json") -> dict[str, Any] | None:
         """The parsed exports/visible_sample.json (or ``file``); None if absent, unreadable or not
@@ -1661,8 +1714,8 @@ def create_app(
         return data if isinstance(data, dict) else None
 
     @app.get("/api/experiments/{name}")
-    def experiment_info(name: str) -> dict[str, Any]:
-        r = _open(name)
+    def experiment_info(run: RunDep) -> dict[str, Any]:
+        r = _open(run)
         info = r.info()
         info["size_bytes"] = _dir_size(r.path)
         exp_dir = r.path / "exports"
@@ -1692,17 +1745,17 @@ def create_app(
         return info
 
     @app.get("/api/experiments/{name}/timeline")
-    def experiment_timeline(name: str) -> dict[str, list[Any]]:
-        return _open(name).timeline()
+    def experiment_timeline(run: RunDep) -> dict[str, list[Any]]:
+        return _open(run).timeline()
 
     @app.get("/api/experiments/{name}/control")
-    def experiment_control(name: str) -> dict[str, Any]:
+    def experiment_control(run: RunDep) -> dict[str, Any]:
         """The run's control/telemetry trace (RF power etc.) on the relative time axis, aligned to
         the thermal frames by frame_id, for overlaying on the ROI-temperature plot. Reads the
         frame-stamped ``control`` events from events.json; empty when the run has none."""
         from flir_research_interface.analysis.control_series import control_series_from_rows
 
-        reader = _open(name)
+        reader = _open(run)
         events_path = reader.path / "events.json"
         if not events_path.is_file():
             return {"t_s": []}
@@ -1714,13 +1767,13 @@ def create_app(
         return control_series_from_rows(rows, reader.timeline())
 
     @app.patch("/api/experiments/{name}/metadata")
-    def experiment_metadata_patch(name: str, req: MetadataPatch) -> dict[str, Any]:
+    def experiment_metadata_patch(run: RunDep, req: MetadataPatch) -> dict[str, Any]:
         """Edit operator fields after the fact; camera/conversion blocks stay as recorded."""
         from flir_research_interface.recording.metadata import patch_experiment_metadata
 
         if not isinstance(req.experiment, dict):
             raise HTTPException(400, "experiment must be an object of field: value")
-        d = _exp_dir(name)
+        d = _exp_dir(run)
         try:
             return patch_experiment_metadata(d, req.experiment)
         except FileNotFoundError as exc:
@@ -1729,7 +1782,7 @@ def create_app(
             raise HTTPException(400, str(exc)) from exc
 
     @app.put("/api/experiments/{name}/rois")
-    def experiment_rois_put(name: str, req: RoisRequest) -> dict[str, Any]:
+    def experiment_rois_put(run: RunDep, req: RoisRequest) -> dict[str, Any]:
         """Persist the ROIs from playback into the recording so derived exports can match them.
 
         The store's counts are never touched — only ``metadata.json['rois']``. Geometry and
@@ -1737,7 +1790,7 @@ def create_app(
         """
         from flir_research_interface.recording.metadata import set_experiment_rois
 
-        d = _exp_dir(name)
+        d = _exp_dir(run)
         rois = _rois_with_labels(req.rois)
         try:
             set_experiment_rois(d, rois)
@@ -1746,11 +1799,11 @@ def create_app(
         return {"rois": len(rois)}
 
     @app.put("/api/experiments/{name}/masks")
-    def experiment_masks_put(name: str, req: MasksRequest) -> dict[str, Any]:
+    def experiment_masks_put(run: RunDep, req: MasksRequest) -> dict[str, Any]:
         """Persist the run's region masks edited in playback (``metadata.json['masks']`` only)."""
         from flir_research_interface.recording.metadata import set_experiment_masks
 
-        d = _exp_dir(name)
+        d = _exp_dir(run)
         masks = _parsed_masks(req.masks)
         try:
             set_experiment_masks(d, masks)
@@ -1760,7 +1813,7 @@ def create_app(
 
     @app.post("/api/experiments/{name}/export/derived")
     async def export_derived_route(
-        name: str, video: bool = True, visible_adjusted: bool = False
+        run: RunDep, video: bool = True, visible_adjusted: bool = False
     ) -> dict[str, Any]:
         """Start (or return) a background regenerate of the ROI-dependent derived files.
 
@@ -1780,8 +1833,10 @@ def create_app(
         """
         from flir_research_interface.analysis.thermal_video import render_thermal_video
 
-        _exp_dir(name)  # 404 early if the run is gone
-        existing: dict[str, Any] | None = app.state.derived_jobs.get(name)
+        ref, _d = _resolve(run)  # 404 early if the run is gone
+        key = ref.key
+        run = _pinned(ref)  # the background work re-resolves this exact run, never a lookup
+        existing: dict[str, Any] | None = app.state.derived_jobs.get(key)
         if existing is not None and existing["state"] == "running":
             if visible_adjusted and not existing.get("visible_adjusted_requested"):
                 raise HTTPException(409, "a derived regenerate without the adjusted analysis is "
@@ -1790,12 +1845,12 @@ def create_app(
         job: dict[str, Any] = {"state": "running", "step": "starting", "done": 0, "total": 0,
                                "exports": None, "error": None, "visible_adjusted": None,
                                "visible_adjusted_requested": visible_adjusted}
-        app.state.derived_jobs[name] = job
+        app.state.derived_jobs[key] = job
 
         def _work() -> list[str]:
             """Regenerate; returns the smart ROI series that failed to compute (the other
             derived files are still written, with that ROI's columns blank)."""
-            exp_dir = _exp_dir(name)
+            exp_dir = _exp_dir(run)
             job["step"] = "smart roi series"
             smart_failed = _refresh_smart_rois(exp_dir)
             job["step"] = "roi series"
@@ -1829,12 +1884,12 @@ def create_app(
 
         async def _job() -> None:
             try:
-                lock = app.state.render_locks.get(name)
+                lock = app.state.render_locks.get(key)
                 if lock.locked():  # a post-stop render (or another regenerate) is finishing first
                     job["step"] = "waiting for the current render"
                 async with lock:
                     smart_failed = await run_in_threadpool(_work)
-                job["exports"] = experiment_info(name)["exports"]
+                job["exports"] = experiment_info(run)["exports"]
                 if smart_failed:  # never "done" with a smart series missing
                     job["step"] = "smart roi series failed"
                     job["error"] = (
@@ -1848,7 +1903,7 @@ def create_app(
                 job["state"] = "done"
             except Exception as exc:  # noqa: BLE001 - surface the failure to the poller
                 job["state"], job["error"] = "error", str(exc)
-                logger.exception("derived regenerate failed for %s", name)
+                logger.exception("derived regenerate failed for %s", key)
 
         task = asyncio.create_task(_job())
         app.state.render_tasks.add(task)
@@ -1856,12 +1911,12 @@ def create_app(
         return job
 
     @app.get("/api/experiments/{name}/export/derived/status")
-    def export_derived_status(name: str) -> dict[str, Any]:
+    def export_derived_status(run: RunDep) -> dict[str, Any]:
         """Progress of the current/last derived regenerate for this run (see the POST)."""
-        return app.state.derived_jobs.get(name) or {"state": "idle"}
+        return app.state.derived_jobs.get(_job_key(run)) or {"state": "idle"}
 
     @app.post("/api/experiments/{name}/export/media")
-    async def export_media_route(name: str, req: MediaRequest) -> dict[str, Any]:
+    async def export_media_route(run: RunDep, req: MediaRequest) -> dict[str, Any]:
         """Start a background media-export render (MP4/GIF of a window with overlays).
 
         Returns a job record immediately; poll ``/export/media/status``. When ``rois`` is given the
@@ -1870,15 +1925,17 @@ def create_app(
         from flir_research_interface.analysis.media import MediaOptions, render_clip
         from flir_research_interface.recording.metadata import set_experiment_rois
 
-        _exp_dir(name)
+        ref, d = _resolve(run)
+        key = ref.key
+        run = _pinned(ref)
         if req.rois is not None:
-            set_experiment_rois(_exp_dir(name), _rois_with_labels(req.rois))
-        existing: dict[str, Any] | None = app.state.media_jobs.get(name)
+            set_experiment_rois(d, _rois_with_labels(req.rois))
+        existing: dict[str, Any] | None = app.state.media_jobs.get(key)
         if existing is not None and existing["state"] == "running":
             return existing
         job: dict[str, Any] = {"state": "running", "step": "starting", "done": 0, "total": 0,
                                "file": None, "error": None}
-        app.state.media_jobs[name] = job
+        app.state.media_jobs[key] = job
         opts = MediaOptions(
             start=req.start, stop=req.stop, step=req.step, scale=req.scale, speed=req.speed,
             fps=req.fps, fmt=req.fmt, with_rois=req.with_rois, frame_stats=req.frame_stats,
@@ -1892,11 +1949,11 @@ def create_app(
         def _work() -> dict[str, Any]:
             def _cb(done: int, total: int) -> None:
                 job["step"], job["done"], job["total"] = "encoding", done, total
-            return render_clip(_open(name), opts, on_progress=_cb)
+            return render_clip(_open(run), opts, on_progress=_cb)
 
         async def _job() -> None:
             try:
-                async with app.state.render_locks.get(name):
+                async with app.state.render_locks.get(key):
                     info = await run_in_threadpool(_work)
                 job["file"] = {
                     "name": info["name"], "bytes": info["bytes"], "note": info.get("note"),
@@ -1906,7 +1963,7 @@ def create_app(
                 job["state"], job["error"] = "error", str(exc)
             except Exception as exc:  # noqa: BLE001
                 job["state"], job["error"] = "error", str(exc)
-                logger.exception("media export failed for %s", name)
+                logger.exception("media export failed for %s", key)
 
         task = asyncio.create_task(_job())
         app.state.render_tasks.add(task)
@@ -1914,8 +1971,8 @@ def create_app(
         return job
 
     @app.get("/api/experiments/{name}/export/media/status")
-    def export_media_status(name: str) -> dict[str, Any]:
-        return app.state.media_jobs.get(name) or {"state": "idle"}
+    def export_media_status(run: RunDep) -> dict[str, Any]:
+        return app.state.media_jobs.get(_job_key(run)) or {"state": "idle"}
 
     def _range_ready(reader: ExperimentReader) -> bool:
         from flir_research_interface.analysis.media import _RANGE_CACHE
@@ -1924,37 +1981,40 @@ def create_app(
         return str(reader.path) in _RANGE_CACHE or load_range(reader) is not None
 
     @app.post("/api/experiments/{name}/range/compute")
-    async def compute_range_route(name: str) -> dict[str, Any]:
+    async def compute_range_route(run: RunDep) -> dict[str, Any]:
         """Precompute the display temperature range — the whole-run frame scan that dominates a
         preview's load time — as a background job with progress, so the editor can show a real
         percentage. Idempotent: returns ``done`` at once when the range is already cached/persisted.
         """
         from flir_research_interface.analysis.media import _cached_range
 
-        reader = _open(name)
+        ref, _d = _resolve(run)
+        key = ref.key
+        run = _pinned(ref)
+        reader = _open(run)
         n = reader.n_frames
         if _range_ready(reader):
             return {"state": "done", "done": n, "total": n, "error": None}
-        existing: dict[str, Any] | None = app.state.range_jobs.get(name)
+        existing: dict[str, Any] | None = app.state.range_jobs.get(key)
         if existing is not None and existing["state"] == "running":
             return existing
         job: dict[str, Any] = {"state": "running", "done": 0, "total": n, "error": None}
-        app.state.range_jobs[name] = job
+        app.state.range_jobs[key] = job
 
         def _work() -> None:
             def _cb(done: int, total: int) -> None:
                 job["done"], job["total"] = done, total
 
-            _cached_range(_open(name), on_progress=_cb)
+            _cached_range(_open(run), on_progress=_cb)
 
         async def _job() -> None:
             try:
-                async with app.state.render_locks.get(name):
+                async with app.state.render_locks.get(key):
                     await run_in_threadpool(_work)
                 job["done"], job["state"] = job["total"], "done"
             except Exception as exc:  # noqa: BLE001
                 job["state"], job["error"] = "error", str(exc)
-                logger.exception("range compute failed for %s", name)
+                logger.exception("range compute failed for %s", key)
 
         task = asyncio.create_task(_job())
         app.state.render_tasks.add(task)
@@ -1962,10 +2022,10 @@ def create_app(
         return job
 
     @app.get("/api/experiments/{name}/range/status")
-    def range_status(name: str) -> dict[str, Any]:
-        reader = _open(name)
+    def range_status(run: RunDep) -> dict[str, Any]:
+        reader = _open(run)
         n = reader.n_frames
-        job: dict[str, Any] | None = app.state.range_jobs.get(name)
+        job: dict[str, Any] | None = app.state.range_jobs.get(_job_key(run))
         if job is not None:
             return job
         if _range_ready(reader):
@@ -1974,7 +2034,7 @@ def create_app(
 
     @app.get("/api/experiments/{name}/export/media/preview")
     async def export_media_preview(
-        name: str, index: int, scale: int = Query(default=1, ge=1, le=4),
+        run: RunDep, index: int, scale: int = Query(default=1, ge=1, le=4),
         with_rois: bool = True, frame_stats: bool = False, timestamp: bool = True,
         colorbar: bool = True, title: str | None = None,
         plot_roi: int | None = None,
@@ -1997,14 +2057,14 @@ def create_app(
                             visible_opacity=max(0.0, min(1.0, visible_opacity)), palette=palette,
                             start=start, stop=stop, rf_notch=rf_notch)
         try:
-            png = await run_in_threadpool(compose_preview, _open(name), opts, index)
+            png = await run_in_threadpool(compose_preview, _open(run), opts, index)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         return Response(content=png, media_type="image/png")
 
     @app.get("/api/experiments/{name}/series")
     async def experiment_series(
-        name: str, rois: str, valid: str | None = None, max_points: int = 0
+        run: RunDep, rois: str, valid: str | None = None, max_points: int = 0
     ) -> dict[str, Any]:
         """ROI values on every frame of a recording (spots: value; areas: min/max/mean/std/n).
         ``valid=lo,hi`` (°C) applies segmentation: pixels outside the range are ignored."""
@@ -2021,7 +2081,7 @@ def create_app(
                 valid_c = (float(lo_s), float(hi_s))
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail="valid must be 'lo,hi'") from exc
-        r = _open(name)
+        r = _open(run)
         stride = 1
         if max_points and r.n_frames > max_points:
             stride = -(-r.n_frames // max_points)  # ceil; keeps ~max_points plot points
@@ -2033,11 +2093,11 @@ def create_app(
 
     @app.get("/api/experiments/{name}/frames")
     def experiment_frame_block(
-        name: str, start: int = 0, count: int = Query(32, ge=1, le=256), rf_notch: bool = False
+        run: RunDep, start: int = 0, count: int = Query(32, ge=1, le=256), rf_notch: bool = False
     ) -> Response:
         """A run of frames in one response: repeated [uint32 length][frame message]. One request
         instead of one per frame keeps playback smooth (block Zarr reads are ~30x cheaper)."""
-        r = _open(name)
+        r = _open(run)
         if not 0 <= start < r.n_frames:
             raise HTTPException(404, f"frame start {start} out of range [0, {r.n_frames})")
         stop = min(start + count, r.n_frames)
@@ -2067,8 +2127,8 @@ def create_app(
         )
 
     @app.get("/api/experiments/{name}/frames/{index}")
-    def experiment_frame(name: str, index: int, rf_notch: bool = False) -> Response:
-        r = _open(name)
+    def experiment_frame(run: RunDep, index: int, rf_notch: bool = False) -> Response:
+        r = _open(run)
         try:
             frame = r.frame(index)
         except IndexError as exc:
@@ -2108,7 +2168,7 @@ def create_app(
         )
 
     @app.get("/api/experiments/{name}/export/series.csv")
-    async def export_series_csv(name: str, rois: str) -> Response:
+    async def export_series_csv(run: RunDep, rois: str) -> Response:
         from flir_research_interface.analysis.export import series_csv
         from flir_research_interface.analysis.series import parse_rois
 
@@ -2116,15 +2176,15 @@ def create_app(
             parsed = parse_rois(rois)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        r = _open(name)
+        r = _open(run)
         text = await run_in_threadpool(series_csv, r, parsed)
         return _download(text, "text/csv", f"{labels_mod.export_label(r.path)}_series.csv")
 
     @app.get("/api/experiments/{name}/frames/{index}/export")
-    async def export_frame(name: str, index: int, format: str = "csv") -> Response:
+    async def export_frame(run: RunDep, index: int, format: str = "csv") -> Response:
         from flir_research_interface.analysis.export import frame_bytes
 
-        r = _open(name)
+        r = _open(run)
         try:
             data, media, filename = await run_in_threadpool(frame_bytes, r, index, format)
         except ValueError as exc:
@@ -2134,15 +2194,15 @@ def create_app(
         return _download(data, media, filename)
 
     @app.post("/api/experiments/{name}/export/hdf5")
-    async def export_hdf5_route(name: str) -> dict[str, Any]:
+    async def export_hdf5_route(run: RunDep) -> dict[str, Any]:
         from flir_research_interface.analysis.export import export_hdf5
 
-        return await run_in_threadpool(export_hdf5, _open(name))
+        return await run_in_threadpool(export_hdf5, _open(run))
 
     @app.delete("/api/experiments/{name}")
-    async def delete_experiment(name: str) -> dict[str, str]:
+    async def delete_experiment(run: RunDep) -> dict[str, str]:
         """Remove a run folder for good (no trash: the acquisition Mac is short of disk)."""
-        d = _exp_dir(name)
+        d = _exp_dir(run)
         rec = recorder()
         if (
             rec is not None
@@ -2152,28 +2212,28 @@ def create_app(
             raise HTTPException(409, "this run is being recorded right now; stop it first")
         await run_in_threadpool(shutil.rmtree, d)
         logger.warning("deleted experiment %s", d)
-        return {"deleted": name}
+        return {"deleted": run.name}
 
     @app.post("/api/experiments/{name}/export/report")
-    async def export_report_route(name: str) -> dict[str, Any]:
+    async def export_report_route(run: RunDep) -> dict[str, Any]:
         from flir_research_interface.analysis.report import write_report
 
-        return await run_in_threadpool(write_report, _open(name))
+        return await run_in_threadpool(write_report, _open(run))
 
     @app.get("/api/experiments/{name}/report.pdf")
-    def experiment_report(name: str) -> Response:
+    def experiment_report(run: RunDep) -> Response:
 
-        d = _exp_dir(name)
+        d = _exp_dir(run)
         path = d / "exports" / "report.pdf"
         if not path.is_file():
             raise HTTPException(404, "report not generated yet")
         return _named_file(path, d, "report.pdf", "application/pdf")
 
     @app.post("/api/experiments/{name}/export/frames")
-    async def export_frames_route(name: str, req: FrameRangeRequest) -> dict[str, Any]:
+    async def export_frames_route(run: RunDep, req: FrameRangeRequest) -> dict[str, Any]:
         from flir_research_interface.analysis.export import export_frame_range
 
-        r = _open(name)
+        r = _open(run)
         try:
             return await run_in_threadpool(
                 export_frame_range, r, req.start, req.stop, req.step, req.format
@@ -2182,12 +2242,12 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/experiments/{name}/export/thermal-video")
-    async def export_thermal_video_route(name: str, rois: bool = False) -> dict[str, Any]:
+    async def export_thermal_video_route(run: RunDep, rois: bool = False) -> dict[str, Any]:
         """Re-render the viewing video; ``?rois=true`` renders the ROI-annotated version."""
         from flir_research_interface.analysis.thermal_video import render_thermal_video
 
         try:
-            reader = _open(name)
+            reader = _open(run)
             return await run_in_threadpool(lambda: render_thermal_video(reader, with_rois=rois))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -2195,33 +2255,33 @@ def create_app(
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.get("/api/experiments/{name}/exports/{file}")
-    def experiment_export_file(name: str, file: str) -> Response:
+    def experiment_export_file(run: RunDep, file: str) -> Response:
         """Any derived file from the run's exports/ folder (PNG, MP4, CSV, PDF, zip, TIFF…)."""
 
         if "/" in file or "\\" in file or file.startswith("."):
             raise HTTPException(400, "invalid file name")
-        d = _exp_dir(name)
+        d = _exp_dir(run)
         path = d / "exports" / file
         if not path.is_file():
             raise HTTPException(404, f"exports/{file} not found")
         return _named_file(path, d, file)
 
     @app.get("/api/experiments/{name}/exports/clips/{file}")
-    def experiment_clip_file(name: str, file: str) -> Response:
+    def experiment_clip_file(run: RunDep, file: str) -> Response:
         """A media-export clip from the run's exports/clips/ folder (MP4 / GIF)."""
         from starlette.responses import FileResponse
 
         if "/" in file or "\\" in file or file.startswith("."):
             raise HTTPException(400, "invalid file name")
-        path = _exp_dir(name) / "exports" / "clips" / file
+        path = _exp_dir(run) / "exports" / "clips" / file
         if not path.is_file():
             raise HTTPException(404, f"clips/{file} not found")
         return FileResponse(path, headers={"Accept-Ranges": "bytes"})
 
     @app.get("/api/experiments/{name}/thermal_preview.mp4")
-    def experiment_thermal_video(name: str) -> Response:
+    def experiment_thermal_video(run: RunDep) -> Response:
 
-        d = _exp_dir(name)
+        d = _exp_dir(run)
         path = d / "exports" / "thermal_preview.mp4"
         if not path.is_file():
             raise HTTPException(404, "thermal preview video not rendered yet")
@@ -2246,8 +2306,8 @@ def create_app(
         return (copy, full_range.FULL) if copy else (run / file, full_range.RAW_UNTAGGED)
 
     @app.get("/api/experiments/{name}/visible.mp4")
-    def experiment_visible_video(name: str) -> Response:
-        d = _exp_dir(name)
+    def experiment_visible_video(run: RunDep) -> Response:
+        d = _exp_dir(run)
         if not (d / "visible.mp4").is_file():
             raise HTTPException(404, "this recording has no visible video")
         path, state = _visible_served(d, "visible.mp4")
@@ -2256,13 +2316,13 @@ def create_app(
         return resp
 
     @app.get("/api/experiments/{name}/visible/{index}")
-    def experiment_visible_segment(name: str, index: int) -> Response:
+    def experiment_visible_segment(run: RunDep, index: int) -> Response:
         """One visible segment: 0 is visible.mp4, k > 0 the reconnect after the k-th stream loss."""
         from starlette.responses import FileResponse
 
         from flir_research_interface.visible.recorder import segment_file
 
-        d = _exp_dir(name)
+        d = _exp_dir(run)
         file = segment_file(index) if index >= 0 else None
         if file is None or not (d / file).is_file():
             raise HTTPException(404, f"this recording has no visible segment {index}")
@@ -2273,18 +2333,18 @@ def create_app(
         )
 
     @app.get("/api/experiments/{name}/preview.png")
-    def experiment_preview(name: str, request: Request) -> Response:
-        return _png_response(_exp_dir(name) / "preview.png", request)
+    def experiment_preview(run: RunDep, request: Request) -> Response:
+        return _png_response(_exp_dir(run) / "preview.png", request)
 
     @app.get("/api/experiments/{name}/keyframes.png")
-    def experiment_keyframes(name: str, request: Request) -> Response:
-        return _png_response(_exp_dir(name) / "keyframes.png", request)
+    def experiment_keyframes(run: RunDep, request: Request) -> Response:
+        return _png_response(_exp_dir(run) / "keyframes.png", request)
 
     @app.post("/api/experiments/{name}/previews")
-    async def experiment_regenerate_previews(name: str) -> dict[str, Any]:
+    async def experiment_regenerate_previews(run: RunDep) -> dict[str, Any]:
         from flir_research_interface.analysis.preview import generate_previews
 
-        r = _open(name)
+        r = _open(run)
         try:
             return await run_in_threadpool(generate_previews, r.path)
         except ValueError as exc:

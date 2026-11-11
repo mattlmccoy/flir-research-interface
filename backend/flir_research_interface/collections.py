@@ -27,6 +27,7 @@ __all__ = [
     "RUN_LIKE_RE",
     "EntryKind",
     "RunRef",
+    "RunQuery",
     "RootScan",
     "collection_name_error",
     "run_name_error",
@@ -81,6 +82,15 @@ class RunRef:
         if any(parent == Path(r).resolve() for r in roots):
             return cls(None, run_dir.name)
         return cls(run_dir.parent.name, run_dir.name)
+
+
+@dataclass(frozen=True)
+class RunQuery:
+    """A request's run address: ``collection`` is None when the caller omitted it (legacy unique
+    lookup), "" for the top level, or a collection name."""
+
+    name: str
+    collection: str | None
 
 
 def classify_entry(path: Path) -> EntryKind:

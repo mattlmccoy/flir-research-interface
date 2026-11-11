@@ -2,8 +2,8 @@
 per-frame playback overlays. Registered by ``create_app``.
 
 Jobs follow the derived-export pattern: a progress record in ``app.state.smart_jobs`` (keyed by
-run name and ROI id), work in the threadpool under the run's ``render_locks`` entry so it never
-races a post-stop render, a regenerate or a move of the same run.
+the run's ``RunRef.key`` and ROI id), work in the threadpool under the run's ``render_locks``
+entry so it never races a post-stop render, a regenerate or a move of the same run.
 """
 
 from __future__ import annotations
@@ -27,6 +27,8 @@ from flir_research_interface.analysis.smart_series import (
     series_payload,
     smart_series_stale,
 )
+from flir_research_interface.api.collections_routes import RunDep
+from flir_research_interface.collections import RunQuery
 from flir_research_interface.playback.reader import ExperimentReader
 
 logger = logging.getLogger(__name__)
@@ -64,13 +66,14 @@ def _run_job(job: dict[str, Any], reader: ExperimentReader, spec: SmartRoiSpec) 
 
 
 def compute_stored_smart_rois(
-    app: FastAPI, exp_dir: Path, *, only_missing_or_stale: bool = False
+    app: FastAPI, exp_dir: Path, *, key: str, only_missing_or_stale: bool = False
 ) -> list[str]:
     """Compute every stored smart ROI's series, publishing progress in ``app.state.smart_jobs``.
 
     Post-stop (threadpool, caller holds the run's render lock) it computes all of them; the
     derived regenerate passes ``only_missing_or_stale`` so a fresh series is kept. Returns one
-    ``"smart ROI <id>: <error>"`` line per ROI whose compute failed (empty when all succeeded)."""
+    ``"smart ROI <id>: <error>"`` line per ROI whose compute failed (empty when all succeeded).
+    ``key`` is the run's ``RunRef.key`` (the caller derives it from ``exp_dir``)."""
     reader = ExperimentReader(exp_dir)
     failed: list[str] = []
     for spec in stored_smart_specs(reader):
@@ -79,20 +82,24 @@ def compute_stored_smart_rois(
             if data is not None and not smart_series_stale(reader, spec, data):
                 continue
         job = _new_job(reader.n_frames)
-        app.state.smart_jobs[(exp_dir.name, spec.id)] = job
+        app.state.smart_jobs[(key, spec.id)] = job
         _run_job(job, reader, spec)
         if job["state"] == "error":
             failed.append(f"smart ROI {spec.id}: {job['error']}")
     return failed
 
 
-def register_smart_roi_routes(app: FastAPI, exp_dir: Callable[[str], Path]) -> None:
-    app.state.smart_jobs = {}  # (run name, roi id) -> progress record
+def register_smart_roi_routes(
+    app: FastAPI,
+    resolve: Callable[[RunQuery], Path],
+    job_key: Callable[[RunQuery], str],
+) -> None:
+    app.state.smart_jobs = {}  # (RunRef.key, roi id) -> progress record
     cache: dict[Path, tuple[int, dict[str, Any]]] = {}
     cache_lock = threading.Lock()
 
-    def _load(name: str, roi_id: int) -> dict[str, Any]:
-        d = exp_dir(name)
+    def _load(run: RunQuery, roi_id: int) -> dict[str, Any]:
+        d = resolve(run)
         path = series_path(d, roi_id)
         try:
             mtime = path.stat().st_mtime_ns
@@ -123,12 +130,13 @@ def register_smart_roi_routes(app: FastAPI, exp_dir: Callable[[str], Path]) -> N
         raise HTTPException(404, f"run has no ROI {roi_id}")
 
     @app.post("/api/experiments/{name}/smart-roi/{roi_id}/compute")
-    async def smart_roi_compute(name: str, roi_id: int) -> dict[str, Any]:
+    async def smart_roi_compute(run: RunDep, roi_id: int) -> dict[str, Any]:
         """Start (or return) the full-rate tracker job for a stored smart ROI; poll ``/status``.
         Pair with ``PUT /rois`` after editing the ROI in playback."""
-        reader = ExperimentReader(exp_dir(name))
+        reader = ExperimentReader(resolve(run))
         spec = _spec(reader, roi_id)
-        key = (name, roi_id)
+        run_key = job_key(run)
+        key = (run_key, roi_id)
         existing: dict[str, Any] | None = app.state.smart_jobs.get(key)
         if existing is not None and existing["state"] == "running":
             return existing
@@ -136,7 +144,7 @@ def register_smart_roi_routes(app: FastAPI, exp_dir: Callable[[str], Path]) -> N
         app.state.smart_jobs[key] = job
 
         async def _job() -> None:
-            async with app.state.render_locks.get(name):
+            async with app.state.render_locks.get(run_key):
                 await run_in_threadpool(_run_job, job, reader, spec)
 
         task = asyncio.create_task(_job())
@@ -145,13 +153,13 @@ def register_smart_roi_routes(app: FastAPI, exp_dir: Callable[[str], Path]) -> N
         return job
 
     @app.get("/api/experiments/{name}/smart-roi/{roi_id}/status")
-    def smart_roi_status(name: str, roi_id: int) -> dict[str, Any]:
+    def smart_roi_status(run: RunDep, roi_id: int) -> dict[str, Any]:
         """``{state, done, total, error}``; ``done`` when a stored series exists (e.g. after a
         restart), ``idle`` when nothing was computed."""
-        job: dict[str, Any] | None = app.state.smart_jobs.get((name, roi_id))
+        job: dict[str, Any] | None = app.state.smart_jobs.get((job_key(run), roi_id))
         if job is not None:
             return job
-        data = load_smart_series(exp_dir(name), roi_id)
+        data = load_smart_series(resolve(run), roi_id)
         if data is not None:
             n = int(data["n_frames"])
             return {"state": "done", "done": n, "total": n, "error": None}
@@ -159,27 +167,27 @@ def register_smart_roi_routes(app: FastAPI, exp_dir: Callable[[str], Path]) -> N
 
     @app.get("/api/experiments/{name}/smart-roi/{roi_id}")
     def smart_roi_series(
-        name: str, roi_id: int, max_points: int = Query(default=2000, ge=1, le=200_000)
+        run: RunDep, roi_id: int, max_points: int = Query(default=2000, ge=1, le=200_000)
     ) -> dict[str, Any]:
         """The stored per-frame series, downsampled to ``max_points`` for the plot (null gaps).
         ``stale`` is true when the run's ROI or frame count changed since it was computed."""
-        data = _load(name, roi_id)
+        data = _load(run, roi_id)
         out = series_payload(data, max_points)
-        out["stale"] = _stale(name, roi_id, data)
+        out["stale"] = _stale(run, roi_id, data)
         return out
 
     @app.get("/api/experiments/{name}/smart-roi/{roi_id}/overlay")
     def smart_roi_overlay(
-        name: str,
+        run: RunDep,
         roi_id: int,
         start: int = Query(default=0, ge=0),
         count: int = Query(default=1, ge=1, le=1000),
     ) -> list[dict[str, Any]]:
         """Stored overlays for frame INDICES ``[start, start + count)`` (clipped to the run)."""
-        return overlay_window(_load(name, roi_id), roi_id, start, count)
+        return overlay_window(_load(run, roi_id), roi_id, start, count)
 
-    def _stale(name: str, roi_id: int, data: dict[str, Any]) -> bool:
-        reader = ExperimentReader(exp_dir(name))
+    def _stale(run: RunQuery, roi_id: int, data: dict[str, Any]) -> bool:
+        reader = ExperimentReader(resolve(run))
         try:
             spec = _spec(reader, roi_id)
         except HTTPException:
