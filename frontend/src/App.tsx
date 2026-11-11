@@ -12,7 +12,7 @@ import type { PaletteName } from "./lib/palette.ts";
 import type { Range, ScaleMode } from "./lib/scale.ts";
 import { DEFAULT_LAYOUT, layoutHasKey, layoutReducer, loadLayout, saveLayout } from "./lib/layout.ts";
 import { runName, type RunKey } from "./lib/runKey.ts";
-import { migrateRunScopes } from "./lib/scopeMigration.ts";
+import { createRunScopeMigrator, openRun } from "./lib/scopeMigration.ts";
 import { usePresets } from "./lib/usePresets.ts";
 import { displayFromView, presetMarker, startupRestore, thermalFromInfo, type ViewDisplay } from "./lib/presets.ts";
 import { isNeutral } from "./lib/visibleAdjust.ts";
@@ -89,19 +89,15 @@ export function App() {
   const [openTitle, setOpenTitle] = useState<string | null>(null);  // display name, if renamed
   const [layout, dispatch] = useReducer(layoutReducer, DEFAULT_LAYOUT, () => loadLayout(storage));
   useEffect(() => { saveLayout(storage, layout); }, [layout]);
-  // Once per load: per-run browser state keyed `exp.<name>` moves to `exp.<collection>/<name>` for
-  // runs that now live in a collection (lib/scopeMigration.ts). Idempotent; a failed fetch skips it.
-  useEffect(() => {
-    if (!storage) return;
-    let alive = true;
-    api.runLocations().then((locs) => {
-      if (!alive) return;
-      const r = migrateRunScopes(storage, locs);
-      if (Object.keys(r.rename).length) dispatch({ type: "renameSmartViewScopes", rename: r.rename });
-      if (r.ambiguous.length) console.warn(`Saved ROI/mask state left under the bare run name (the name is in more than one collection): ${r.ambiguous.join(", ")}`);
-    }).catch(() => undefined);
-    return () => { alive = false; };
-  }, []);
+  // Per-run browser state keyed `exp.<name>` moves to `exp.<collection>/<name>` for runs that now
+  // live in a collection (lib/scopeMigration.ts). Warmed up on load; every run open awaits it first
+  // (a failed fetch is retried there), so a run's new scope is never seeded ahead of its old state.
+  const migrator = useMemo(() => storage
+    ? createRunScopeMigrator(() => api.runLocations(), storage,
+      (rename) => dispatch({ type: "renameSmartViewScopes", rename }),
+      (names) => console.warn(`Saved ROI/mask state left under the bare run name (the name is in more than one collection): ${names.join(", ")}`))
+    : { ensure: () => Promise.resolve() }, []);
+  useEffect(() => { migrator.ensure().catch(() => undefined); }, [migrator]);  // warm-up; opening retries
   const presets = usePresets();
   // Startup: each part this browser had nothing stored for (palette/range, visible sliders) starts
   // from the last applied preset. Nothing is sent to the camera. A part already changed while the
@@ -441,7 +437,7 @@ export function App() {
   }
   if (page === "experiments") {
     return <StudioFrame layout={layout} page topbar={topbar} statusbar={statusbar}
-      center={<ExperimentsPage onOpen={(key, title) => { setOpenExp(key); setOpenTitle(title ?? null); setPage("playback"); }}/>} />;
+      center={<ExperimentsPage onOpen={(key, title) => openRun(key, migrator, (k) => { setOpenExp(k); setOpenTitle(title ?? null); setPage("playback"); })}/>} />;
   }
   if (page === "playback" && openExp) {
     return <PlaybackPage name={openExp} layout={layout} dispatch={dispatch} topbar={topbar}

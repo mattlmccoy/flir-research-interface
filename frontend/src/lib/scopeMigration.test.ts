@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { migrateRunScopes } from "./scopeMigration.ts";
+import { createRunScopeMigrator, migrateRunScopes, openRun, type RunLocation } from "./scopeMigration.ts";
 import { saveRois, loadRois } from "./roi.ts";
 import { EMPTY_MASKS, saveMasks } from "./mask.ts";
 import { offsetsKey, saveOffsets } from "./labelDrag.ts";
@@ -107,4 +107,74 @@ test("other scopes and other runs are untouched", () => {
   const r = migrateRunScopes(st, [{ collection: "mattmccoy", name: RUN }]);
   assert.deepEqual(r.moved, []);
   assert.deepEqual(snapshot(st), before);
+});
+
+// -- the migrator: when the re-key runs relative to opening a run (fix round 1) --
+
+function deferred<T>() {
+  let resolve!: (v: T) => void, reject!: (e: unknown) => void;
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
+test("migrator: concurrent ensure() calls share one fetch", async () => {
+  const st = memStorage();
+  seed(st, RUN);
+  const d = deferred<RunLocation[]>();
+  let fetches = 0;
+  const renames: Record<string, string>[] = [];
+  const m = createRunScopeMigrator(() => { fetches++; return d.promise; }, st, (r) => renames.push(r));
+  const a = m.ensure(), b = m.ensure();
+  d.resolve([{ collection: "mattmccoy", name: RUN }]);
+  await Promise.all([a, b]);
+  assert.equal(fetches, 1);
+  assert.deepEqual(renames, [{ [`exp.${RUN}`]: `exp.mattmccoy/${RUN}` }]);
+  assert.equal(st.getItem(`fri.rois.exp.${RUN}`), null, "migrated");
+});
+
+test("migrator: a rejected fetch clears the memo, so the next ensure() retries and migrates", async () => {
+  const st = memStorage();
+  seed(st, RUN);
+  let calls = 0;
+  const m = createRunScopeMigrator(async () => {
+    calls++;
+    if (calls === 1) throw new Error("operator down");
+    return [{ collection: "mattmccoy", name: RUN }];
+  }, st, () => undefined);
+  await assert.rejects(m.ensure(), /operator down/);
+  assert.notEqual(st.getItem(`fri.rois.exp.${RUN}`), null, "nothing moved on failure");
+  await m.ensure();
+  assert.equal(calls, 2);
+  assert.equal(st.getItem(`fri.rois.exp.${RUN}`), null);
+  assert.notEqual(st.getItem(`fri.rois.exp.mattmccoy/${RUN}`), null);
+});
+
+test("openRun: the migration completes before the run is opened; a failure does not open it", async () => {
+  const st = memStorage();
+  seed(st, RUN);
+  const m = createRunScopeMigrator(async () => [{ collection: "mattmccoy", name: RUN }], st, () => undefined);
+  let seenAtOpen: string | null | undefined;
+  await openRun(`mattmccoy/${RUN}`, m, () => { seenAtOpen = st.getItem(`fri.rois.exp.mattmccoy/${RUN}`); });
+  assert.ok(seenAtOpen, "the new scope already holds the old ROIs when the run opens");
+
+  const failing = createRunScopeMigrator(async () => { throw new Error("operator down"); }, memStorage(), () => undefined);
+  let opened = false;
+  await assert.rejects(openRun("mattmccoy/x", failing, () => { opened = true; }), /operator down/);
+  assert.equal(opened, false);
+});
+
+test("migrator: a backend move after the first ensure() is re-keyed by the next one", async () => {
+  const st = memStorage();
+  seed(st, RUN);
+  let locs: RunLocation[] = [{ collection: null, name: RUN }];
+  const renames: Record<string, string>[] = [];
+  const m = createRunScopeMigrator(async () => locs, st, (r) => renames.push(r));
+  await m.ensure();
+  assert.notEqual(st.getItem(`fri.rois.exp.${RUN}`), null, "top level: unchanged");
+  assert.deepEqual(renames, [], "no rename for a top-level run");
+  locs = [{ collection: "mattmccoy", name: RUN }];  // the operator moved it into mattmccoy/
+  await m.ensure();
+  assert.equal(st.getItem(`fri.rois.exp.${RUN}`), null);
+  assert.notEqual(st.getItem(`fri.rois.exp.mattmccoy/${RUN}`), null);
+  assert.deepEqual(renames, [{ [`exp.${RUN}`]: `exp.mattmccoy/${RUN}` }]);
 });

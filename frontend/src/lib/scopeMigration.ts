@@ -55,3 +55,37 @@ export function migrateRunScopes(storage: Storage, locations: RunLocation[]): Sc
   }
   return out;
 }
+
+export interface RunScopeMigrator {
+  /** Fetches the run locations and re-keys (migrateRunScopes). Concurrent calls share one fetch;
+   *  each later call runs again (idempotent), so runs moved mid-session are caught. Rejects when
+   *  the fetch fails, and the next call retries. */
+  ensure(): Promise<void>;
+}
+
+export function createRunScopeMigrator(
+  fetchLocations: () => Promise<RunLocation[]>,
+  storage: Storage,
+  onRename: (rename: Record<string, string>) => void,
+  onAmbiguous: (names: string[]) => void = () => undefined,
+): RunScopeMigrator {
+  let inFlight: Promise<void> | null = null;
+  const run = async (): Promise<void> => {
+    const r = migrateRunScopes(storage, await fetchLocations());
+    if (Object.keys(r.rename).length) onRename(r.rename);
+    if (r.ambiguous.length) onAmbiguous(r.ambiguous);
+  };
+  return {
+    ensure() {
+      inFlight ??= run().finally(() => { inFlight = null; });
+      return inFlight;
+    },
+  };
+}
+
+/** Opens a run only after its browser state is re-keyed, so the new scope is never seeded (and
+ *  saved) ahead of the old state moving into it. A failed migration rejects and opens nothing. */
+export async function openRun(key: string, migrator: RunScopeMigrator, setOpen: (key: string) => void): Promise<void> {
+  await migrator.ensure();
+  setOpen(key);
+}

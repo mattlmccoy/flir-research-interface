@@ -17,7 +17,7 @@ const ls = {
   set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } },
 };
 
-export function ExperimentsPage({ onOpen }: { onOpen: (key: RunKey, title?: string) => void }) {
+export function ExperimentsPage({ onOpen }: { onOpen: (key: RunKey, title?: string) => Promise<void> }) {
   const [items, setItems] = useState<Experiment[] | null>(null);
   const [driveConnected, setDriveConnected] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -183,7 +183,7 @@ export function ExperimentsPage({ onOpen }: { onOpen: (key: RunKey, title?: stri
           const id = cardId(e);
           return (
             <ExperimentCard
-              key={id} exp={e} onOpen={() => onOpen(keyOf(e), e.title)} onChanged={load}
+              key={id} exp={e} onOpen={() => { setErr(null); onOpen(keyOf(e), e.title).catch((err) => setErr(`Could not open ${e.name}: ${err}`)); }} onChanged={load}
               driveConnected={driveConnected} universe={universe}
               selecting={selecting} selected={sel.selected.has(id)}
               onToggleSelect={isOffline(e) ? undefined : (ev) => dispatch(ev.shiftKey ? { type: "range", name: id, order: shownIds } : { type: "toggle", name: id })}
