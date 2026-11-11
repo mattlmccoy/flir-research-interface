@@ -5,7 +5,8 @@ import { deltaTrace } from "./lib/delta.ts";
 import { ProfilePanel, type FieldSnapshot } from "./components/ProfilePanel.tsx";
 import { radiometryFromCamera } from "./lib/emissivity.ts";
 import { useCallback, useEffect, useReducer, useRef, useState, useMemo } from "react";
-import { api, operatorBase, type RecordingStatus, type Status } from "./lib/api.ts";
+import { api, operatorBase, type CollectionsDoc, type RecordingStatus, type Status } from "./lib/api.ts";
+import { collectionLabel, pickerLocked } from "./lib/collections.ts";
 import { wsUrl } from "./lib/operator.ts";
 import { decodeFrameMessage, type FrameMessage } from "./lib/protocol.ts";
 import type { PaletteName } from "./lib/palette.ts";
@@ -310,6 +311,16 @@ export function App() {
     try { setRecording(await api.recordingStatus()); } catch { /* keep last */ }
   }, []);
   useEffect(() => { void refresh(); const id = setInterval(refresh, 1000); return () => clearInterval(id); }, [refresh]);
+  // The operator's collections + selection (shared by every browser): the top bar, the picker and
+  // the Record gate all read this one copy.
+  const [collections, setCollections] = useState<CollectionsDoc | null>(null);
+  useEffect(() => {
+    const tick = () => { api.collections().then(setCollections).catch(() => undefined); };
+    tick();
+    const id = setInterval(tick, 3000);
+    return () => clearInterval(id);
+  }, []);
+  const collectionLocked = pickerLocked(recording);
 
   useEffect(() => {
     if (status.state !== "acquiring") return;
@@ -407,6 +418,10 @@ export function App() {
         <button className={page === "experiments" || page === "playback" ? "active" : ""} aria-current={page === "experiments" || page === "playback" ? "page" : undefined} onClick={() => setPage("experiments")}>experiments</button>
         <button className={page === "setup" ? "active" : ""} aria-current={page === "setup" ? "page" : undefined} onClick={() => setPage("setup")}>setup</button>
       </nav>
+      <span className={`collection-indicator${collections && !collections.selected ? " unset" : ""}`}
+        title="The collection new runs record into (change it on the experiments page)">
+        <span className="k">collection</span>{collections ? collectionLabel(collections.selected) : "…"}
+      </span>
       {page === "playback" && openExp && (
         <span className="crumb">
           <button className="secondary" onClick={() => setPage("experiments")} title="Back to the experiments list" aria-label="Back to experiments">← experiments</button>
@@ -437,7 +452,8 @@ export function App() {
   }
   if (page === "experiments") {
     return <StudioFrame layout={layout} page topbar={topbar} statusbar={statusbar}
-      center={<ExperimentsPage onOpen={(key, title) => openRun(key, migrator, (k) => { setOpenExp(k); setOpenTitle(title ?? null); setPage("playback"); })}/>} />;
+      center={<ExperimentsPage collections={collections} locked={collectionLocked} onCollections={setCollections}
+        onOpen={(key, title) => openRun(key, migrator, (k) => { setOpenExp(k); setOpenTitle(title ?? null); setPage("playback"); })}/>} />;
   }
   if (page === "playback" && openExp) {
     return <PlaybackPage name={openExp} layout={layout} dispatch={dispatch} topbar={topbar}
@@ -508,7 +524,7 @@ export function App() {
             <CameraControls info={info} locked={isRecording} onApplied={refreshInfo} presetSave={<SaveCurrentAs store={presets} onSave={saveCurrent} label="save current as preset…" />} />
           </RailSection>
           <RailSection id="recording" title="recording" open={layout.sections.recording} onToggle={() => dispatch({ type: "toggleSection", section: "recording" })}>
-            <RecordPanel acquiring={status.state === "acquiring"} rois={rois.rois} liveAdjust={layout.visibleAdjust} lastApplied={presets.lastApplied} masks={masks.enabled && masks.shapes.length ? masks.shapes : null} />
+            <RecordPanel collections={collections} acquiring={status.state === "acquiring"} rois={rois.rois} liveAdjust={layout.visibleAdjust} lastApplied={presets.lastApplied} masks={masks.enabled && masks.shapes.length ? masks.shapes : null} />
           </RailSection>
           <RailSection id="display" title="display" open={layout.sections.display} onToggle={() => dispatch({ type: "toggleSection", section: "display" })} tag="visualization only">
             <DisplayControls palette={palette} setPalette={setPalette} scaleMode={scaleMode} setScaleMode={setScaleMode} manual={manual} setManual={setManual} shown={shown} isotherm={layout.isotherm} setIsotherm={(isotherm) => dispatch({ type: "setIsotherm", isotherm })} hasReference={!!reference} onSetReference={() => { if (field) setReference(new Float32Array(field.c)); }} onClearReference={() => setReference(null)} onRangeFromRoi={(() => { const sel = rois.rois.find((r) => r.id === rois.selected); if (!field || !sel || sel.kind === "spot") return null; return () => { const rg = rangeFromRoi(field.c, field.w, field.h, sel); if (rg) { setManual({ min: Math.floor(rg.min * 10) / 10, max: Math.ceil(rg.max * 10) / 10 }); setScaleMode("manual"); } }; })()} hold={layout.hold} setHold={(hold) => dispatch({ type: "setHold", hold })} flipH={layout.flipH} flipV={layout.flipV} setFlip={(h, v) => dispatch({ type: "setFlip", h, v })} agc={layout.agc} setAgc={(agc) => dispatch({ type: "setAgc", agc })} units={layout.units} setUnits={(units) => dispatch({ type: "setUnits", units })} conv={field?.conv ?? null} filter={layout.filter} setFilter={(filter) => dispatch({ type: "setFilter", filter })} rfNotch={layout.rfNotch} setRfNotch={(on) => dispatch({ type: "setRfNotch", on })} rfStatus={rfNotchStatus(layout.rfNotch, frame?.header.display?.rf_notch)} segment={layout.segment} setSegment={(segment) => dispatch({ type: "setSegment", segment })} saturation={(() => { const cs = (info as Record<string, unknown> | null | undefined)?.active_case as { low_c?: number; high_c?: number } | undefined; if (!field || !cs || typeof cs.low_c !== "number" || typeof cs.high_c !== "number") return null; const n = saturationCount(field.c, { low: cs.low_c, high: cs.high_c }); return { ...n, lowC: cs.low_c, highC: cs.high_c }; })()} onSnapshot={saveLiveImage} />

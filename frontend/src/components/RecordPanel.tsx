@@ -2,7 +2,9 @@ import type { MaskShape } from "../lib/mask.ts";
 import { NumberField } from "./NumberField.tsx";
 import { markForKey } from "../lib/delta.ts";
 import { useEffect, useState } from "react";
-import { api, DEFAULT_PROFILE, type Profile, type RecordingStatus } from "../lib/api.ts";
+import { api, DEFAULT_PROFILE, type CollectionsDoc, type Profile, type RecordingStatus } from "../lib/api.ts";
+import { canRecord, collectionLabel } from "../lib/collections.ts";
+import { RecordingTo } from "./CollectionPicker.tsx";
 import { ArmPanel } from "./ArmPanel.tsx";
 import { streamStallWarning } from "../lib/streamStall.ts";
 import type { Roi } from "../lib/roi.ts";
@@ -10,8 +12,9 @@ import type { VisibleAdjust } from "../lib/visibleAdjust.ts";
 import { recordStamp } from "../lib/visibleAdjustUi.ts";
 
 
-/** `lastApplied`: the last applied preset, so the visible stamp records `preset` / `based_on`. */
-export function RecordPanel({ acquiring, rois, masks = null, liveAdjust, lastApplied = null }: { acquiring: boolean; rois: Roi[]; masks?: MaskShape[] | null; liveAdjust: VisibleAdjust; lastApplied?: { name: string; visible_adjust: VisibleAdjust } | null }) {
+/** `lastApplied`: the last applied preset, so the visible stamp records `preset` / `based_on`.
+ *  `collections`: the operator's selection; Record and Arm need a collection (lib/collections.ts). */
+export function RecordPanel({ collections, acquiring, rois, masks = null, liveAdjust, lastApplied = null }: { collections: CollectionsDoc | null; acquiring: boolean; rois: Roi[]; masks?: MaskShape[] | null; liveAdjust: VisibleAdjust; lastApplied?: { name: string; visible_adjust: VisibleAdjust } | null }) {
   const [name, setName] = useState("Run");
   const [meta, setMeta] = useState<Record<string, string>>({});
   const [profile, setProfile] = useState<Profile>(DEFAULT_PROFILE);
@@ -107,6 +110,10 @@ export function RecordPanel({ acquiring, rois, masks = null, liveAdjust, lastApp
   }
 
   const idle = !recording && !armed;
+  // Until the collections load the gate is unknown: Record stays off with no reason shown.
+  const gate = collections ? canRecord(collections) : { ok: false, reason: null };
+  // while live, the run's own folder (the selection is locked then); idle, the selection
+  const recordingTo = !idle && status.collection ? status.collection : collections ? collectionLabel(collections.selected) : "…";
   return (
     <>
       {/* Status banner — always says plainly what the recorder is doing. */}
@@ -125,17 +132,18 @@ export function RecordPanel({ acquiring, rois, masks = null, liveAdjust, lastApp
       )}
 
       {/* Armed banner + controls (waiting / triggered). */}
-      {armed && <ArmPanel rois={rois} armed={armed} recording={recording} disabled={!acquiring} busy={busy} onArm={arm} onDisarm={disarm} onStartNow={startNow} />}
+      {armed && <ArmPanel rois={rois} armed={armed} recording={recording} disabled={!acquiring} busy={busy} recordingTo={recordingTo} blockReason={null} onArm={arm} onDisarm={disarm} onStartNow={startNow} />}
 
       {/* Idle → armed-trigger mode: the trigger form. */}
-      {idle && mode === "arm" && <ArmPanel rois={rois} armed={null} recording={false} disabled={!acquiring} busy={busy} onArm={arm} onDisarm={disarm} onStartNow={startNow} />}
+      {idle && mode === "arm" && <ArmPanel rois={rois} armed={null} recording={false} disabled={!acquiring || !gate.ok} busy={busy} recordingTo={recordingTo} blockReason={gate.reason} onArm={arm} onDisarm={disarm} onStartNow={startNow} />}
 
       {/* Idle → record-now mode: name + immediate Record + options. */}
       {idle && mode === "now" && (
         <>
+          <RecordingTo name={recordingTo} reason={gate.reason} />
           <div className="row">
             <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="experiment name" style={{ width: 140 }} />
-            <button className="primary" disabled={!acquiring || busy} onClick={start} title={acquiring ? "" : "connect a camera first"}>● Record</button>
+            <button className="primary" disabled={!acquiring || busy || !gate.ok} onClick={start} title={!acquiring ? "connect a camera first" : gate.reason ?? ""}>● Record</button>
             <button className="secondary" onClick={() => setShowForm(!showForm)}>{showForm ? "Hide metadata" : "Metadata"}</button>
           </div>
           <div className="row">
@@ -153,6 +161,7 @@ export function RecordPanel({ acquiring, rois, masks = null, liveAdjust, lastApp
       )}
 
       {/* Recording (started directly, not via a trigger): Stop. */}
+      {recording && !armed && <RecordingTo name={recordingTo} reason={null} />}
       {recording && !armed && <div className="row"><button className="danger" disabled={busy} onClick={stop}>■ Stop</button></div>}
       {recording && (
         <>

@@ -86,9 +86,20 @@ test("bulk titles: numbered in recording order, regardless of selection or scree
     { name: "20260911_135955_Run" },  // no started_utc: falls back to the timestamped folder name
   ];
   assert.deepEqual(bulkTitles(picked, "Doped coupon", true), [
-    { name: "20260911_121421_Run", title: "Doped coupon 1" },
-    { name: "20260911_135955_Run", title: "Doped coupon 2" },
-    { name: "20260911_150811_Run", title: "Doped coupon 3" },
+    { name: "20260911_121421_Run", key: "20260911_121421_Run", title: "Doped coupon 1" },
+    { name: "20260911_135955_Run", key: "20260911_135955_Run", title: "Doped coupon 2" },
+    { name: "20260911_150811_Run", key: "20260911_150811_Run", title: "Doped coupon 3" },
+  ]);
+});
+
+test("bulk titles carry each run's key, so same-named runs in two collections stay apart", () => {
+  const picked = [
+    { name: "20260911_121421_Run", collection: "mattmccoy" },
+    { name: "20260911_121421_Run", collection: "rf-sintering" },
+  ];
+  assert.deepEqual(bulkTitles(picked, "Coupon", true).map((x) => [x.key, x.title]), [
+    ["mattmccoy/20260911_121421_Run", "Coupon 1"],
+    ["rf-sintering/20260911_121421_Run", "Coupon 2"],
   ]);
 });
 

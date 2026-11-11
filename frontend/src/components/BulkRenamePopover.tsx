@@ -7,8 +7,8 @@ import { bulkTitles } from "../lib/organize.ts";
 export function BulkRenamePopover({
   items, onApply, onClose,
 }: {
-  items: { name: string; started_utc?: string | null; title?: string | null }[];
-  onApply: (titles: { name: string; title: string }[]) => void;
+  items: { name: string; collection?: string | null; started_utc?: string | null; title?: string | null }[];
+  onApply: (titles: { name: string; key: string; title: string }[]) => void;
   onClose: () => void;
 }) {
   const [base, setBase] = useState("");
@@ -28,7 +28,7 @@ export function BulkRenamePopover({
       </label>
       <ol className="bulk-rename-preview" aria-label="preview">
         {shown.map((p) => (
-          <li key={p.name}><span className="folder-name">{p.name}</span> → {p.title || <em>folder name (name cleared)</em>}</li>
+          <li key={p.key}><span className="folder-name">{p.name}</span> → {p.title || <em>folder name (name cleared)</em>}</li>
         ))}
         {plan.length > shown.length && <li className="hint">…and {plan.length - shown.length} more</li>}
       </ol>

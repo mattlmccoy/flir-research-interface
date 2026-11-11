@@ -1,6 +1,8 @@
 // Pure logic for organizing experiments: tag normalization + autocomplete, star/tag filtering,
 // sorting, and the multi-select reducer. No React, so it is unit-tested directly. Mirrors the
 // backend's flir_research_interface/labels.py normalization so the UI never sends junk.
+import { keyOf, type RunKey } from "./runKey.ts";
+
 const MAX_TAG = 40;
 
 export function normalizeTag(s: string): string {
@@ -76,16 +78,18 @@ export function filterExperiments<T extends Exp>(
  *  of the two clocks — so "1, 2, 3" follows the experiment sequence, not click order. With
  *  `numbered`, titles are "<base> NN" zero-padded to the count's width (so they also sort by
  *  name); otherwise every run gets `base`. A blank base yields "" for each run, which clears it. */
+/** `key` is the run's address (lib/runKey.ts keyOf): apply titles by key, never by bare name. */
 export function bulkTitles(
-  items: { name: string; started_utc?: string | null }[], base: string, numbered: boolean,
-): { name: string; title: string }[] {
+  items: { name: string; collection?: string | null; started_utc?: string | null }[], base: string, numbered: boolean,
+): { name: string; key: RunKey; title: string }[] {
   const b = base.trim().replace(/\s+/g, " ");
   const when = (e: { name: string; started_utc?: string | null }) =>
     /^\d{8}_\d{6}/.exec(e.name)?.[0] ?? e.started_utc ?? e.name;
-  const ordered = [...items].sort((a, c) => when(a).localeCompare(when(c)) || a.name.localeCompare(c.name));
+  const ordered = [...items].sort((a, c) => when(a).localeCompare(when(c)) || keyOf(a).localeCompare(keyOf(c)));
   const width = String(ordered.length).length;
   return ordered.map((e, i) => ({
     name: e.name,
+    key: keyOf(e),
     title: !b ? "" : numbered ? `${b} ${String(i + 1).padStart(width, "0")}` : b,
   }));
 }

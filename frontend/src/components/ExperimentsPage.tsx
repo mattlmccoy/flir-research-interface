@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
-import { api, type Experiment } from "../lib/api.ts";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { api, type CollectionsDoc, type Experiment } from "../lib/api.ts";
 import { keyOf, type RunKey } from "../lib/runKey.ts";
 import { isOffline, storageBreakdown, summaryLabel } from "../lib/storageSummary.ts";
 import {
@@ -10,6 +10,7 @@ import { ExperimentCard } from "./ExperimentCard.tsx";
 import { SelectionBar } from "./SelectionBar.tsx";
 import { BulkRenamePopover } from "./BulkRenamePopover.tsx";
 import { TagPopover } from "./TagPopover.tsx";
+import { CollectionPicker } from "./CollectionPicker.tsx";
 
 const cardId = (e: { library?: string; collection?: string | null; name: string }) => `${e.library ?? "local"}:${keyOf(e)}`;
 const ls = {
@@ -17,7 +18,12 @@ const ls = {
   set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } },
 };
 
-export function ExperimentsPage({ onOpen }: { onOpen: (key: RunKey, title?: string) => Promise<void> }) {
+/** `collections`: the operator's collections (App polls it); the list shows the selected one's runs
+ *  ("" or nothing selected = the top-level runs, labelled Unsorted). */
+export function ExperimentsPage({ onOpen, collections, locked, onCollections }: {
+  onOpen: (key: RunKey, title?: string) => Promise<void>;
+  collections: CollectionsDoc | null; locked: boolean; onCollections: (d: CollectionsDoc) => void;
+}) {
   const [items, setItems] = useState<Experiment[] | null>(null);
   const [driveConnected, setDriveConnected] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -39,9 +45,15 @@ export function ExperimentsPage({ onOpen }: { onOpen: (key: RunKey, title?: stri
   const setTagsP = (t: string[]) => { setTagFilter(t); ls.set("fri.tagFilter", JSON.stringify(t)); };
   const addTagFilter = (t: string) => { if (!tagFilter.includes(t)) setTagsP([...tagFilter, t]); };
 
+  // the list follows the selection; a reply for a scope no longer selected is dropped
+  const scope = collections ? collections.selected ?? "" : null;
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
+  useEffect(() => { setItems(null); dispatch({ type: "clear" }); }, [scope]);
   const load = useCallback(() => {
-    api.experiments().then(setItems).catch((e) => setErr(String(e)));
-  }, []);
+    if (scope === null) return;  // collections not loaded yet
+    api.experiments(scope).then((xs) => { if (scopeRef.current === scope) setItems(xs); }).catch((e) => setErr(String(e)));
+  }, [scope]);
   useEffect(() => {
     let alive = true;
     const tick = () => {
@@ -114,12 +126,12 @@ export function ExperimentsPage({ onOpen }: { onOpen: (key: RunKey, title?: stri
       (e) => api.setLabels(keyOf(e), { starred: !!e.starred, tags: mergeTags(e.tags ?? [], add), library: libOf(e) }).then(() => {}));
   }
 
-  async function bulkRename(plan: { name: string; title: string }[]) {
+  async function bulkRename(plan: { key: RunKey; title: string }[]) {
     setBulkRenameOpen(false);
-    const titleOf = new Map(plan.map((p) => [p.name, p.title]));
-    const targets = selectedItems().filter((e) => titleOf.has(e.name));
+    const titleOf = new Map(plan.map((p) => [p.key, p.title]));
+    const targets = selectedItems().filter((e) => titleOf.has(keyOf(e)));
     await runBulk(targets, "rename", (e) => api.setLabels(keyOf(e), {
-      starred: !!e.starred, tags: e.tags ?? [], library: libOf(e), title: titleOf.get(e.name) ?? "",
+      starred: !!e.starred, tags: e.tags ?? [], library: libOf(e), title: titleOf.get(keyOf(e)) ?? "",
     }).then(() => {}));
   }
 
@@ -134,6 +146,7 @@ export function ExperimentsPage({ onOpen }: { onOpen: (key: RunKey, title?: stri
   return (
     <div className="page-body wide">
       <div className="exp-head">
+        <CollectionPicker doc={collections} locked={locked} onDoc={onCollections} />
         <span>{items ? (filtering ? `${shown.length} / ${summaryLabel(breakdown, driveConnected)}` : summaryLabel(breakdown, driveConnected)) : "loading…"}</span>
         <span className="right">
           <button className={`secondary${selecting ? " active" : ""}`} onClick={() => { setSelecting((s) => !s); clearSelection(); }} title="Select multiple runs for bulk actions">
@@ -176,7 +189,7 @@ export function ExperimentsPage({ onOpen }: { onOpen: (key: RunKey, title?: stri
       )}
 
       {err && <div className="errbox">{err}</div>}
-      {items && items.length === 0 && <div className="muted">No experiments yet. Record one from the live view.</div>}
+      {items && items.length === 0 && <div className="muted">{scope ? `No runs in ${scope} yet. Record one from the live view.` : "No runs at the top level (Unsorted)."}</div>}
       {items && items.length > 0 && shown.length === 0 && <div className="muted">No experiments match the filter.</div>}
       <div className="exp-grid">
         {shown.map((e) => {

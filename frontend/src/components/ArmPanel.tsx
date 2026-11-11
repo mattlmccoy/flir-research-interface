@@ -4,15 +4,18 @@ import { DEFAULT_TRIGGER_FORM, reconcileTriggerForm, rfLinkWarning, triggerRois,
 import { roiLabel, type Roi } from "../lib/roi.ts";
 import { useControlStatus } from "../lib/useControlStatus.ts";
 import type { ArmedStatus } from "../lib/api.ts";
+import { RecordingTo } from "./CollectionPicker.tsx";
 
 interface Props {
   rois: Roi[]; armed: ArmedStatus | null; recording: boolean; disabled: boolean; busy: boolean;
+  /** The collection the run records into, and why Arm is off (null = it may arm). */
+  recordingTo: string; blockReason: string | null;
   onArm: (trigger: unknown) => void; onDisarm: () => void; onStartNow: () => void;
 }
 
 /** The "armed trigger" recording mode: pick a start and an end condition, arm, and let the trigger
  *  run the recording. When armed it shows the live armed/triggered status instead of the form. */
-export function ArmPanel({ rois, armed, recording, disabled, busy, onArm, onDisarm, onStartNow }: Props) {
+export function ArmPanel({ rois, armed, recording, disabled, busy, recordingTo, blockReason, onArm, onDisarm, onStartNow }: Props) {
   const area = triggerRois(rois);  // lines and smart ROIs can not trigger (the operator answers 400)
   const [form, setF] = useState<TriggerForm>(DEFAULT_TRIGGER_FORM);
   const f = reconcileTriggerForm(form, area);  // a stale or ineligible ROI id never reaches the operator
@@ -42,6 +45,7 @@ export function ArmPanel({ rois, armed, recording, disabled, busy, onArm, onDisa
           <span className="badge rec" style={{ animation: "pulse 1.2s infinite" }}>{recording ? "● RECORDING" : "◌ ARMED"}</span>{" "}
           <span className="hint">{recording ? "trigger fired — recording in progress" : `waiting — ${startText}`}</span>
         </div>
+        <RecordingTo name={recordingTo} reason={null} />
         {rfWarn && <div className="bad" role="alert" style={{ fontSize: 12 }}>⚠ {rfWarn}</div>}
         <div className="hint">{triggerSummary(armed.trigger as never)}</div>
         <div className="hint">watched value: <b>{armed.watched_value != null ? `${armed.watched_value.toFixed(2)} °C` : "—"}</b>{armed.watched_roi != null ? ` (ROI ${armed.watched_roi})` : ""} · buffered {armed.ring_frames} fr{recording ? ` · recorded ${m.frames_recorded} fr` : ""}</div>
@@ -57,6 +61,7 @@ export function ArmPanel({ rois, armed, recording, disabled, busy, onArm, onDisa
   const needsRoi = f.startKind === "threshold" || f.endKind === "threshold";
   return (
     <div className="kv" style={{ alignItems: "center" }}>
+      <div style={{ gridColumn: "1 / -1" }}><RecordingTo name={recordingTo} reason={blockReason} /></div>
       <span>start</span>
       <span className="v plain" style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
         <select value={f.startKind} aria-label="start condition" onChange={(e) => upd({ startKind: e.target.value as TriggerForm["startKind"] })}>
@@ -103,7 +108,7 @@ export function ArmPanel({ rois, armed, recording, disabled, busy, onArm, onDisa
         <span className="v plain"><NumberField min={1} step={60} value={f.maxSeconds} style={{ width: 72 }} aria-label="max seconds" onChange={(n) => upd({ maxSeconds: Math.max(1, n) })} /> <span className="hint">s — always stops the run</span></span>
       </>}
 
-      <button className="primary" style={{ gridColumn: "1 / -1", justifySelf: "start" }} disabled={disabled || busy} onClick={() => onArm(spec)} title={triggerSummary(spec)}>◌ Arm this trigger</button>
+      <button className="primary" style={{ gridColumn: "1 / -1", justifySelf: "start" }} disabled={disabled || busy || !!blockReason} onClick={() => onArm(spec)} title={blockReason ?? triggerSummary(spec)}>◌ Arm this trigger</button>
     </div>
   );
 }

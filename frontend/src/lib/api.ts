@@ -50,7 +50,7 @@ async function j<T>(r: Promise<Response>): Promise<T> {
 }
 export interface VisibleStatus { state: string; restarts?: number; reconnecting?: boolean; segments?: number; gaps?: number; file?: string | null; started_host_ns?: number | null; url?: string; error?: string | null; reason?: string; }
 export interface ArmedStatus { trigger: Record<string, unknown>; machine: { state: string; frames_recorded: number; reason: string | null; sustain: number }; watched_value: number | null; watched_roi: number | null; ring_frames: number; pretrigger_frames: number; }
-export interface RecordingStatus { state: string; armed?: ArmedStatus; visible?: VisibleStatus; experiment_dir?: string | null; frames_received?: number; frames_written?: number; queue_depth?: number; queue_dropped?: number; frame_id_gaps?: number; transport?: Transport | null; repeated_frames?: number; every_nth?: number; frames_skipped_interval?: number; duration_s?: number; recorded_fps?: number | null; free_space_gb?: number | null; min_free_gb?: number; error?: string | null; experiments_root?: string; last_frame_age_s?: number | null; stream_stalled?: boolean; stream_stalls?: number; stall_threshold_s?: number; }
+export interface RecordingStatus { state: string; /** The collection the run goes into (idle: the selection; null/"" = Record is refused). */ collection?: string | null; armed?: ArmedStatus; visible?: VisibleStatus; experiment_dir?: string | null; frames_received?: number; frames_written?: number; queue_depth?: number; queue_dropped?: number; frame_id_gaps?: number; transport?: Transport | null; repeated_frames?: number; every_nth?: number; frames_skipped_interval?: number; duration_s?: number; recorded_fps?: number | null; free_space_gb?: number | null; min_free_gb?: number; error?: string | null; experiments_root?: string; last_frame_age_s?: number | null; stream_stalled?: boolean; stream_stalls?: number; stall_threshold_s?: number; }
 export interface Previews {
   units: "celsius" | "counts";
   preview: { file: string; frame_index: number; t_s: number; size?: [number, number]; units?: string; sha256: string };
@@ -73,6 +73,16 @@ export interface MediaOptions { start: number; stop: number; step?: number; scal
 /** Progress of a media-export render (background job). */
 export interface MediaJob { state: "running" | "done" | "error" | "idle"; step?: string; done?: number; total?: number; file?: { name: string; bytes: number; note?: string | null } | null; error?: string | null; }
 export interface RangeJob { state: "running" | "done" | "error" | "idle"; done: number; total: number; error?: string | null; }
+/** GET/POST /api/collections and PUT /api/collections/selected (backend api/collections_routes.py `_doc`).
+ *  `selected`: a collection name, "" = Unsorted (top level), null = nothing selected. */
+export interface CollectionInfo { name: string; local: boolean; drive: boolean; offline: boolean; }
+export interface CollectionsDoc {
+  selected: string | null;
+  collections: CollectionInfo[];
+  unsorted: { local: number; drive: number };
+  unexpected: { library: string; name: string }[];
+  drive_connected: boolean;
+}
 /** A user-selectable external drive for offload. */
 export interface Volume { label: string; mount: string; fstype: string; total_bytes: number; free_bytes: number; is_registered?: boolean; }
 /** Storage state: the local root and the registered drive (if any). */
@@ -216,6 +226,13 @@ export const api = {
   /** Runs in a collection: omitted = the operator's selected collection, null = the top level. */
   experiments: (collection?: string | null) =>
     j<Experiment[]>(req(collection === undefined ? "/api/experiments" : `/api/experiments?collection=${encodeURIComponent(collection ?? "")}`)),
+  collections: () => j<CollectionsDoc>(req("/api/collections")),
+  /** Create a collection folder (400 with the reason for an invalid name). */
+  addCollection: (name: string) =>
+    j<CollectionsDoc>(req("/api/collections", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) })),
+  /** Select a collection ("" = Unsorted); 409 while a recording or armed trigger is active. */
+  selectCollection: (name: string | null) =>
+    j<CollectionsDoc>(req("/api/collections/selected", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) })),
   /** Every run's location (local, connected drive, offline index); collection null = top level. */
   runLocations: () => j<{ collection: string | null; name: string }[]>(req("/api/collections/runs")),
   previewUrl: (name: RunKey) => u(runPath(name, `/preview.png`)),
