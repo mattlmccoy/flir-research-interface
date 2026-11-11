@@ -16,6 +16,7 @@ from typing import Literal
 
 from lab_storage import fsutil as _fsutil
 
+from .recording.recorder import STORE_NAME
 from .storage import _atomic_json
 
 logger = logging.getLogger(__name__)
@@ -87,7 +88,11 @@ def classify_entry(path: Path) -> EntryKind:
     name = path.name
     if not _fsutil.listable(name) or name.startswith(".") or not path.is_dir():
         return "skip"
-    if RUN_LIKE_RE.match(name) or (path / "metadata.json").exists():
+    if (
+        RUN_LIKE_RE.match(name)
+        or (path / "metadata.json").exists()
+        or (path / STORE_NAME).exists()
+    ):
         return "run"
     if collection_name_error(name) is None:
         return "collection"

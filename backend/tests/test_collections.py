@@ -71,6 +71,19 @@ def test_classify_entry(tmp_path: Path) -> None:
     }
 
 
+def test_classify_entry_store_makes_a_run(tmp_path: Path) -> None:
+    # hand-made shape: a hand-renamed / legacy run with only thermal.zarr must never read as a
+    # collection (that would hide it), whatever its name looks like.
+    from flir_research_interface.recording.recorder import STORE_NAME
+
+    (tmp_path / "renamed").mkdir()
+    (tmp_path / "renamed" / STORE_NAME).mkdir()
+    (tmp_path / "Odd Name").mkdir()
+    (tmp_path / "Odd Name" / STORE_NAME).mkdir()
+    assert classify_entry(tmp_path / "renamed") == "run"
+    assert classify_entry(tmp_path / "Odd Name") == "run"
+
+
 def test_scan_missing_root(tmp_path: Path) -> None:
     scan = scan_root(tmp_path / "nope")
     assert (scan.collections, scan.runs, scan.unexpected) == ((), (), ())
