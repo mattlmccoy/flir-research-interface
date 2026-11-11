@@ -20,6 +20,7 @@ function doc(over: Partial<CollectionsDoc> = {}): CollectionsDoc {
     unsorted: { local: 1, drive: 0 },
     unexpected: [{ library: "local", name: "Old Stuff" }],
     drive_connected: false,
+    drive_registered: true,
     ...over,
   };
 }
@@ -34,7 +35,9 @@ test("name rules match the backend lists", () => {
 });
 
 test("entries order and notes", () => {
+  // drive connected, so a local-only collection is a fact; the offline entry exercises the note
   const e = pickerEntries(doc({
+    drive_connected: true,
     collections: [
       { name: "rf-sintering", local: false, drive: true, offline: true },
       { name: "mattmccoy", local: true, drive: true, offline: false },
@@ -53,6 +56,30 @@ test("entries order and notes", () => {
   // Unsorted counts both sides
   const u = pickerEntries(doc({ unsorted: { local: 2, drive: 3 } })).find((x) => x.value === "");
   assert.equal(u?.label, "Unsorted (5)");
+});
+
+test("notes never state the unplugged drive's side as fact (ruling R5a)", () => {
+  const note = (d: Partial<CollectionsDoc>, name: string) =>
+    pickerEntries(doc(d)).find((x) => x.value === name)?.note;
+  // drive registered but unplugged: the operator flags index-known collections offline, and the
+  // drive side of a collection the index does not know is unknown -> no note
+  const unplugged = {
+    drive_connected: false, drive_registered: true,
+    collections: [
+      { name: "known", local: true, drive: true, offline: true },
+      { name: "unknown", local: true, drive: false, offline: false },
+    ],
+  };
+  assert.equal(note(unplugged, "known"), "offline");
+  assert.equal(note(unplugged, "unknown"), null);
+  // no drive registered: a local collection is on this Mac only
+  const noDrive = { drive_connected: false, drive_registered: false,
+    collections: [{ name: "unknown", local: true, drive: false, offline: false }] };
+  assert.equal(note(noDrive, "unknown"), "on this Mac only");
+  // drive connected: the drive was read, so "on this Mac only" is a fact
+  const connected = { drive_connected: true, drive_registered: true,
+    collections: [{ name: "unknown", local: true, drive: false, offline: false }] };
+  assert.equal(note(connected, "unknown"), "on this Mac only");
 });
 
 test("Unsorted hidden when empty and not selected", () => {

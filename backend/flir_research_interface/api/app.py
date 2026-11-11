@@ -1535,7 +1535,9 @@ def create_app(
     def experiments(collection: str | None = None) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         local_root = app.state.experiments_root
-        for lib, root, names, coll in _scoped_roots(collection):
+        scoped = _scoped_roots(collection)
+        listed = scoped[0][3]  # the listed collection (None = top level); the same for every root
+        for lib, root, names, coll in scoped:
             for it in list_experiments(root, library=lib, names=names):
                 run_dir = root / str(it.get("name", ""))
                 it["size_bytes"] = _dir_size(run_dir)
@@ -1546,11 +1548,14 @@ def create_app(
         if drive_root is not None:  # connected: remember what is on it for when it is unplugged
             storage.remember_drive_runs(
                 local_root, [it for it in items if it.get("library") == "drive"],
-                label=drive_root.parent.name,
+                label=drive_root.parent.name, collection=listed,
             )
         elif storage.load_storage_config(local_root)["drive"]:
-            here = {str(it.get("name")) for it in items}
-            items += [r for r in storage.offline_runs(local_root) if r["name"] not in here]
+            here = {(it.get("collection"), str(it.get("name"))) for it in items}
+            items += [
+                r for r in storage.offline_runs(local_root, collection=listed)
+                if (r["collection"], r["name"]) not in here
+            ]
         # newest first across both libraries (names are timestamped)
         items.sort(key=lambda e: str(e.get("name", "")), reverse=True)
         return items

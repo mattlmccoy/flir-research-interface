@@ -21,17 +21,21 @@ export function collectionNameError(name: string): string | null {
 
 export interface PickerEntry { value: string; label: string; disabled: boolean; note: string | null; }
 
-function collectionNote(c: CollectionsDoc["collections"][number]): string | null {
+/** `offline`: the drive side came from the unplugged drive's index (backend _doc). A local
+ *  collection the index does not know gets no note while a registered drive is unplugged: what is
+ *  on the drive is unknown, so "on this Mac only" would state a guess as fact (ruling R5a). */
+function collectionNote(c: CollectionsDoc["collections"][number], doc: CollectionsDoc): string | null {
   if (c.offline) return "offline";
   if (c.local && c.drive) return null;
-  return c.drive ? "on drive only" : "on this Mac only";
+  if (c.drive) return "on drive only";
+  return doc.drive_registered && !doc.drive_connected ? null : "on this Mac only";
 }
 
 /** Collections A-Z, then Unsorted (when it holds runs or is selected), then the unexpected folders
  *  (disabled: shown so nothing on disk is hidden, never selectable). */
 export function pickerEntries(doc: CollectionsDoc): PickerEntry[] {
   const cols = [...doc.collections].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-  const out: PickerEntry[] = cols.map((c) => ({ value: c.name, label: c.name, disabled: false, note: collectionNote(c) }));
+  const out: PickerEntry[] = cols.map((c) => ({ value: c.name, label: c.name, disabled: false, note: collectionNote(c, doc) }));
   const n = doc.unsorted.local + doc.unsorted.drive;
   if (n > 0 || doc.selected === "") out.push({ value: "", label: `Unsorted (${n})`, disabled: false, note: null });
   for (const u of doc.unexpected) {

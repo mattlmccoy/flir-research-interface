@@ -68,15 +68,30 @@ def register_collections_routes(
     def _base() -> Path:
         return Path(roots()[0][1])  # the local root is always first
 
+    def _registered() -> bool:
+        return bool(storage.load_storage_config(_base())["drive"])
+
+    def _offline() -> bool:
+        """The drive is registered but not connected (its offline index stands in for it)."""
+        return "drive" not in dict(roots()) and _registered()
+
     def _doc() -> dict[str, Any]:
         scans = {lib: scan_root(root) for lib, root in roots()}
         local = set(scans["local"].collections)
         drive = set(scans["drive"].collections) if "drive" in scans else set()
+        # unplugged: the drive side is what the offline index last saw, flagged ``offline``
+        offline = "drive" not in scans and _registered()
+        indexed = storage.offline_collections(_base()) if offline else set()
         return {
             "selected": load_selection(_base()),
             "collections": [
-                {"name": n, "local": n in local, "drive": n in drive, "offline": False}
-                for n in sorted(local | drive)
+                {
+                    "name": n,
+                    "local": n in local,
+                    "drive": n in drive or n in indexed,
+                    "offline": n in indexed,
+                }
+                for n in sorted(local | drive | indexed)
             ],
             "unsorted": {
                 "local": len(scans["local"].runs),
@@ -86,6 +101,7 @@ def register_collections_routes(
                 {"library": lib, "name": n} for lib, s in scans.items() for n in s.unexpected
             ],
             "drive_connected": "drive" in scans,
+            "drive_registered": _registered(),
         }
 
     @app.get("/api/collections")
@@ -103,11 +119,11 @@ def register_collections_routes(
             seen.update((None, n) for n in scan.runs)
             for c in scan.collections:
                 seen.update((c, n) for n in _collection_runs(root / c))
-        libs = {lib for lib, _ in roots()}
-        if "drive" not in libs and storage.load_storage_config(_base())["drive"]:
-            for r in storage.offline_runs(_base()):
-                coll = r.get("collection")  # absent from v1 index entries: top level
-                seen.add((coll if isinstance(coll, str) and coll else None, str(r["name"])))
+        if _offline():
+            for coll in [None, *storage.offline_collections(_base())]:
+                seen.update(
+                    (coll, str(r["name"])) for r in storage.offline_runs(_base(), collection=coll)
+                )
         ordered = sorted(seen, key=lambda p: (p[0] or "", p[1]))
         return [{"collection": c, "name": n} for c, n in ordered]
 

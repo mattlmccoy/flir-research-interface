@@ -226,30 +226,62 @@ def forget_drive(local_root: Path | str) -> dict[str, Any]:
 INDEX_NAME = ".drive-index.json"
 
 
-def remember_drive_runs(local_root: Path | str, items: list[dict[str, Any]], label: str) -> None:
-    """Snapshot the connected drive's run summaries (rewritten only when they change)."""
-    runs = sorted(
-        ({k: v for k, v in it.items() if k not in ("root", "library")} for it in items),
-        key=lambda r: str(r.get("name", "")),
-    )
+#: Index file format. v2 tags every run with its ``collection`` (``None`` = top level); a file
+#: without ``schema`` is v1, whose runs all read as top level.
+INDEX_SCHEMA = 2
+
+
+def _index_runs(idx: dict[str, Any]) -> list[dict[str, Any]]:
+    """The index's run entries, each with ``collection`` (``None`` for v1 / top level)."""
+    out = []
+    for r in idx.get("runs", []):
+        if isinstance(r, dict) and r.get("name"):
+            coll = r.get("collection")
+            out.append({**r, "collection": coll if isinstance(coll, str) and coll else None})
+    return out
+
+
+def remember_drive_runs(
+    local_root: Path | str, items: list[dict[str, Any]], label: str, *, collection: str | None
+) -> None:
+    """Snapshot the connected drive's run summaries for one ``collection`` (``None`` = top level).
+    Entries of every other collection are kept; the file is rewritten only when it changes."""
     path = Path(local_root) / INDEX_NAME
     old = _read_index(path)
-    if old.get("label") == label and old.get("runs") == runs:
+    kept = [r for r in _index_runs(old) if r["collection"] != collection]
+    fresh = [
+        {**{k: v for k, v in it.items() if k not in ("root", "library")}, "collection": collection}
+        for it in items
+    ]
+    runs = sorted(kept + fresh, key=lambda r: (r["collection"] or "", str(r["name"])))
+    if (
+        old.get("schema") == INDEX_SCHEMA
+        and old.get("label") == label
+        and old.get("runs") == runs
+    ):
         return
     now = datetime.now(UTC).isoformat(timespec="seconds")
-    _atomic_json(path, {"label": label, "last_seen_utc": now, "runs": runs})
+    _atomic_json(
+        path, {"schema": INDEX_SCHEMA, "label": label, "last_seen_utc": now, "runs": runs}
+    )
 
 
-def offline_runs(local_root: Path | str) -> list[dict[str, Any]]:
-    """The last-seen runs of the registered drive, marked ``library: "offline"`` so they can never
-    be mistaken for runs that are actually readable right now."""
+def offline_runs(local_root: Path | str, *, collection: str | None) -> list[dict[str, Any]]:
+    """The last-seen runs of the registered drive in ``collection`` (``None`` = top level), marked
+    ``library: "offline"`` so they can never be mistaken for runs readable right now."""
     idx = _read_index(Path(local_root) / INDEX_NAME)
     label, seen = idx.get("label", "drive"), idx.get("last_seen_utc")
     return [
         {**r, "library": "offline", "offline": True, "drive_label": label, "last_seen_utc": seen}
-        for r in idx.get("runs", [])
-        if isinstance(r, dict) and r.get("name")
+        for r in _index_runs(idx)
+        if r["collection"] == collection
     ]
+
+
+def offline_collections(local_root: Path | str) -> set[str]:
+    """Collections the offline index holds runs for (the top level is not a collection)."""
+    idx = _read_index(Path(local_root) / INDEX_NAME)
+    return {r["collection"] for r in _index_runs(idx) if r["collection"]}
 
 
 def _read_index(path: Path) -> dict[str, Any]:

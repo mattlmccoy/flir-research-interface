@@ -82,6 +82,8 @@ export interface CollectionsDoc {
   unsorted: { local: number; drive: number };
   unexpected: { library: string; name: string }[];
   drive_connected: boolean;
+  /** A drive is registered (connected or not); with !drive_connected the offline index stands in. */
+  drive_registered: boolean;
 }
 /** A user-selectable external drive for offload. */
 export interface Volume { label: string; mount: string; fstype: string; total_bytes: number; free_bytes: number; is_registered?: boolean; }
