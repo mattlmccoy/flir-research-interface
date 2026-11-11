@@ -1646,7 +1646,7 @@ def create_app(
         recording = rec is not None and rec.state == RecorderState.RECORDING
         return recording or app.state.armer is not None
 
-    register_collections_routes(app, _roots, _recording_or_armed)
+    register_collections_routes(app, _roots, _recording_or_armed, _busy)
 
     # -- external-drive storage (offload) ------------------------------------------------------
 

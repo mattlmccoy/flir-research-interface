@@ -21,6 +21,12 @@ from flir_research_interface.collections import (
     save_selection,
     scan_root,
 )
+from flir_research_interface.collections_migration import (
+    LOG_NAME,
+    MigrationPlan,
+    apply_migration,
+    plan_migration,
+)
 
 __all__ = ["RunDep", "register_collections_routes", "run_query"]
 
@@ -58,12 +64,34 @@ class _SelectBody(BaseModel):
     name: str | None = None
 
 
+class _MigrationBody(BaseModel):
+    volume: str
+    target: str
+    confirm: list[str]
+
+
+def _plan_doc(plan: MigrationPlan, volume: str, busy: list[str]) -> dict[str, Any]:
+    return {
+        "volume": volume,
+        "base": str(plan.base),
+        "target": plan.target,
+        "moves": [{"name": m.name, "src": str(m.src), "dst": str(m.dst)} for m in plan.moves],
+        "conflicts": [{"name": n, "reason": r} for n, r in plan.conflicts],
+        "appledouble": plan.appledouble,
+        "unexpected": list(plan.unexpected),
+        "already_in_target": plan.already_in_target,
+        "busy": busy,
+    }
+
+
 def register_collections_routes(
     app: FastAPI,
     roots: Callable[[], list[tuple[str, Path]]],
     live: Callable[[], bool] = lambda: False,
+    busy: Callable[[], list[str]] = lambda: [],
 ) -> None:
-    """``live()`` is True while a recording or an armed trigger is active (the picker lock)."""
+    """``live()`` is True while a recording or an armed trigger is active (the picker lock);
+    ``busy()`` lists why the operator must not be interrupted (a migration is refused then)."""
 
     def _base() -> Path:
         return Path(roots()[0][1])  # the local root is always first
@@ -149,3 +177,50 @@ def register_collections_routes(
                 raise HTTPException(404, f"collection {name!r} not found")
         save_selection(_base(), name)
         return _doc()
+
+    def _migration_base(volume: str) -> Path:
+        """The root a migration runs in: the local root, or ``<mount>/FLIR-recordings`` only."""
+        if volume not in ("local", "drive"):
+            raise HTTPException(400, "volume must be 'local' or 'drive'")
+        root = dict(roots()).get(volume)
+        if root is None:
+            raise HTTPException(409, "the drive is not connected")
+        return Path(root)
+
+    def _plan(volume: str, target: str) -> MigrationPlan:
+        base = _migration_base(volume)
+        try:
+            return plan_migration(base, target)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.get("/api/collections/migration")
+    def get_migration(volume: str, target: str) -> dict[str, Any]:
+        """Dry run: what moving ``volume``'s top-level runs into ``target`` would do."""
+        return _plan_doc(_plan(volume, target), volume, busy())
+
+    @app.post("/api/collections/migration")
+    def post_migration(body: _MigrationBody) -> dict[str, Any]:
+        reasons = busy()
+        if reasons:
+            raise HTTPException(
+                409, f"operator is busy: {', '.join(reasons)}; migration not started"
+            )
+        err = collection_name_error(body.target)
+        if err:
+            raise HTTPException(400, err)
+        if not body.confirm:
+            raise HTTPException(400, "confirm lists no runs; nothing to migrate")
+        plan = _plan(body.volume, body.target)  # re-plan: the disk may have changed
+        res = apply_migration(plan, confirm=body.confirm, log_path=plan.base / LOG_NAME)
+        moved = [m.name for m in res.moved]
+        if body.volume == "drive":
+            storage.reindex_collection(_base(), moved, body.target, plan.base)
+        elif load_selection(_base()) is None:
+            save_selection(_base(), body.target)
+        return {
+            "moved": moved,
+            "failed": [{"name": n, "error": e} for n, e in res.failed],
+            "skipped": list(res.skipped),
+            "log": str(res.log),
+        }

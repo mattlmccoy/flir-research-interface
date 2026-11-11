@@ -19,7 +19,7 @@ import os
 import shutil
 import tempfile
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -311,14 +311,47 @@ def move_index_entry(
         )
         if hit is None:
             return
-        moved = {**hit, "collection": dst_collection}
-        if "path" in hit:
-            moved["path"] = _rewrite_prefix(hit["path"], old_dir, new_dir)
-        tp = hit.get("thermal_preview")
-        if isinstance(tp, dict) and "path" in tp:
-            moved["thermal_preview"] = {**tp, "path": _rewrite_prefix(tp["path"], old_dir, new_dir)}
+        moved = _relocated(hit, dst_collection, old_dir, new_dir)
         runs = [r for r in runs if r is not hit] + [moved]
         _write_index(path, idx, runs, str(idx.get("label", "drive")))
+
+
+def _relocated(
+    entry: dict[str, Any], collection: str | None, old_dir: Path, new_dir: Path
+) -> dict[str, Any]:
+    """``entry`` tagged with ``collection``, its ``path`` / ``thermal_preview.path`` moved from
+    ``old_dir`` to ``new_dir``."""
+    out = {**entry, "collection": collection}
+    if "path" in entry:
+        out["path"] = _rewrite_prefix(entry["path"], old_dir, new_dir)
+    tp = entry.get("thermal_preview")
+    if isinstance(tp, dict) and "path" in tp:
+        out["thermal_preview"] = {**tp, "path": _rewrite_prefix(tp["path"], old_dir, new_dir)}
+    return out
+
+
+def reindex_collection(
+    local_root: Path | str, moved: Iterable[str], collection: str, drive_root: Path | str
+) -> int:
+    """After a drive migration renamed top-level runs ``moved`` into ``collection``, retag their
+    index entries (v1 or v2) and rewrite their paths. Writes a v2 index; returns the count."""
+    names = set(moved)
+    root = Path(drive_root)
+    path = Path(local_root) / INDEX_NAME
+    with _INDEX_LOCK:
+        idx = _read_index(path)
+        if not idx:
+            return 0
+        count = 0
+        runs = []
+        for r in _index_runs(idx):
+            if r["collection"] is None and r["name"] in names:
+                n = str(r["name"])
+                r = _relocated(r, collection, root / n, root / collection / n)
+                count += 1
+            runs.append(r)
+        _write_index(path, idx, runs, str(idx.get("label", "drive")))
+        return count
 
 
 def offline_runs(local_root: Path | str, *, collection: str | None) -> list[dict[str, Any]]:
@@ -508,6 +541,7 @@ __all__ = [
     "destination_clash",
     "forget_drive",
     "offline_runs",
+    "reindex_collection",
     "remember_drive_runs",
     "load_storage_config",
     "move_experiment",
