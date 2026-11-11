@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from collection_helpers import select_collection
 from fastapi.testclient import TestClient
 
 from flir_research_interface import visible_adjust_store as store
@@ -101,10 +102,11 @@ def test_recording_start_stamps_visible_adjust(tmp_path: Path) -> None:
     with _client(tmp_path) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         r = c.post("/api/recording/start", json={"name": "stamped", "visible_adjust": STAMP})
         assert r.status_code == 200, r.text
         assert c.post("/api/recording/stop").status_code == 200
-        run = next(p for p in tmp_path.iterdir() if p.is_dir())
+        run = next(p for p in (tmp_path / "t").iterdir() if p.is_dir())
         meta = json.loads((run / "metadata.json").read_text())
         assert meta["visible_adjust"] == STAMP
         assert "profile" in meta  # the other extra blocks are still merged
@@ -124,9 +126,10 @@ def test_recording_without_visible_adjust_has_no_block(tmp_path: Path) -> None:
     with _client(tmp_path) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         assert c.post("/api/recording/start", json={"name": "plain"}).status_code == 200
         c.post("/api/recording/stop")
-        run = next(p for p in tmp_path.iterdir() if p.is_dir())
+        run = next(p for p in (tmp_path / "t").iterdir() if p.is_dir())
         assert "visible_adjust" not in json.loads((run / "metadata.json").read_text())
         info = c.get(f"/api/experiments/{run.name}").json()
         assert info["visible_adjust_recorded"] is None
@@ -136,6 +139,7 @@ def test_recording_without_visible_adjust_has_no_block(tmp_path: Path) -> None:
 def _record_run(c: TestClient) -> str:
     devs = c.get("/api/camera/devices").json()
     c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+    select_collection(c)
     assert c.post("/api/recording/start", json={"name": "r"}).status_code == 200
     c.post("/api/recording/stop")
     return str(c.get("/api/experiments").json()[0]["name"])
@@ -145,21 +149,22 @@ def test_put_and_delete_visible_adjust_route(tmp_path: Path) -> None:
     with _client(tmp_path) as c:
         name = _record_run(c)
         url = f"/api/experiments/{name}/visible-adjust"
-        meta_before = (tmp_path / name / "metadata.json").read_bytes()
+        meta_before = (tmp_path / "t" / name / "metadata.json").read_bytes()
         r = c.put(url, json={**SIDECAR_VALUES, "library": "local"}, headers=H)
         assert r.status_code == 200, r.text
         assert {k: r.json()[k] for k in SIDECAR_VALUES} == SIDECAR_VALUES
-        assert (tmp_path / name / store.SIDECAR).is_file()
+        assert (tmp_path / "t" / name / store.SIDECAR).is_file()
         info = c.get(f"/api/experiments/{name}").json()
         assert info["visible_adjust"] == {**SIDECAR_VALUES, "source": "sidecar"}
-        assert (tmp_path / name / "metadata.json").read_bytes() == meta_before  # never rewritten
+        # never rewritten
+        assert (tmp_path / "t" / name / "metadata.json").read_bytes() == meta_before
         bad = c.put(url, json={**SIDECAR_VALUES, "brightness": 2.0}, headers=H)
         assert bad.status_code == 400 and "brightness" in bad.text
-        assert json.loads((tmp_path / name / store.SIDECAR).read_text())["brightness"] == 0.1
+        assert json.loads((tmp_path / "t" / name / store.SIDECAR).read_text())["brightness"] == 0.1
         assert c.put(url, json={**SIDECAR_VALUES, "library": "drive"}, headers=H).status_code == 404
         assert c.delete(url, params={"library": "drive"}, headers=H).status_code == 404
         assert c.delete(url, params={"library": "local"}, headers=H).status_code == 200
-        assert not (tmp_path / name / store.SIDECAR).exists()
+        assert not (tmp_path / "t" / name / store.SIDECAR).exists()
         assert c.get(f"/api/experiments/{name}").json()["visible_adjust"]["source"] == "neutral"
         assert c.delete(url, headers=H).status_code == 200  # nothing to delete is not an error
 

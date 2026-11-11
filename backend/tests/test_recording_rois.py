@@ -6,6 +6,7 @@ import json
 import time
 from pathlib import Path
 
+from collection_helpers import select_collection
 from fastapi.testclient import TestClient
 
 from flir_research_interface.api.app import create_app
@@ -37,6 +38,7 @@ def test_rois_are_written_to_metadata_and_series_exported_at_stop(tmp_path: Path
     with _client(tmp_path) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         r = c.post("/api/recording/start", json={"name": "withrois", "rois": ROIS})
         assert r.status_code == 200, r.text
         d = Path(r.json()["experiment_dir"])
@@ -63,9 +65,10 @@ def test_bad_rois_are_rejected_before_anything_is_written(tmp_path: Path) -> Non
     with _client(tmp_path) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         r = c.post("/api/recording/start", json={"name": "bad", "rois": [{"id": 1, "kind": "hex"}]})
         assert r.status_code == 400
-        assert not any(p.is_dir() for p in tmp_path.iterdir())
+        assert not any(p.is_dir() for p in (tmp_path / "t").iterdir())
         c.post("/api/camera/disconnect")
 
 
@@ -73,6 +76,7 @@ def test_stop_writes_readme_and_roi_plot(tmp_path: Path) -> None:
     with _client(tmp_path) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         d = Path(
             c.post("/api/recording/start", json={"name": "rd", "rois": ROIS}).json()[
                 "experiment_dir"

@@ -1192,8 +1192,23 @@ def create_app(
         except Exception:  # noqa: BLE001
             logger.exception("could not restore NUCMode=%s", before)
 
+    def _recording_collection() -> str:
+        """The selected collection to record into; 409 when nothing (or Unsorted) is selected.
+
+        A collection that exists only on the unplugged drive is allowed: the run is written to
+        ``<root>/<collection>/`` on the Mac, which the Recorder creates when missing.
+        """
+        selected = load_selection(Path(app.state.experiments_root))
+        if not selected:  # None (nothing selected) or "" (Unsorted)
+            raise HTTPException(409, "pick a collection before recording")
+        return selected
+
     async def _start_recording(
-        req: RecordingStartRequest, *, attach_service: bool = True, nuc_first: bool = True
+        req: RecordingStartRequest,
+        *,
+        collection: str,
+        attach_service: bool = True,
+        nuc_first: bool = True,
     ) -> tuple[Recorder, Path, dict[str, Any]]:
         svc = service()
         if svc is None or svc.state != ServiceState.ACQUIRING:
@@ -1213,7 +1228,7 @@ def create_app(
             extra["nuc_hold"] = hold
         rec = Recorder(
             svc if attach_service else None,
-            experiments_root=app.state.experiments_root,
+            experiments_root=Path(app.state.experiments_root) / collection,
             min_free_gb=app.state.min_free_gb,
             every_nth=req.every_nth,
             transport_stats=svc.backend.transport_stats,
@@ -1251,7 +1266,8 @@ def create_app(
     async def recording_start(req: RecordingStartRequest) -> dict[str, Any]:
         if app.state.armer is not None:
             raise HTTPException(409, "a recording is armed; disarm it or let the trigger start it")
-        rec, exp_dir, visible = await _start_recording(req)
+        collection = _recording_collection()
+        rec, exp_dir, visible = await _start_recording(req, collection=collection)
         return {"state": rec.state.value, "experiment_dir": str(exp_dir), "visible": visible}
 
     # -- M11: armed recording ------------------------------------------------------------------
@@ -1259,6 +1275,7 @@ def create_app(
     app.state.armer = None
     app.state.arm_task = None
     app.state.arm_req = None
+    app.state.arm_collection = None  # the selection at arm time; the armed start records into it
 
     async def _arm_loop() -> None:
         from flir_research_interface.recording.arm import Armer
@@ -1274,7 +1291,10 @@ def create_app(
                     req: ArmRequest = app.state.arm_req
                     try:
                         rec, _exp_dir, _vis = await _start_recording(
-                            req, attach_service=False, nuc_first=False
+                            req,
+                            collection=app.state.arm_collection,
+                            attach_service=False,
+                            nuc_first=False,
                         )
                     except HTTPException as exc:
                         logger.error("armed start failed: %s", exc.detail)
@@ -1328,6 +1348,7 @@ def create_app(
             svc.remove_listener(armer.on_frame)
         app.state.armer = None
         app.state.arm_req = None
+        app.state.arm_collection = None
 
     @app.post("/api/recording/arm")
     async def recording_arm(req: ArmRequest) -> dict[str, Any]:
@@ -1342,6 +1363,7 @@ def create_app(
             raise HTTPException(409, "already armed")
         if recorder() is not None and recorder().state == RecorderState.RECORDING:  # type: ignore[union-attr]
             raise HTTPException(409, "already recording")
+        collection = _recording_collection()
         try:
             spec = parse_trigger(req.trigger)
             rois = parse_rois(json.dumps(req.rois)) if req.rois else []
@@ -1359,6 +1381,7 @@ def create_app(
             await run_in_threadpool(_nuc_hold_begin, svc, nuc_first=True)
         app.state.armer = armer
         app.state.arm_req = req
+        app.state.arm_collection = collection
         svc.add_listener(armer.on_frame)
         app.state.arm_task = asyncio.create_task(_arm_loop())
         return {"state": "armed", "armed": armer.status()}
@@ -1422,6 +1445,7 @@ def create_app(
             return {
                 "state": "armed",
                 "armed": armer.status(),
+                "collection": app.state.arm_collection,
                 "experiments_root": str(root),
                 "free_space_gb": free,
                 "min_free_gb": app.state.min_free_gb,
@@ -1432,12 +1456,16 @@ def create_app(
             free = shutil.disk_usage(probe).free / 1e9 if probe.exists() else None
             return {
                 "state": RecorderState.IDLE.value,
+                "collection": load_selection(root),  # None or "" means Record is refused
                 "experiments_root": str(root),
                 "free_space_gb": free,
                 "min_free_gb": app.state.min_free_gb,
                 "visible": _visible_status(),
             }
         st = rec.stats()
+        exp_dir = st.get("experiment_dir")
+        # the live run's folder is <root>/<collection>/<run>
+        st["collection"] = Path(exp_dir).parent.name if exp_dir else None
         st["visible"] = _visible_status()
         return st
 
@@ -1580,7 +1608,14 @@ def create_app(
         return RunQuery(ref.name, ref.collection or "")
 
     register_smart_roi_routes(app, _exp_dir, _job_key)
-    register_collections_routes(app, _roots)
+
+    def _recording_or_armed() -> bool:
+        """The collection picker is locked while this is True."""
+        rec: Recorder | None = getattr(app.state, "recorder", None)  # set by the lifespan
+        recording = rec is not None and rec.state == RecorderState.RECORDING
+        return recording or app.state.armer is not None
+
+    register_collections_routes(app, _roots, _recording_or_armed)
 
     # -- external-drive storage (offload) ------------------------------------------------------
 

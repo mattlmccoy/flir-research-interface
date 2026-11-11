@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from collection_helpers import select_collection
 from fastapi.testclient import TestClient
 
 from flir_research_interface.api.app import create_app
@@ -176,6 +177,7 @@ def test_recording_with_visible_writes_mp4_next_to_the_store(tmp_path: Path) -> 
     with _client(tmp_path, visible_factory=factory) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         r = c.post("/api/recording/start", json={"name": "vis", "visible": True})
         assert r.status_code == 200, r.text
         assert r.json()["visible"]["state"] == "recording"
@@ -195,6 +197,7 @@ def test_recording_without_visible_support_reports_it(tmp_path: Path) -> None:
     with _client(tmp_path) as c:  # no factory: ffmpeg/credentials unavailable
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         r = c.post("/api/recording/start", json={"name": "novis", "visible": True})
         assert r.status_code == 200
         assert r.json()["visible"]["state"] == "unavailable"

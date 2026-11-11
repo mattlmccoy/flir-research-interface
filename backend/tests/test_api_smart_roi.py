@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from collection_helpers import select_collection
 from fastapi.testclient import TestClient
 from smart_recording import SMART, make_smart_run
 
@@ -130,6 +131,7 @@ def test_arm_rejects_smart_trigger(tmp_path: Path) -> None:
     with _client(tmp_path) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         trig = {"start": {"kind": "threshold", "roi": 7, "level_c": 100.0},
                 "end": {"kind": "manual"}}
         r = c.post("/api/recording/arm", json={"name": "n", "rois": [SMART], "trigger": trig})
@@ -160,6 +162,7 @@ def test_post_stop_computes_stored_smart_rois(
     with _client(tmp_path) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         r = c.post("/api/recording/start", json={"name": "run", "rois": [SMART]})
         assert r.status_code == 200, r.text
         name = Path(r.json()["experiment_dir"]).name
@@ -172,16 +175,16 @@ def test_post_stop_computes_stored_smart_rois(
                 break
             time.sleep(0.05)
         assert job["state"] == "done", job
-        assert (tmp_path / name / "smart_roi" / "7.npz").is_file()
+        assert (tmp_path / "t" / name / "smart_roi" / "7.npz").is_file()
         _wait_idle(c)
         failures = [
             r for r in caplog.records
             if r.levelno >= logging.ERROR and "ffmpeg not found" not in (r.exc_text or "")
         ]
         assert not failures, [(r.getMessage(), r.exc_text) for r in failures]
-        csv_text = (tmp_path / name / "exports" / "roi_series.csv").read_text()
+        csv_text = (tmp_path / "t" / name / "exports" / "roi_series.csv").read_text()
         assert "smart ROI part: thermal edge" in csv_text and "part area px" in csv_text
-        assert (tmp_path / name / "exports" / "roi_plot.png").is_file()
+        assert (tmp_path / "t" / name / "exports" / "roi_plot.png").is_file()
         c.post("/api/camera/disconnect")
 
 

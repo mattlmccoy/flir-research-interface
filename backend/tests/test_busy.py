@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from collection_helpers import select_collection
 from fastapi.testclient import TestClient
 
 from flir_research_interface.analysis import run_summary
@@ -79,6 +80,7 @@ def test_post_stop_exports_count_as_busy(
         devs = c.get("/api/camera/devices").json()
         serial = devs[0]["serial"]
         r = c.post("/api/camera/connect", json={"backend": "simulated", "serial": serial})
+        select_collection(c)
         assert r.status_code == 200, r.text
         assert c.get("/api/operator/busy").json() == {"busy": False, "reasons": []}
         assert c.post("/api/recording/start", json={"name": "busy"}).status_code == 200

@@ -12,6 +12,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+from collection_helpers import select_collection
 from fastapi.testclient import TestClient
 
 from flir_research_interface import storage
@@ -33,6 +34,7 @@ def _client(tmp: Path) -> TestClient:
 def _record_run(c: TestClient, body: dict[str, object] | None = None) -> str:
     devs = c.get("/api/camera/devices").json()
     c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+    select_collection(c)
     r = c.post("/api/recording/start", json={"name": "r", **(body or {})})
     assert r.status_code == 200, r.text
     c.post("/api/recording/stop")
@@ -46,7 +48,7 @@ def test_put_visible_adjust_refuses_non_numbers(tmp_path: Path, bad: object) -> 
         r = c.put(f"/api/experiments/{name}/visible-adjust", json={**OK, "contrast": bad},
                   headers=H)
         assert r.status_code in (400, 422), r.text
-        assert not (tmp_path / name / "visible_adjust.json").exists()
+        assert not (tmp_path / "t" / name / "visible_adjust.json").exists()
         ok = c.put(f"/api/experiments/{name}/visible-adjust", json=OK, headers=H)
         assert ok.status_code == 200, ok.text  # a real number (an int too) is still fine
         assert c.put(f"/api/experiments/{name}/visible-adjust",
@@ -58,16 +60,17 @@ def test_recording_stamp_refuses_non_numbers(tmp_path: Path, bad: object) -> Non
     with _client(tmp_path) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         r = c.post("/api/recording/start",
                    json={"name": "bad", "visible_adjust": {**OK, "exposure_ev": bad}})
         assert r.status_code in (400, 422), r.text
-        assert [p for p in tmp_path.iterdir() if p.is_dir()] == []
+        assert [p for p in (tmp_path / "t").iterdir() if p.is_dir()] == []
 
 
 def test_exports_listing_hides_transient_part_files(tmp_path: Path) -> None:
     with _client(tmp_path) as c:
         name = _record_run(c)
-        exports = tmp_path / name / "exports"
+        exports = tmp_path / "t" / name / "exports"
         exports.mkdir(exist_ok=True)
         (exports / "visible_full_range.mp4.part").write_bytes(b"half")
         (exports / "thermal.part.mp4").write_bytes(b"half")

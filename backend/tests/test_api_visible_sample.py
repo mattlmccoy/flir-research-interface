@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from collection_helpers import select_collection
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -81,6 +82,7 @@ def _record(c: TestClient, calls: _Calls) -> str:
     """Record a short simulated run, stop it, and wait for the post-stop chain to finish."""
     devs = c.get("/api/camera/devices").json()
     c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+    select_collection(c)
     r = c.post("/api/recording/start", json={"name": "run"})
     assert r.status_code == 200, r.text
     name = Path(r.json()["experiment_dir"]).name
@@ -95,7 +97,7 @@ def test_experiment_info_includes_visible_sample(tmp_path: Path, calls: _Calls) 
     with TestClient(_app(tmp_path)) as c:
         name = _record(c, calls)
         summary = {"status": "ok", "reason": None, "events": [{"t_start_s": 4.0}]}
-        (tmp_path / name / "exports" / "visible_sample.json").write_text(json.dumps(summary))
+        (tmp_path / "t" / name / "exports" / "visible_sample.json").write_text(json.dumps(summary))
         info = c.get(f"/api/experiments/{name}").json()
         assert info["visible_sample"] == summary
         c.post("/api/camera/disconnect")
@@ -104,7 +106,7 @@ def test_experiment_info_includes_visible_sample(tmp_path: Path, calls: _Calls) 
 def test_experiment_info_visible_sample_absent(tmp_path: Path, calls: _Calls) -> None:
     with TestClient(_app(tmp_path)) as c:
         name = _record(c, calls)
-        assert not (tmp_path / name / "exports" / "visible_sample.json").exists()
+        assert not (tmp_path / "t" / name / "exports" / "visible_sample.json").exists()
         r = c.get(f"/api/experiments/{name}")
         assert r.status_code == 200
         assert r.json()["visible_sample"] is None
@@ -118,7 +120,7 @@ def test_experiment_info_visible_sample_invalid_is_none(
     """A truncated, empty or non-object file must never break the endpoint."""
     with TestClient(_app(tmp_path)) as c:
         name = _record(c, calls)
-        (tmp_path / name / "exports" / "visible_sample.json").write_text(text)
+        (tmp_path / "t" / name / "exports" / "visible_sample.json").write_text(text)
         r = c.get(f"/api/experiments/{name}")
         assert r.status_code == 200
         assert r.json()["visible_sample"] is None
@@ -136,7 +138,7 @@ def test_derived_job_runs_visible_step(
         real = visible_sample_run.analyse_visible_sample
 
         def spy(reader: Any, **kw: Any) -> dict[str, Any]:
-            steps.append(app.state.derived_jobs[name]["step"])  # which step called it
+            steps.append(app.state.derived_jobs[f"t/{name}"]["step"])  # keyed by RunRef.key
             return real(reader, **kw)  # type: ignore[no-any-return]
 
         monkeypatch.setattr(visible_sample_run, "analyse_visible_sample", spy)
@@ -235,12 +237,13 @@ def test_real_analysis_of_a_run_without_visible_video_is_skipped_and_exposed(
     with TestClient(_app(tmp_path)) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         started = c.post("/api/recording/start", json={"name": "run"}).json()
         name = Path(started["experiment_dir"]).name
         time.sleep(0.3)
         c.post("/api/recording/stop")
         _wait_for(lambda: bool(chain_done), "the post-stop chain")
-        path = tmp_path / name / "exports" / "visible_sample.json"
+        path = tmp_path / "t" / name / "exports" / "visible_sample.json"
         on_disk = json.loads(path.read_text())
         assert on_disk["status"] == "skipped" and on_disk["reason"]
         assert c.get(f"/api/experiments/{name}").json()["visible_sample"] == on_disk

@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 import pytest
+from collection_helpers import select_collection
 from fastapi.testclient import TestClient
 
 from flir_research_interface.analysis.run_summary import readme_text
@@ -40,6 +41,7 @@ def _client(tmp_path: Path) -> TestClient:
 def _record(c: TestClient, **body: object) -> Path:
     devs = c.get("/api/camera/devices").json()
     c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+    select_collection(c)
     r = c.post("/api/recording/start", json={"name": "masked", **body})
     assert r.status_code == 200, r.text
     time.sleep(0.2)

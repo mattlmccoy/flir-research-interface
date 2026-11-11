@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+from collection_helpers import select_collection
 from fastapi.testclient import TestClient
 
 from flir_research_interface.api.app import create_app
@@ -59,6 +60,7 @@ def test_arm_then_auto_start_and_auto_stop(tmp_path: Path) -> None:
     with _client(tmp_path) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         body = {
             "name": "armed",
             "metadata": {"operator": "t"},
@@ -99,6 +101,7 @@ def test_disarm_and_refusals(tmp_path: Path) -> None:
         )  # no camera
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         bad = {"name": "n", "trigger": {"start": {"kind": "threshold"}, "end": {"kind": "manual"}}}
         assert c.post("/api/recording/arm", json=bad).status_code == 400
         ok = {"name": "n", "trigger": {"start": {"kind": "manual"}, "end": {"kind": "manual"}}}
@@ -106,7 +109,8 @@ def test_disarm_and_refusals(tmp_path: Path) -> None:
         assert c.post("/api/recording/arm", json=ok).status_code == 409  # already armed
         assert c.post("/api/recording/disarm").status_code == 200
         assert c.get("/api/recording/status").json()["state"] == "idle"
-        assert not any(p.is_dir() for p in tmp_path.iterdir())  # disarm before start writes nothing
+        # disarm before start writes nothing
+        assert not any(p.is_dir() for p in (tmp_path / "t").iterdir())
         assert c.post("/api/recording/disarm").status_code == 409
         c.post("/api/camera/disconnect")
 

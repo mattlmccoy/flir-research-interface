@@ -7,6 +7,7 @@ import json
 import time
 from pathlib import Path
 
+from collection_helpers import select_collection
 from fastapi.testclient import TestClient
 
 from flir_research_interface.api.app import create_app
@@ -24,6 +25,7 @@ def test_recording_holds_nuc_off_and_restores_it(tmp_path: Path) -> None:
     with _client(tmp_path) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         assert c.get("/api/camera/info").json()["nuc_mode"] == "Automatic"
         r = c.post("/api/recording/start", json={"name": "hold", "nuc_hold": True})
         assert r.status_code == 200, r.text

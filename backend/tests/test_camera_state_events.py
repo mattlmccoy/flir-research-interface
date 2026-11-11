@@ -7,6 +7,7 @@ import json
 import time
 from pathlib import Path
 
+from collection_helpers import select_collection
 from fastapi.testclient import TestClient
 
 from flir_research_interface.api.app import create_app
@@ -19,6 +20,7 @@ def test_device_temperature_is_stamped_at_start_and_stop(tmp_path: Path) -> None
     with TestClient(app) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         d = Path(
             c.post("/api/recording/start", json={"name": "temp", "nuc_hold": False}).json()[
                 "experiment_dir"

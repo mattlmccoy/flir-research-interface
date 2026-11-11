@@ -12,6 +12,7 @@ import json
 import time
 from pathlib import Path
 
+from collection_helpers import select_collection
 from fastapi.testclient import TestClient
 
 from flir_research_interface.api.app import create_app
@@ -36,6 +37,7 @@ def _wait(c: TestClient, pred, timeout: float = 10.0):  # type: ignore[no-untype
 def _connect(c: TestClient) -> None:
     devs = c.get("/api/camera/devices").json()
     c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+    select_collection(c)
 
 
 def _arm_rf(c: TestClient) -> None:

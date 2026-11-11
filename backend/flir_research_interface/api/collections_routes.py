@@ -48,8 +48,12 @@ class _SelectBody(BaseModel):
 
 
 def register_collections_routes(
-    app: FastAPI, roots: Callable[[], list[tuple[str, Path]]]
+    app: FastAPI,
+    roots: Callable[[], list[tuple[str, Path]]],
+    live: Callable[[], bool] = lambda: False,
 ) -> None:
+    """``live()`` is True while a recording or an armed trigger is active (the picker lock)."""
+
     def _base() -> Path:
         return Path(roots()[0][1])  # the local root is always first
 
@@ -87,6 +91,10 @@ def register_collections_routes(
 
     @app.put("/api/collections/selected")
     def select_collection(body: _SelectBody) -> dict[str, Any]:
+        if live():
+            raise HTTPException(
+                409, "the collection can't change while a recording or armed trigger is active"
+            )
         name = body.name
         if name:
             err = collection_name_error(name)

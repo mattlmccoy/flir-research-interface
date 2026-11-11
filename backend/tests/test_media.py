@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from collection_helpers import select_collection
 
 from flir_research_interface.camera.base import Frame
 from flir_research_interface.playback.reader import ExperimentReader
@@ -74,6 +75,7 @@ def test_media_export_api_job(tmp_path: Path) -> None:
                                experiments_root=tmp_path, min_free_gb=0.0)) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         rec = c.post("/api/recording/start", json={"name": "clip"}).json()
         name = Path(rec["experiment_dir"]).name
         time.sleep(0.3)
@@ -108,6 +110,7 @@ def test_range_compute_job_reports_progress_then_done(tmp_path: Path) -> None:
                                experiments_root=tmp_path, min_free_gb=0.0)) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         rec = c.post("/api/recording/start", json={"name": "clip"}).json()
         name = Path(rec["experiment_dir"]).name
         time.sleep(0.3)

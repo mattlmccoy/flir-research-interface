@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+from collection_helpers import select_collection
 from fastapi.testclient import TestClient
 
 from flir_research_interface.api.app import create_app
@@ -54,6 +55,7 @@ def test_event_endpoint_requires_recording_and_lands_in_events_json(tmp_path: Pa
         assert c.post("/api/recording/event", json={"name": "RF ON"}).status_code == 409
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         assert c.post("/api/recording/start", json={"name": "marks"}).status_code == 200
         time.sleep(0.2)
         r = c.post("/api/recording/event", json={"name": "RF ON", "note": "300 W"})

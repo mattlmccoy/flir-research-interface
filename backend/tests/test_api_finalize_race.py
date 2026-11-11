@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from collection_helpers import select_collection
 from fastapi.testclient import TestClient
 
 from flir_research_interface.analysis import run_summary
@@ -49,6 +50,7 @@ class StaleFinalizeScenario:
 def _connect(c: TestClient) -> None:
     devs = c.get("/api/camera/devices").json()
     r = c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+    select_collection(c)
     assert r.status_code == 200, r.text
 
 

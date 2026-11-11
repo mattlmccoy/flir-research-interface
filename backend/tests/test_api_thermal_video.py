@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 import pytest
+from collection_helpers import select_collection
 from fastapi.testclient import TestClient
 
 from flir_research_interface.api.app import create_app
@@ -38,6 +39,7 @@ def test_stop_renders_thermal_preview_in_the_background_and_it_is_served(tmp_pat
     with _client(tmp_path) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         d = Path(c.post("/api/recording/start", json={"name": "tv"}).json()["experiment_dir"])
         time.sleep(0.3)
         t0 = time.monotonic()
@@ -62,6 +64,7 @@ def test_thermal_video_can_be_regenerated_on_demand(tmp_path: Path) -> None:
     with _client(tmp_path) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         d = Path(c.post("/api/recording/start", json={"name": "tv2"}).json()["experiment_dir"])
         time.sleep(0.2)
         c.post("/api/recording/stop")

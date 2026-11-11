@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 import pytest
+from collection_helpers import select_collection
 from fastapi.testclient import TestClient
 
 from flir_research_interface.api.app import create_app
@@ -49,6 +50,7 @@ def _wait_derived(c: TestClient, name: str, timeout: float = 30.0) -> dict:
 def _record(c: TestClient, tmp_path: Path) -> str:
     devs = c.get("/api/camera/devices").json()
     c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+    select_collection(c)
     r = c.post("/api/recording/start", json={"name": "run", "rois": RECORD_ROIS})
     assert r.status_code == 200, r.text
     name = Path(r.json()["experiment_dir"]).name
@@ -57,7 +59,7 @@ def _record(c: TestClient, tmp_path: Path) -> str:
     # let the post-stop background render of the ROI video settle so a following on-demand
     # regenerate does not race it on the same output file
     if _HAVE_FFMPEG:
-        rois_video = tmp_path / name / "exports" / "thermal_preview_rois.mp4"
+        rois_video = tmp_path / "t" / name / "exports" / "thermal_preview_rois.mp4"
         t0 = time.monotonic()
         while not rois_video.is_file() and time.monotonic() - t0 < 20.0:
             time.sleep(0.1)
@@ -70,7 +72,7 @@ def test_put_rois_updates_metadata_and_keeps_optics(tmp_path: Path) -> None:
         r = c.put(f"/api/experiments/{name}/rois", json={"rois": NEW_ROIS})
         assert r.status_code == 200, r.text
         assert r.json()["rois"] == 2
-        meta = json.loads((tmp_path / name / "metadata.json").read_text())
+        meta = json.loads((tmp_path / "t" / name / "metadata.json").read_text())
         assert [x["kind"] for x in meta["rois"]] == ["spot", "rect"]
         assert meta["rois"][1]["name"] == "patch"
         assert meta["rois"][1]["emissivity"] == 0.85  # optics preserved for accuracy
@@ -82,7 +84,7 @@ def test_derived_regenerate_reflects_the_new_rois(tmp_path: Path) -> None:
     with _client(tmp_path) as c:
         name = _record(c, tmp_path)
         # at record time roi_series.csv had only the spot S1
-        csv0 = (tmp_path / name / "exports" / "roi_series.csv").read_text()
+        csv0 = (tmp_path / "t" / name / "exports" / "roi_series.csv").read_text()
         head0 = [ln for ln in csv0.splitlines() if not ln.startswith("#")][0]
         assert "R2_mean" not in head0
 
@@ -97,7 +99,7 @@ def test_derived_regenerate_reflects_the_new_rois(tmp_path: Path) -> None:
         names = {e["name"] for e in job["exports"]}
         assert "roi_series.csv" in names and "roi_plot.png" in names
 
-        csv1 = (tmp_path / name / "exports" / "roi_series.csv").read_text()
+        csv1 = (tmp_path / "t" / name / "exports" / "roi_series.csv").read_text()
         head1 = [ln for ln in csv1.splitlines() if not ln.startswith("#")][0]
         assert "R2_mean" in head1  # the rectangle now appears in the regenerated series
         c.post("/api/camera/disconnect")
@@ -107,7 +109,7 @@ def test_derived_skip_video_regenerates_series_without_touching_the_video(tmp_pa
     """The quick option (video=false) rebuilds roi_series + plot and never renders the video."""
     with _client(tmp_path) as c:
         name = _record(c, tmp_path)
-        video = tmp_path / name / "exports" / "thermal_preview_rois.mp4"
+        video = tmp_path / "t" / name / "exports" / "thermal_preview_rois.mp4"
         # let the post-stop background render settle so `before` is stable
         if _HAVE_FFMPEG:
             t0 = time.monotonic()
@@ -120,7 +122,7 @@ def test_derived_skip_video_regenerates_series_without_touching_the_video(tmp_pa
         job = _wait_derived(c, name)
         assert job["state"] == "done", job
         # roi_series reflects the new rect ROI
-        csv_path = tmp_path / name / "exports" / "roi_series.csv"
+        csv_path = tmp_path / "t" / name / "exports" / "roi_series.csv"
         head = [ln for ln in csv_path.read_text().splitlines() if not ln.startswith("#")][0]
         assert "R2_mean" in head
         # the ROI video was not re-rendered (unchanged, or still absent)

@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 import pytest
+from collection_helpers import select_collection
 from fastapi.testclient import TestClient
 
 from flir_research_interface.analysis.calibration import calibration_dir
@@ -81,6 +82,7 @@ def test_profile_api_and_recording_stamp(tmp_path: Path) -> None:
         )
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         d = Path(
             c.post("/api/recording/start", json={"name": "p", "nuc_hold": False}).json()[
                 "experiment_dir"

@@ -7,6 +7,7 @@ import json
 import time
 from pathlib import Path
 
+from collection_helpers import select_collection
 from fastapi.testclient import TestClient
 
 from flir_research_interface.api.app import create_app
@@ -34,6 +35,7 @@ def test_control_endpoint_returns_frame_aligned_rf_power(tmp_path: Path) -> None
     with _client(tmp_path) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         c.post("/api/recording/start", json={"name": "rf trace"})
         time.sleep(0.2)
         c.post("/api/control/telemetry", json={**SAMPLE, "forward_w": 100.0})
@@ -41,7 +43,8 @@ def test_control_endpoint_returns_frame_aligned_rf_power(tmp_path: Path) -> None
         c.post("/api/control/telemetry", json={**SAMPLE, "forward_w": 250.0})
         c.post("/api/recording/stop")
         c.post("/api/camera/disconnect")
-        runs = [d for d in tmp_path.iterdir() if d.is_dir() and (d / "events.json").exists()]
+        coll = tmp_path / "t"  # the selected collection
+        runs = [d for d in coll.iterdir() if d.is_dir() and (d / "events.json").exists()]
         s = c.get(f"/api/experiments/{runs[0].name}/control").json()
         assert len(s["t_s"]) == 2 and all(isinstance(t, float) for t in s["t_s"])
         assert s["forward_w"] == [100.0, 250.0]  # RF power over the run, frame-aligned
@@ -61,6 +64,7 @@ def test_telemetry_marks_timeline_and_writes_control_csv_while_recording(tmp_pat
     with _client(tmp_path) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         c.post("/api/recording/start", json={"name": "loop run"})
         time.sleep(0.2)
         assert c.post("/api/control/telemetry", json=SAMPLE).json()["recording"] is True
@@ -69,8 +73,9 @@ def test_telemetry_marks_timeline_and_writes_control_csv_while_recording(tmp_pat
         c.post("/api/recording/stop")
         c.post("/api/camera/disconnect")
 
-        # locate the single run folder (created directly under experiments_root=tmp_path)
-        runs = [d for d in tmp_path.iterdir() if d.is_dir() and (d / "events.json").exists()]
+        # locate the single run folder (created in the selected collection under tmp_path)
+        coll = tmp_path / "t"  # the selected collection
+        runs = [d for d in coll.iterdir() if d.is_dir() and (d / "events.json").exists()]
         assert len(runs) == 1
         run = runs[0]
 
@@ -95,6 +100,7 @@ def test_cap_positions_are_recorded_and_unknown_keys_are_tolerated(tmp_path: Pat
     with _client(tmp_path) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         c.post("/api/recording/start", json={"name": "cap trace"})
         time.sleep(0.2)
         hb = {"mode": "manual", "forward_w": 200.0, "reverse_w": 8.0, "reflected_fraction": 0.04}
@@ -107,7 +113,8 @@ def test_cap_positions_are_recorded_and_unknown_keys_are_tolerated(tmp_path: Pat
         assert r.status_code == 200  # unknown keys are ignored, never a 422
         c.post("/api/recording/stop")
         c.post("/api/camera/disconnect")
-        run = next(d for d in tmp_path.iterdir() if d.is_dir() and (d / "events.json").exists())
+        coll = tmp_path / "t"  # the selected collection
+        run = next(d for d in coll.iterdir() if d.is_dir() and (d / "events.json").exists())
 
         rows = list(csv.reader((run / "exports" / "control.csv").open()))
         assert rows[0][-2:] == ["tune_cap_percent", "load_cap_percent"]  # appended, order kept

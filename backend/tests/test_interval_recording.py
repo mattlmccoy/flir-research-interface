@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+from collection_helpers import select_collection
 from fastapi.testclient import TestClient
 
 from flir_research_interface.api.app import create_app
@@ -46,6 +47,7 @@ def test_api_start_accepts_every_nth(tmp_path: Path) -> None:
     with TestClient(app) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         r = c.post(
             "/api/recording/start", json={"name": "lapse", "every_nth": 10, "nuc_hold": False}
         )

@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+from collection_helpers import select_collection
 from fastapi.testclient import TestClient
 
 from flir_research_interface.api.app import create_app
@@ -22,6 +23,7 @@ def test_delete_removes_the_run_folder_and_refuses_the_active_recording(tmp_path
     with _client(tmp_path) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         d1 = Path(c.post("/api/recording/start", json={"name": "old"}).json()["experiment_dir"])
         time.sleep(0.2)
         c.post("/api/recording/stop")

@@ -13,6 +13,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from collection_helpers import select_collection
 from fastapi.testclient import TestClient
 
 from flir_research_interface.api.app import create_app
@@ -130,6 +131,7 @@ def test_parameters_endpoint_requires_connection_and_validates(tmp_path: Path) -
         assert r.status_code == 409
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         bad = c.post("/api/camera/parameters", json={"values": {"ObjectEmissivity": 2}})
         assert bad.status_code == 400
         ok = c.post(
@@ -146,6 +148,7 @@ def test_parameters_locked_while_recording_but_nuc_allowed_and_logged(tmp_path: 
     with _client(tmp_path) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         assert (
             c.post("/api/recording/start", json={"name": "lock", "nuc_hold": False}).status_code
             == 200

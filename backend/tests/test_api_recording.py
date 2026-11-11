@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+from collection_helpers import select_collection
 from fastapi.testclient import TestClient
 
 from flir_research_interface.api.app import create_app
@@ -28,6 +29,7 @@ def test_recording_lifecycle_and_experiment_listing(tmp_path: Path) -> None:
         )  # not connected
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         r = c.post(
             "/api/recording/start",
             json={"name": "PA12 Run 1", "metadata": {"operator": "mm", "rf_power_w": 300}},
@@ -60,6 +62,7 @@ def test_disconnect_while_recording_finalizes_first(tmp_path: Path) -> None:
     with _client(tmp_path) as c:
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         c.post("/api/recording/start", json={"name": "abrupt"})
         time.sleep(0.3)
         c.post("/api/camera/disconnect")

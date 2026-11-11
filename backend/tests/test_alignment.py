@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from collection_helpers import select_collection
 from fastapi.testclient import TestClient
 
 from flir_research_interface.api.app import create_app
@@ -42,6 +43,7 @@ def test_recording_metadata_carries_the_alignment(tmp_path: Path) -> None:
         c.put("/api/calibration/visible", json=ALIGN)
         devs = c.get("/api/camera/devices").json()
         c.post("/api/camera/connect", json={"backend": "simulated", "serial": devs[0]["serial"]})
+        select_collection(c)
         d = c.post("/api/recording/start", json={"name": "aligned"}).json()["experiment_dir"]
         c.post("/api/recording/stop")
         meta = json.loads((Path(d) / "metadata.json").read_text())
