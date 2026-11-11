@@ -1,0 +1,130 @@
+{
+  "label": "FLIR SSD",
+  "last_seen_utc": "2026-11-09T20:12:01+00:00",
+  "runs": [
+    {
+      "name": "20260902_155959_AIT_T096_L077_120ser_200shunt_8020mix_power_test",
+      "path": "/Volumes/FLIR SSD/FLIR-recordings/20260902_155959_AIT_T096_L077_120ser_200shunt_8020mix_power_test",
+      "n_frames": 572,
+      "width": 640,
+      "height": 480,
+      "duration_s": 19.013,
+      "complete": true,
+      "manifest": {},
+      "previews": {},
+      "ir_format": "TemperatureLinear10mK",
+      "pixel_format": "Mono16",
+      "conversion": {
+        "ir_format": "TemperatureLinear10mK",
+        "kelvin_per_count": 0.01,
+        "kelvin_offset": 273.15,
+        "rule": "T_C = counts * kelvin_per_count - kelvin_offset"
+      },
+      "experiment": {},
+      "started_utc": "2026-09-02T19:59:59.718948+00:00",
+      "n_events": 4,
+      "visible": {},
+      "visible_timeline": [
+        {
+          "index": 0,
+          "file": "visible.mp4",
+          "t_start_s": -0.004837,
+          "duration_s": 20.039044,
+          "anchor": "launch"
+        }
+      ],
+      "rois": [],
+      "masks": null,
+      "visible_alignment": {},
+      "thermal_preview": {
+        "path": "/Volumes/FLIR SSD/FLIR-recordings/20260902_155959_AIT_T096_L077_120ser_200shunt_8020mix_power_test/exports/thermal_preview.mp4",
+        "bytes": 311581
+      },
+      "frames_on_disk": 572,
+      "metadata": {},
+      "size_bytes": 152382984,
+      "starred": false,
+      "tags": []
+    },
+    {
+      "name": "20260902_160221_AIT_T091_L077_120ser_200shunt_8020mix_power_test",
+      "path": "/Volumes/FLIR SSD/FLIR-recordings/20260902_160221_AIT_T091_L077_120ser_200shunt_8020mix_power_test",
+      "n_frames": 1332,
+      "width": 640,
+      "height": 480,
+      "duration_s": 44.319,
+      "complete": true,
+      "manifest": {},
+      "previews": {},
+      "ir_format": "TemperatureLinear10mK",
+      "pixel_format": "Mono16",
+      "conversion": {
+        "ir_format": "TemperatureLinear10mK",
+        "kelvin_per_count": 0.01,
+        "kelvin_offset": 273.15,
+        "rule": "T_C = counts * kelvin_per_count - kelvin_offset"
+      },
+      "experiment": {},
+      "started_utc": "2026-09-02T20:02:21.593117+00:00",
+      "n_events": 15,
+      "visible": {},
+      "visible_timeline": [],
+      "rois": [],
+      "masks": null,
+      "visible_alignment": {},
+      "thermal_preview": {
+        "path": "/Volumes/FLIR SSD/FLIR-recordings/20260902_160221_AIT_T091_L077_120ser_200shunt_8020mix_power_test/exports/thermal_preview.mp4",
+        "bytes": 287566
+      },
+      "frames_on_disk": 1332,
+      "metadata": {},
+      "size_bytes": 621865111,
+      "starred": false,
+      "tags": []
+    },
+    {
+      "name": "20260902_161019_AIT_T088_L067_120ser_200shunt_8020mix_power_test",
+      "path": "/Volumes/FLIR SSD/FLIR-recordings/20260902_161019_AIT_T088_L067_120ser_200shunt_8020mix_power_test",
+      "n_frames": 1186,
+      "width": 640,
+      "height": 480,
+      "duration_s": 39.458,
+      "complete": true,
+      "manifest": {},
+      "previews": {},
+      "ir_format": "TemperatureLinear10mK",
+      "pixel_format": "Mono16",
+      "conversion": {
+        "ir_format": "TemperatureLinear10mK",
+        "kelvin_per_count": 0.01,
+        "kelvin_offset": 273.15,
+        "rule": "T_C = counts * kelvin_per_count - kelvin_offset"
+      },
+      "experiment": {},
+      "started_utc": "2026-09-02T20:10:19.490992+00:00",
+      "n_events": 10,
+      "visible": {},
+      "visible_timeline": [
+        {
+          "index": 0,
+          "file": "visible.mp4",
+          "t_start_s": 0.005986,
+          "duration_s": 40.967489,
+          "anchor": "launch"
+        }
+      ],
+      "rois": [],
+      "masks": null,
+      "visible_alignment": {},
+      "thermal_preview": {
+        "path": "/Volumes/FLIR SSD/FLIR-recordings/20260902_161019_AIT_T088_L067_120ser_200shunt_8020mix_power_test/exports/thermal_preview.mp4",
+        "bytes": 3227563
+      },
+      "frames_on_disk": 1186,
+      "metadata": {},
+      "size_bytes": 321257462,
+      "starred": false,
+      "tags": []
+    }
+  ]
+}
