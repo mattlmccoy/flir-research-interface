@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import json
 import shutil
+import threading
 import time
 from pathlib import Path
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from flir_research_interface import storage
@@ -186,3 +188,104 @@ def test_record_into_offline_only_collection_creates_local_folder(tmp_path: Path
         assert r.status_code == 200, r.text
         assert Path(r.json()["experiment_dir"]).parent == local / "rf-sintering"
         assert c.post("/api/recording/stop").status_code == 200
+
+
+# -- fix round 1 ---------------------------------------------------------------------------------
+
+
+def test_concurrent_remembers_keep_both_collections(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two scoped listings at once (sync routes run in the threadpool) must not lose an update."""
+    local = _local(tmp_path)
+    real = storage._atomic_json
+
+    def slow(path: Path, data: dict[str, Any]) -> None:
+        time.sleep(0.2)  # widen the read-merge-write window so the threads interleave
+        real(path, data)
+
+    monkeypatch.setattr(storage, "_atomic_json", slow)
+    base = _v1()["runs"][0]
+    threads = [
+        threading.Thread(
+            target=storage.remember_drive_runs,
+            args=(local, [{**base, "name": f"20261110_00000{i}_{c}"}], "FLIR SSD"),
+            kwargs={"collection": c},
+        )
+        for i, c in enumerate(("aa", "bb"))
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert storage.offline_collections(local) == {"aa", "bb"}
+
+
+def test_v1_index_rewritten_once_to_schema_2(tmp_path: Path) -> None:
+    local = _local(tmp_path)
+    shutil.copy(FIXTURE, local / storage.INDEX_NAME)
+    items = [{**r, "library": "drive", "root": "/x"} for r in _v1()["runs"]]
+
+    storage.remember_drive_runs(local, items, "FLIR SSD", collection=None)
+    assert _index(local)["schema"] == 2
+    stamp = (local / storage.INDEX_NAME).stat().st_mtime_ns
+    time.sleep(0.01)
+    storage.remember_drive_runs(local, items, "FLIR SSD", collection=None)
+    assert (local / storage.INDEX_NAME).stat().st_mtime_ns == stamp
+
+
+def test_move_index_entry_rewrites_collection_and_paths(tmp_path: Path) -> None:
+    local = _local(tmp_path)
+    shutil.copy(FIXTURE, local / storage.INDEX_NAME)  # captured paths: /Volumes/FLIR SSD/...
+    run = _v1()["runs"][0]
+    drive_root = Path("/Volumes/FLIR SSD/FLIR-recordings")
+
+    storage.move_index_entry(local, run["name"], None, "rf-sintering", drive_root)
+    [moved] = storage.offline_runs(local, collection="rf-sintering")
+    new_dir = f"{drive_root}/rf-sintering/{run['name']}"
+    assert moved["name"] == run["name"]
+    assert moved["path"] == new_dir
+    assert moved["thermal_preview"]["path"] == f"{new_dir}/exports/thermal_preview.mp4"
+    assert run["name"] not in {r["name"] for r in storage.offline_runs(local, collection=None)}
+    assert _index(local)["schema"] == 2
+
+    storage.move_index_entry(local, run["name"], "rf-sintering", None, drive_root)
+    [back] = [r for r in storage.offline_runs(local, collection=None) if r["name"] == run["name"]]
+    assert back["path"] == run["path"]
+    # an entry the index does not have: nothing to do, no error
+    storage.move_index_entry(local, "20990101_000000_x", None, "aa", drive_root)
+
+
+def test_drive_move_route_updates_index(tmp_path: Path) -> None:
+    local = _local(tmp_path)
+    drive = tmp_path / "Drive"
+    drive.mkdir()
+    storage.register_drive(local, str(drive))
+    name = "20261110_100000_a"
+    d = drive / "FLIR-recordings" / name
+    d.mkdir(parents=True)
+    (d / "metadata.json").write_text(json.dumps({"experiment": {"name": name}}))
+    with _client(local) as c:
+        assert c.get("/api/experiments", params={"collection": ""}).status_code == 200
+        assert [r["name"] for r in storage.offline_runs(local, collection=None)] == [name]
+
+        r = c.post(
+            f"/api/experiments/{name}/collection?collection=",
+            json={"to": "rf-sintering", "library": "drive"},
+        )
+        assert r.status_code == 200, r.text
+    # the target collection was never listed, yet the offline view still has the run
+    assert storage.offline_runs(local, collection=None) == []
+    [moved] = storage.offline_runs(local, collection="rf-sintering")
+    assert moved["name"] == name
+
+
+def test_unsorted_counts_offline_top_level_runs(tmp_path: Path) -> None:
+    local = _local(tmp_path)
+    drive = tmp_path / "Drive"
+    drive.mkdir()
+    storage.register_drive(local, str(drive))  # removes any old index
+    shutil.rmtree(drive)  # unplugged
+    shutil.copy(FIXTURE, local / storage.INDEX_NAME)  # real v1: every run at the top level
+    doc = _client(local).get("/api/collections").json()
+    assert doc["unsorted"] == {"local": 0, "drive": 3}

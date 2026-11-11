@@ -18,6 +18,7 @@ import logging
 import os
 import shutil
 import tempfile
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -230,6 +231,10 @@ INDEX_NAME = ".drive-index.json"
 #: without ``schema`` is v1, whose runs all read as top level.
 INDEX_SCHEMA = 2
 
+#: Serialises every read-modify-write of the index: listings are sync routes in the threadpool, so
+#: two scoped listings at once would otherwise drop one collection's entries.
+_INDEX_LOCK = threading.Lock()
+
 
 def _index_runs(idx: dict[str, Any]) -> list[dict[str, Any]]:
     """The index's run entries, each with ``collection`` (``None`` for v1 / top level)."""
@@ -246,14 +251,21 @@ def remember_drive_runs(
 ) -> None:
     """Snapshot the connected drive's run summaries for one ``collection`` (``None`` = top level).
     Entries of every other collection are kept; the file is rewritten only when it changes."""
-    path = Path(local_root) / INDEX_NAME
-    old = _read_index(path)
-    kept = [r for r in _index_runs(old) if r["collection"] != collection]
     fresh = [
         {**{k: v for k, v in it.items() if k not in ("root", "library")}, "collection": collection}
         for it in items
     ]
-    runs = sorted(kept + fresh, key=lambda r: (r["collection"] or "", str(r["name"])))
+    path = Path(local_root) / INDEX_NAME
+    with _INDEX_LOCK:
+        old = _read_index(path)
+        kept = [r for r in _index_runs(old) if r["collection"] != collection]
+        _write_index(path, old, kept + fresh, label)
+
+
+def _write_index(path: Path, old: dict[str, Any], runs: list[dict[str, Any]], label: str) -> None:
+    """Write ``runs`` (sorted) as a v2 index unless that is exactly what ``old`` already holds.
+    Callers hold ``_INDEX_LOCK``."""
+    runs = sorted(runs, key=lambda r: (r["collection"] or "", str(r["name"])))
     if (
         old.get("schema") == INDEX_SCHEMA
         and old.get("label") == label
@@ -266,6 +278,49 @@ def remember_drive_runs(
     )
 
 
+def _rewrite_prefix(value: Any, old: Path, new: Path) -> Any:
+    """``value`` with a leading ``old`` folder path replaced by ``new`` (also matched in its
+    symlink-resolved form, e.g. /var -> /private/var); anything else is returned unchanged."""
+    if not isinstance(value, str):
+        return value
+    for prefix in dict.fromkeys((str(old), str(old.resolve()))):
+        if value == prefix or value.startswith(prefix + os.sep):
+            return str(new) + value[len(prefix):]
+    return value
+
+
+def move_index_entry(
+    local_root: Path | str,
+    name: str,
+    src_collection: str | None,
+    dst_collection: str | None,
+    drive_root: Path | str,
+) -> None:
+    """After a rename on the connected drive, move run ``name``'s index entry from
+    ``src_collection`` to ``dst_collection`` (``None`` = top level), rewriting its ``path`` and
+    ``thermal_preview.path``. No entry, no change."""
+    root = Path(drive_root)
+    old_dir = root / src_collection / name if src_collection else root / name
+    new_dir = root / dst_collection / name if dst_collection else root / name
+    path = Path(local_root) / INDEX_NAME
+    with _INDEX_LOCK:
+        idx = _read_index(path)
+        runs = _index_runs(idx)
+        hit = next(
+            (r for r in runs if r["collection"] == src_collection and r["name"] == name), None
+        )
+        if hit is None:
+            return
+        moved = {**hit, "collection": dst_collection}
+        if "path" in hit:
+            moved["path"] = _rewrite_prefix(hit["path"], old_dir, new_dir)
+        tp = hit.get("thermal_preview")
+        if isinstance(tp, dict) and "path" in tp:
+            moved["thermal_preview"] = {**tp, "path": _rewrite_prefix(tp["path"], old_dir, new_dir)}
+        runs = [r for r in runs if r is not hit] + [moved]
+        _write_index(path, idx, runs, str(idx.get("label", "drive")))
+
+
 def offline_runs(local_root: Path | str, *, collection: str | None) -> list[dict[str, Any]]:
     """The last-seen runs of the registered drive in ``collection`` (``None`` = top level), marked
     ``library: "offline"`` so they can never be mistaken for runs readable right now."""
@@ -276,6 +331,11 @@ def offline_runs(local_root: Path | str, *, collection: str | None) -> list[dict
         for r in _index_runs(idx)
         if r["collection"] == collection
     ]
+
+
+def offline_index(local_root: Path | str) -> list[dict[str, Any]]:
+    """Every entry of the offline index (one read), each with ``collection`` (``None`` = top)."""
+    return _index_runs(_read_index(Path(local_root) / INDEX_NAME))
 
 
 def offline_collections(local_root: Path | str) -> set[str]:

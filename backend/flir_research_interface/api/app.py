@@ -1813,6 +1813,10 @@ def create_app(
             raise HTTPException(409, _clash_message(req.to or None, lib, ref.name)) from exc
         except OSError as exc:  # e.g. EXDEV: never fall back to a copy
             raise HTTPException(500, f"could not move {ref.name}: {exc}") from exc
+        if lib == "drive":  # keep the offline view right even if only the source is re-listed
+            storage.move_index_entry(
+                app.state.experiments_root, ref.name, ref.collection, req.to or None, root
+            )
         return {"collection": req.to or None, "name": ref.name}
 
     @app.get("/api/experiments/{name}/move/status")

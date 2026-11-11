@@ -80,7 +80,7 @@ def register_collections_routes(
         local = set(scans["local"].collections)
         drive = set(scans["drive"].collections) if "drive" in scans else set()
         # unplugged: the drive side is what the offline index last saw, flagged ``offline``
-        offline = "drive" not in scans and _registered()
+        offline = _offline()
         indexed = storage.offline_collections(_base()) if offline else set()
         return {
             "selected": load_selection(_base()),
@@ -95,7 +95,9 @@ def register_collections_routes(
             ],
             "unsorted": {
                 "local": len(scans["local"].runs),
-                "drive": len(scans["drive"].runs) if "drive" in scans else 0,
+                # unplugged: the top-level runs the offline index last saw (never a false 0)
+                "drive": len(scans["drive"].runs) if "drive" in scans
+                else len(storage.offline_runs(_base(), collection=None)) if offline else 0,
             },
             "unexpected": [
                 {"library": lib, "name": n} for lib, s in scans.items() for n in s.unexpected
@@ -120,10 +122,7 @@ def register_collections_routes(
             for c in scan.collections:
                 seen.update((c, n) for n in _collection_runs(root / c))
         if _offline():
-            for coll in [None, *storage.offline_collections(_base())]:
-                seen.update(
-                    (coll, str(r["name"])) for r in storage.offline_runs(_base(), collection=coll)
-                )
+            seen.update((r["collection"], str(r["name"])) for r in storage.offline_index(_base()))
         ordered = sorted(seen, key=lambda p: (p[0] or "", p[1]))
         return [{"collection": c, "name": n} for c, n in ordered]
 
