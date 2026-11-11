@@ -30,6 +30,7 @@ export function StoragePanel() {
   const drive = info?.drive ?? null;
   return (
     <>
+      <div className="hint storage-scope">Totals: all collections, both volumes</div>
       <div className="kv">
         <span>Local recordings</span>
         <span className="v">{gb(info?.local.free_bytes)} free of {gb(info?.local.total_bytes)}</span>

@@ -56,6 +56,13 @@ export function collectionLabel(selected: string | null): string {
   return selected === "" ? "Unsorted" : selected;
 }
 
+/** The top bar and picker label: the selection once the doc loads, the fetch error while it has
+ *  never loaded (ruling R5b: never sit on "loading…" forever), else "loading…". */
+export function collectionsStatus(doc: CollectionsDoc | null, err: string | null): string {
+  if (doc) return collectionLabel(doc.selected);
+  return err ? `collections unavailable: ${err}` : "loading…";
+}
+
 /** The operator refuses a selection change while a recording or armed trigger is active. */
 export function pickerLocked(rec: { state: string } | null): boolean {
   return !!rec && (rec.state === "recording" || rec.state === "armed");

@@ -6,6 +6,7 @@ import { hasRois, loadRois, roisDifferFromStored } from "../lib/roi.ts";
 import { displayName } from "../lib/organize.ts";
 import { isOffline } from "../lib/storageSummary.ts";
 import { TagPopover } from "./TagPopover.tsx";
+import { MoveToCollection } from "./MoveToCollection.tsx";
 
 interface Props {
   exp: Experiment; onOpen: () => void; onChanged: () => void;
@@ -15,13 +16,14 @@ interface Props {
   selected?: boolean;                              // is this card selected?
   onToggleSelect?: (e: React.MouseEvent) => void;  // shift-aware toggle
   onFilterTag?: (tag: string) => void;             // click a chip to filter by it
+  collectionTargets?: string[];                    // where "move to collection…" can send it
 }
 
 const roiStorage: Storage | null = (() => { try { return typeof localStorage !== "undefined" ? localStorage : null; } catch { return null; } })();
 
 export function ExperimentCard({
   exp, onOpen, onChanged, driveConnected = false,
-  universe = [], selecting = false, selected = false, onToggleSelect, onFilterTag,
+  universe = [], selecting = false, selected = false, onToggleSelect, onFilterTag, collectionTargets = [],
 }: Props) {
   // Flag runs whose ROIs have been edited since their exports were built: the run has a saved
   // working set that differs from the ROIs stored (and exported) with the recording.
@@ -80,6 +82,12 @@ export function ExperimentCard({
         if (jb.state === "idle") break;
       }
     } catch (e) { setNote(String(e)); } finally { setBusy(false); setMove(null); }
+  }
+  // Rename into another collection of the same volume (instant; refused while the run is busy).
+  async function moveToCollection(to: string) {
+    setBusy(true); setNote(null);
+    try { await api.moveToCollection(rk, to, onDrive ? "drive" : "local"); onChanged(); }
+    catch (e) { setNote(String(e)); } finally { setBusy(false); }
   }
   // The regenerate response is authoritative the instant it comes back — don't wait on the
   // parent's refetch (onChanged) to see the new preview, in case it's slow or the parent's
@@ -304,6 +312,11 @@ export function ExperimentCard({
               delete
             </button>
           </div>
+          {collectionTargets.length > 0 && (
+            <div className="actions-row">
+              <MoveToCollection targets={collectionTargets} disabled={busy} onPick={moveToCollection} />
+            </div>
+          )}
         </div>
         {move && (
           <div style={{ marginTop: 4 }}>

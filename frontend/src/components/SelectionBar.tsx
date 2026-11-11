@@ -1,14 +1,18 @@
+import { MoveToCollection } from "./MoveToCollection.tsx";
+
 // Prominent floating bulk-action bar. Shown for the whole time selection mode is on (even at 0
 // selected, as a "pick some runs" prompt) so the action controls are where you expect them after
 // clicking "select". During a bulk op it shows a live "verb k/N" progress bar.
 export function SelectionBar({
-  count, driveConnected, busy, progress, onMove, onTag, onRename, onStar, onDelete, onSelectAll, onClear,
+  count, driveConnected, busy, progress, onMove, collectionTargets = [], onMoveToCollection, onTag, onRename, onStar, onDelete, onSelectAll, onClear,
 }: {
   count: number;
   driveConnected: boolean;
   busy: boolean;
   progress: { done: number; total: number; verb: string } | null;
   onMove: (to: "drive" | "local") => void;
+  collectionTargets?: string[];                     // "" = Unsorted (lib/migrationView.ts moveTargets)
+  onMoveToCollection?: (to: string) => void;
   onTag: () => void;
   onRename: () => void;
   onStar: (on: boolean) => void;
@@ -25,6 +29,9 @@ export function SelectionBar({
       <span className="sep" />
       {driveConnected && <button className="secondary" disabled={busy || none} onClick={() => onMove("drive")}>move to drive →</button>}
       {driveConnected && <button className="secondary" disabled={busy || none} onClick={() => onMove("local")}>← local</button>}
+      {onMoveToCollection && collectionTargets.length > 0 && (
+        <MoveToCollection targets={collectionTargets} disabled={busy || none} onPick={onMoveToCollection} />
+      )}
       <button className="secondary" disabled={busy || none} onClick={onTag}>tag…</button>
       <button className="secondary" disabled={busy || none} onClick={onRename} title="Give the selected runs a display name (optionally numbered)">rename…</button>
       <button className="secondary" disabled={busy || none} onClick={() => onStar(true)}>★ star</button>

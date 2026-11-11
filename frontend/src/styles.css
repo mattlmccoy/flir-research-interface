@@ -140,6 +140,11 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 .badge.rec { background: var(--err-bg); color: var(--rec); animation: fri-blink 1s steps(1) infinite; }
 .warnbox { border-left: 3px solid var(--warn); padding: 6px 10px; background: var(--warn-bg); font-size: 12px; }
 .errbox { border-left: 3px solid var(--err); padding: 6px 10px; background: var(--err-bg); font-size: 12px; }
+.migration-volume { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line-control); }
+.migration-list { max-height: 180px; overflow: auto; margin: 4px 0; padding-left: 18px; font-size: 11px; font-family: var(--font-mono); }
+.storage-scope { margin-bottom: 4px; }
+.move-coll { max-width: 100%; }
+.collection-indicator.error, .coll-btn.error { color: var(--err); }
 .muted { color: var(--muted); }
 .colorbar { display: flex; align-items: center; gap: 8px; }
 .colorbar canvas { flex: 1 1 auto; min-width: 0; height: 12px; border: 1px solid var(--line); }

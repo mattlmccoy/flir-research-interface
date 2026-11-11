@@ -1,5 +1,6 @@
 import { ProfileEditor } from "./ProfileEditor.tsx";
 import { StoragePanel } from "./StoragePanel.tsx";
+import { CollectionsMigrationPanel } from "./CollectionsMigrationPanel.tsx";
 import { RfLinkPanel } from "./RfLinkPanel.tsx";
 import { CredentialsHelp } from "./CredentialsHelp.tsx";
 import { useEffect, useState } from "react";
@@ -135,6 +136,11 @@ export function SetupPage({ onConnected, status, onConnectFailed }: { onConnecte
       <div className="card">
         <h2>5. Storage (offload runs to an external drive)</h2>
         <StoragePanel />
+      </div>
+
+      <div className="card">
+        <h2>Collections: sort existing runs into a collection</h2>
+        <CollectionsMigrationPanel />
       </div>
 
       {rfEngaged && (

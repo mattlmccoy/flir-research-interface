@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type CollectionsDoc } from "../lib/api.ts";
-import { collectionLabel, collectionNameError, pickerEntries, PICKER_LOCK_MESSAGE } from "../lib/collections.ts";
+import { collectionNameError, collectionsStatus, pickerEntries, PICKER_LOCK_MESSAGE } from "../lib/collections.ts";
 
 /** The collection picker on the experiments page: the operator's selection (shared by every
  *  browser), the Unsorted top level, the folders it leaves alone, and an inline "add" form.
  *  Locked while a recording or armed trigger is active (the operator answers 409 then). */
-export function CollectionPicker({ doc, locked, onDoc }: { doc: CollectionsDoc | null; locked: boolean; onDoc: (d: CollectionsDoc) => void }) {
+export function CollectionPicker({ doc, error = null, locked, onDoc }: { doc: CollectionsDoc | null; error?: string | null; locked: boolean; onDoc: (d: CollectionsDoc) => void }) {
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState("");
@@ -34,11 +34,11 @@ export function CollectionPicker({ doc, locked, onDoc }: { doc: CollectionsDoc |
 
   const draftErr = draft === "" ? null : collectionNameError(draft);
   const entries = doc ? pickerEntries(doc) : [];
-  const label = doc ? collectionLabel(doc.selected) : "loading…";
+  const label = collectionsStatus(doc, error);
 
   return (
     <div className="coll-picker" ref={box}>
-      <button type="button" className={`coll-btn${doc && !doc.selected ? " unset" : ""}`} disabled={!doc || locked}
+      <button type="button" className={`coll-btn${doc && !doc.selected ? " unset" : ""}${!doc && error ? " error" : ""}`} disabled={!doc || locked}
         aria-haspopup="listbox" aria-expanded={open}
         title={locked ? PICKER_LOCK_MESSAGE : "The user or project new runs record into; the list below shows its runs"}
         onClick={() => (open ? close() : setOpen(true))}>

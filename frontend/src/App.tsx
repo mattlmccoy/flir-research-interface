@@ -6,7 +6,7 @@ import { ProfilePanel, type FieldSnapshot } from "./components/ProfilePanel.tsx"
 import { radiometryFromCamera } from "./lib/emissivity.ts";
 import { useCallback, useEffect, useReducer, useRef, useState, useMemo } from "react";
 import { api, operatorBase, type CollectionsDoc, type RecordingStatus, type Status } from "./lib/api.ts";
-import { collectionLabel, pickerLocked } from "./lib/collections.ts";
+import { collectionsStatus, pickerLocked } from "./lib/collections.ts";
 import { wsUrl } from "./lib/operator.ts";
 import { decodeFrameMessage, type FrameMessage } from "./lib/protocol.ts";
 import type { PaletteName } from "./lib/palette.ts";
@@ -314,8 +314,10 @@ export function App() {
   // The operator's collections + selection (shared by every browser): the top bar, the picker and
   // the Record gate all read this one copy.
   const [collections, setCollections] = useState<CollectionsDoc | null>(null);
+  const [collectionsErr, setCollectionsErr] = useState<string | null>(null);
   useEffect(() => {
-    const tick = () => { api.collections().then(setCollections).catch(() => undefined); };
+    // a failure is shown (ruling R5b), never swallowed into a "loading…" that never ends
+    const tick = () => { api.collections().then((d) => { setCollections(d); setCollectionsErr(null); }).catch((e) => setCollectionsErr(String(e))); };
     tick();
     const id = setInterval(tick, 3000);
     return () => clearInterval(id);
@@ -418,9 +420,9 @@ export function App() {
         <button className={page === "experiments" || page === "playback" ? "active" : ""} aria-current={page === "experiments" || page === "playback" ? "page" : undefined} onClick={() => setPage("experiments")}>experiments</button>
         <button className={page === "setup" ? "active" : ""} aria-current={page === "setup" ? "page" : undefined} onClick={() => setPage("setup")}>setup</button>
       </nav>
-      <span className={`collection-indicator${collections && !collections.selected ? " unset" : ""}`}
+      <span className={`collection-indicator${collections && !collections.selected ? " unset" : ""}${!collections && collectionsErr ? " error" : ""}`}
         title="The collection new runs record into (change it on the experiments page)">
-        <span className="k">collection</span>{collections ? collectionLabel(collections.selected) : "…"}
+        <span className="k">collection</span>{collectionsStatus(collections, collectionsErr)}
       </span>
       {page === "playback" && openExp && (
         <span className="crumb">
@@ -452,7 +454,7 @@ export function App() {
   }
   if (page === "experiments") {
     return <StudioFrame layout={layout} page topbar={topbar} statusbar={statusbar}
-      center={<ExperimentsPage collections={collections} locked={collectionLocked} onCollections={setCollections}
+      center={<ExperimentsPage collections={collections} collectionsErr={collectionsErr} locked={collectionLocked} onCollections={setCollections}
         onOpen={(key, title) => openRun(key, migrator, (k) => { setOpenExp(k); setOpenTitle(title ?? null); setPage("playback"); })}/>} />;
   }
   if (page === "playback" && openExp) {

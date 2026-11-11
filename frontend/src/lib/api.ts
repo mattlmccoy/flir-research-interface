@@ -85,6 +85,20 @@ export interface CollectionsDoc {
   /** A drive is registered (connected or not); with !drive_connected the offline index stands in. */
   drive_registered: boolean;
 }
+/** GET /api/collections/migration (backend api/collections_routes.py `_plan_doc`): a dry run. */
+export interface MigrationPlanDoc {
+  volume: "local" | "drive";
+  base: string;
+  target: string;
+  moves: { name: string; src: string; dst: string }[];
+  conflicts: { name: string; reason: string }[];
+  appledouble: number;
+  unexpected: string[];
+  already_in_target: number;
+  busy: string[];
+}
+/** POST /api/collections/migration result. */
+export interface MigrationResultDoc { moved: string[]; failed: { name: string; error: string }[]; skipped: string[]; log: string; }
 /** A user-selectable external drive for offload. */
 export interface Volume { label: string; mount: string; fstype: string; total_bytes: number; free_bytes: number; is_registered?: boolean; }
 /** Storage state: the local root and the registered drive (if any). */
@@ -274,6 +288,13 @@ export const api = {
   forgetDrive: () => j<StorageInfo>(req("/api/storage/drive", { method: "DELETE" })),
   moveExperiment: (name: RunKey, to: "drive" | "local") =>
     j<MoveJob>(req(runPath(name, `/move`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ to }) })),
+  /** Rename a run into another collection of its library ("" = Unsorted); 409 when busy or clashing. */
+  moveToCollection: (name: RunKey, to: string, library?: "local" | "drive") =>
+    j<Record<string, unknown>>(req(runPath(name, `/collection`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ to, library }) })),
+  migrationPlan: (volume: "local" | "drive", target: string) =>
+    j<MigrationPlanDoc>(req(`/api/collections/migration?volume=${volume}&target=${encodeURIComponent(target)}`)),
+  applyMigration: (body: { volume: "local" | "drive"; target: string; confirm: string[] }) =>
+    j<MigrationResultDoc>(req("/api/collections/migration", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })),
   moveStatus: (name: RunKey) =>
     j<MoveJob>(req(runPath(name, `/move/status`))),
   setLabels: (name: RunKey, body: { starred: boolean; tags: string[]; library?: "local" | "drive"; title?: string; notes?: string }) =>

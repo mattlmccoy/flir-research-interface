@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { CollectionsDoc } from "./api.ts";
-import { canRecord, collectionLabel, collectionNameError, pickerEntries, pickerLocked, PICKER_LOCK_MESSAGE } from "./collections.ts";
+import { canRecord, collectionLabel, collectionNameError, collectionsStatus, pickerEntries, pickerLocked, PICKER_LOCK_MESSAGE } from "./collections.ts";
 
 // The same lists as backend tests/test_collections.py test_valid_collection_names /
 // test_rejected_collection_names.
@@ -111,4 +111,10 @@ test("the picker locks while recording or armed", () => {
   assert.equal(pickerLocked({ state: "recording" }), true);
   assert.equal(pickerLocked({ state: "armed" }), true);
   assert.equal(PICKER_LOCK_MESSAGE, "the collection can't change while a recording or armed trigger is active");
+});
+
+test("status label surfaces a failed /api/collections instead of loading forever", () => {
+  assert.equal(collectionsStatus(null, null), "loading…");
+  assert.equal(collectionsStatus(null, "Error: 500 boom"), "collections unavailable: Error: 500 boom");
+  assert.equal(collectionsStatus(doc(), "stale error"), "mattmccoy");  // a doc wins once it loads
 });

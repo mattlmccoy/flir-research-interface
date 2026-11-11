@@ -11,6 +11,7 @@ import { SelectionBar } from "./SelectionBar.tsx";
 import { BulkRenamePopover } from "./BulkRenamePopover.tsx";
 import { TagPopover } from "./TagPopover.tsx";
 import { CollectionPicker } from "./CollectionPicker.tsx";
+import { moveTargets } from "../lib/migrationView.ts";
 
 const cardId = (e: { library?: string; collection?: string | null; name: string }) => `${e.library ?? "local"}:${keyOf(e)}`;
 const ls = {
@@ -20,9 +21,9 @@ const ls = {
 
 /** `collections`: the operator's collections (App polls it); the list shows the selected one's runs
  *  ("" or nothing selected = the top-level runs, labelled Unsorted). */
-export function ExperimentsPage({ onOpen, collections, locked, onCollections }: {
+export function ExperimentsPage({ onOpen, collections, collectionsErr = null, locked, onCollections }: {
   onOpen: (key: RunKey, title?: string) => Promise<void>;
-  collections: CollectionsDoc | null; locked: boolean; onCollections: (d: CollectionsDoc) => void;
+  collections: CollectionsDoc | null; collectionsErr?: string | null; locked: boolean; onCollections: (d: CollectionsDoc) => void;
 }) {
   const [items, setItems] = useState<Experiment[] | null>(null);
   const [driveConnected, setDriveConnected] = useState(false);
@@ -135,6 +136,12 @@ export function ExperimentsPage({ onOpen, collections, locked, onCollections }: 
     }).then(() => {}));
   }
 
+  // every listed run is in the selected scope, so one target list serves the bar and the cards
+  const collTargets = useMemo(() => moveTargets(collections, scope || null), [collections, scope]);
+  async function bulkMoveToCollection(to: string) {
+    await runBulk(selectedItems(), `move to ${to || "Unsorted"}`, (e) => api.moveToCollection(keyOf(e), to, libOf(e)).then(() => {}));
+  }
+
   async function bulkDelete() {
     const targets = selectedItems();
     if (targets.length === 0) return;
@@ -146,7 +153,7 @@ export function ExperimentsPage({ onOpen, collections, locked, onCollections }: 
   return (
     <div className="page-body wide">
       <div className="exp-head">
-        <CollectionPicker doc={collections} locked={locked} onDoc={onCollections} />
+        <CollectionPicker doc={collections} error={collectionsErr} locked={locked} onDoc={onCollections} />
         <span>{items ? (filtering ? `${shown.length} / ${summaryLabel(breakdown, driveConnected)}` : summaryLabel(breakdown, driveConnected)) : "loading…"}</span>
         <span className="right">
           <button className={`secondary${selecting ? " active" : ""}`} onClick={() => { setSelecting((s) => !s); clearSelection(); }} title="Select multiple runs for bulk actions">
@@ -197,7 +204,7 @@ export function ExperimentsPage({ onOpen, collections, locked, onCollections }: 
           return (
             <ExperimentCard
               key={id} exp={e} onOpen={() => { setErr(null); onOpen(keyOf(e), e.title).catch((err) => setErr(`Could not open ${e.name}: ${err}`)); }} onChanged={load}
-              driveConnected={driveConnected} universe={universe}
+              driveConnected={driveConnected} universe={universe} collectionTargets={collTargets}
               selecting={selecting} selected={sel.selected.has(id)}
               onToggleSelect={isOffline(e) ? undefined : (ev) => dispatch(ev.shiftKey ? { type: "range", name: id, order: shownIds } : { type: "toggle", name: id })}
               onFilterTag={addTagFilter}
@@ -210,7 +217,7 @@ export function ExperimentsPage({ onOpen, collections, locked, onCollections }: 
         <>
           <SelectionBar
             count={sel.selected.size} driveConnected={driveConnected} busy={bulkBusy} progress={bulkProgress}
-            onMove={bulkMove} onTag={() => { setBulkRenameOpen(false); setBulkTagOpen(true); }} onRename={() => { setBulkTagOpen(false); setBulkRenameOpen(true); }} onStar={bulkStar} onDelete={bulkDelete}
+            onMove={bulkMove} collectionTargets={collTargets} onMoveToCollection={bulkMoveToCollection} onTag={() => { setBulkRenameOpen(false); setBulkTagOpen(true); }} onRename={() => { setBulkTagOpen(false); setBulkRenameOpen(true); }} onStar={bulkStar} onDelete={bulkDelete}
             onSelectAll={() => dispatch({ type: "selectAll", names: shownIds })} onClear={() => { clearSelection(); setSelecting(false); }}
           />
           {bulkRenameOpen && sel.selected.size > 0 && (
