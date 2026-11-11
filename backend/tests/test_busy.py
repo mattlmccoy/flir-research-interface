@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 
 from flir_research_interface.analysis import run_summary
 from flir_research_interface.api.app import create_app
-from flir_research_interface.busy import BusyInputs, busy_reasons
+from flir_research_interface.busy import BusyInputs, busy_reasons, job_labels
 
 IDLE = BusyInputs(
     recording=False,
@@ -95,3 +95,24 @@ def test_post_stop_exports_count_as_busy(
             time.sleep(0.05)
         assert c.get("/api/operator/busy").json() == {"busy": False, "reasons": []}
         c.post("/api/camera/disconnect")
+
+
+def test_running_smart_job_is_reported(tmp_path: Path) -> None:
+    # smart_jobs keys are (RunRef.key, roi id) with an int roi id (smart_roi_routes.py)
+    app = create_app(default_backend="simulated", experiments_root=tmp_path, min_free_gb=0.0)
+    with TestClient(app, raise_server_exceptions=False) as c:
+        app.state.smart_jobs[("runkey", 3)] = {"state": "running"}
+        r = c.get("/api/operator/busy")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["busy"] is True
+        assert "smart runkey 3" in body["reasons"]
+
+
+def test_job_labels_use_real_key_shapes() -> None:
+    jobs = {
+        "move": {"mattmccoy/r": {"state": "running"}, "old": {"state": "done"}},
+        "derived": {"r2": {"state": "running"}},
+        "smart": {("mattmccoy/r", 3): {"state": "running"}, ("x", 1): {"state": "error"}},
+    }
+    assert job_labels(jobs) == ["move mattmccoy/r", "derived r2", "smart mattmccoy/r 3"]

@@ -44,7 +44,7 @@ from flir_research_interface.api.smart_roi_routes import (
     compute_stored_smart_rois,
     register_smart_roi_routes,
 )
-from flir_research_interface.busy import BusyInputs, busy_reasons
+from flir_research_interface.busy import BusyInputs, busy_reasons, job_labels
 from flir_research_interface.camera import CAMERA_BACKENDS, create_backend
 from flir_research_interface.camera.base import CameraBackend, CameraError, DeviceDescriptor, Frame
 from flir_research_interface.camera.simulated import HotspotRampScene
@@ -1071,19 +1071,18 @@ def create_app(
         from flir_research_interface.rf_status import rf_engaged
 
         rec = recorder()
-        running: list[str] = []
-        for kind, jobs in (
-            ("move", app.state.move_jobs),
-            ("derived", app.state.derived_jobs),
-            ("media", app.state.media_jobs),
-            ("range", app.state.range_jobs),
-            ("smart", app.state.smart_jobs),
-        ):
-            for key, job in list(jobs.items()):
-                if job.get("state") == "running":
-                    # smart_jobs keys are (run key, roi id) tuples
-                    label = " ".join(key) if isinstance(key, tuple) else key
-                    running.append(f"{kind} {label}")
+        # A running job is also a render_task, so it is reported twice (its label and the
+        # background-task count). That double-reporting is intentional: the labels say what, the
+        # count catches work that has no job record (the post-stop exports).
+        running = job_labels(
+            {
+                "move": app.state.move_jobs,
+                "derived": app.state.derived_jobs,
+                "media": app.state.media_jobs,
+                "range": app.state.range_jobs,
+                "smart": app.state.smart_jobs,  # keys are (run key, roi id) tuples
+            }
+        )
         return busy_reasons(
             BusyInputs(
                 recording=rec is not None and rec.state == RecorderState.RECORDING,

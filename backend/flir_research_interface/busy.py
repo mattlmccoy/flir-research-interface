@@ -7,7 +7,9 @@ post-stop exports that "recording idle" had missed, so background tasks are coun
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -37,4 +39,17 @@ def busy_reasons(i: BusyInputs) -> list[str]:
     return reasons
 
 
-__all__ = ["BusyInputs", "busy_reasons"]
+def job_labels(jobs: Mapping[str, Mapping[Any, Mapping[str, Any]]]) -> list[str]:
+    """Labels for every running job: ``"<kind> <key>"``, or ``"smart <run key> <roi id>"`` for the
+    tuple keys of smart_jobs (the roi id is an int, so keys are stringified, not joined)."""
+    out: list[str] = []
+    for kind, entries in jobs.items():
+        for key, job in list(entries.items()):
+            if job.get("state") != "running":
+                continue
+            label = " ".join(str(k) for k in key) if isinstance(key, tuple) else str(key)
+            out.append(f"{kind} {label}")
+    return out
+
+
+__all__ = ["BusyInputs", "busy_reasons", "job_labels"]
