@@ -93,3 +93,29 @@ def test_jobs_are_keyed_per_collection(tmp_path: Path) -> None:
 def test_post_stop_lock_key_includes_collection(tmp_path: Path) -> None:
     root = tmp_path
     assert RunRef.from_dir(root / "mattmccoy" / "r", [root]).key == "mattmccoy/r"
+
+
+def test_dot_collection_params_400(tmp_path: Path) -> None:
+    root = tmp_path / "experiments"
+    _run(root / "mattmccoy")
+    c = _client(root)
+    for bad in ("..", ".x"):
+        r = c.post(f"/api/experiments/{RUN}/reveal?collection={bad}")
+        assert r.status_code == 400, (bad, r.text)
+
+
+def test_status_endpoint_409_on_ambiguous_legacy_name(tmp_path: Path) -> None:
+    root = tmp_path / "experiments"
+    _run(root / "mattmccoy")
+    _run(root / "rf-sintering")
+    r = _client(root).get(f"/api/experiments/{RUN}/export/derived/status")
+    assert r.status_code == 409, r.text
+
+
+def test_top_level_and_collection_copy_409_names_top_level(tmp_path: Path) -> None:
+    root = tmp_path / "experiments"
+    _run(root)
+    _run(root / "mattmccoy")
+    r = _client(root).post(f"/api/experiments/{RUN}/reveal")
+    assert r.status_code == 409
+    assert "top level" in r.json()["detail"] and "mattmccoy" in r.json()["detail"]

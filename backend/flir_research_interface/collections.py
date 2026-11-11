@@ -16,13 +16,13 @@ from typing import Literal
 
 from lab_storage import fsutil as _fsutil
 
-from .recording.recorder import STORE_NAME
 from .storage import _atomic_json
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "SELECTION_FILE",
+    "STORE_NAME",
     "NAME_RE",
     "RUN_LIKE_RE",
     "EntryKind",
@@ -38,6 +38,7 @@ __all__ = [
 ]
 
 SELECTION_FILE = ".collection.json"
+STORE_NAME = "thermal.zarr"  # == recording.recorder.STORE_NAME (test-enforced; no recorder import)
 NAME_RE = re.compile(r"^[a-z0-9_-]{1,40}$")
 RUN_LIKE_RE = re.compile(r"^\d{8}_\d{6}(_|$)")
 

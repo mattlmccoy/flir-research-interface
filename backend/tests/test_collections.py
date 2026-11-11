@@ -84,6 +84,24 @@ def test_classify_entry_store_makes_a_run(tmp_path: Path) -> None:
     assert classify_entry(tmp_path / "Odd Name") == "run"
 
 
+def test_store_name_matches_recorder_without_importing_it() -> None:
+    # collections.py is the pure model: it keeps its own STORE_NAME literal (no recorder/zarr
+    # import, no cycle when the recorder uses collections) and it must equal the recorder's.
+    import subprocess
+    import sys
+
+    from flir_research_interface import collections as coll
+    from flir_research_interface.recording.recorder import STORE_NAME
+
+    assert coll.STORE_NAME == STORE_NAME
+    probe = (
+        "import sys, flir_research_interface.collections; "
+        "print('flir_research_interface.recording.recorder' in sys.modules)"
+    )
+    out = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "False"
+
+
 def test_scan_missing_root(tmp_path: Path) -> None:
     scan = scan_root(tmp_path / "nope")
     assert (scan.collections, scan.runs, scan.unexpected) == ((), (), ())
