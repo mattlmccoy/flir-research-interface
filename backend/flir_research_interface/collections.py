@@ -48,7 +48,7 @@ def collection_name_error(name: str) -> str | None:
         return "A collection name cannot start with a dot."
     if RUN_LIKE_RE.match(name):
         return "A collection name cannot look like a run folder (YYYYMMDD_HHMMSS...)."
-    if not NAME_RE.match(name):
+    if not NAME_RE.fullmatch(name):
         return "Use 1-40 characters: lowercase letters, digits, '-' and '_'."
     return None
 

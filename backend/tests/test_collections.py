@@ -29,7 +29,8 @@ def test_valid_collection_names(ok: str) -> None:
 
 
 @pytest.mark.parametrize("bad", ["", "a" * 41, "Matt", "has space", ".hidden", "a/b",
-                                 "20261102_165506_Run", "20261102_165506", "FLIR-recordings"])
+                                 "20261102_165506_Run", "20261102_165506", "FLIR-recordings",
+                                 "abc\n", "abc\r\n"])
 def test_rejected_collection_names(bad: str) -> None:
     assert collection_name_error(bad)
 
@@ -112,3 +113,9 @@ def test_selection_roundtrip_and_malformed(tmp_path: Path) -> None:
 def test_save_selection_creates_base(tmp_path: Path) -> None:
     save_selection(tmp_path / "new", "a")
     assert load_selection(tmp_path / "new") == "a"
+
+
+def test_save_selection_none_roundtrip(tmp_path: Path) -> None:
+    save_selection(tmp_path, None)
+    assert json.loads((tmp_path / ".collection.json").read_text()) == {"selected": None}
+    assert load_selection(tmp_path) is None
