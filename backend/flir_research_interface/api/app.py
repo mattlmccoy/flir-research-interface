@@ -44,6 +44,7 @@ from flir_research_interface.api.smart_roi_routes import (
     compute_stored_smart_rois,
     register_smart_roi_routes,
 )
+from flir_research_interface.busy import BusyInputs, busy_reasons
 from flir_research_interface.camera import CAMERA_BACKENDS, create_backend
 from flir_research_interface.camera.base import CameraBackend, CameraError, DeviceDescriptor, Frame
 from flir_research_interface.camera.simulated import HotspotRampScene
@@ -1064,6 +1065,45 @@ def create_app(
                 app.state.control_last, app.state.rf_link_last_event, datetime.now(timezone.utc)
             ),
         }
+
+    def _busy() -> list[str]:
+        """Why the operator must not be interrupted right now (empty when idle)."""
+        from flir_research_interface.rf_status import rf_engaged
+
+        rec = recorder()
+        running: list[str] = []
+        for kind, jobs in (
+            ("move", app.state.move_jobs),
+            ("derived", app.state.derived_jobs),
+            ("media", app.state.media_jobs),
+            ("range", app.state.range_jobs),
+            ("smart", app.state.smart_jobs),
+        ):
+            for key, job in list(jobs.items()):
+                if job.get("state") == "running":
+                    # smart_jobs keys are (run key, roi id) tuples
+                    label = " ".join(key) if isinstance(key, tuple) else key
+                    running.append(f"{kind} {label}")
+        return busy_reasons(
+            BusyInputs(
+                recording=rec is not None and rec.state == RecorderState.RECORDING,
+                finalizing=bool(app.state.finalizing),
+                armed=app.state.armer is not None,
+                control_engaged=rf_engaged(
+                    app.state.control_last,
+                    app.state.rf_link_last_event,
+                    datetime.now(timezone.utc),
+                ),
+                running_jobs=tuple(running),
+                # render_tasks holds the post-stop exports and every job task
+                background_tasks=len(app.state.render_tasks),
+            )
+        )
+
+    @app.get("/api/operator/busy")
+    async def operator_busy() -> dict[str, Any]:
+        reasons = _busy()
+        return {"busy": bool(reasons), "reasons": reasons}
 
     # -- recording -------------------------------------------------------------------------
 
