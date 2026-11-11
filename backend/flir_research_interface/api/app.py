@@ -21,7 +21,7 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
@@ -290,6 +290,11 @@ class RegisterDriveRequest(BaseModel):
 class MoveRequest(BaseModel):
     to: str  # "drive" | "local"
     full_verify: bool = False  # SHA-256 every file (slower) vs size + critical-file checksums
+
+
+class CollectionMoveRequest(BaseModel):
+    to: str  # target collection; "" = Unsorted (the top level)
+    library: Literal["local", "drive"] | None = None  # which copy, when the run is on both
 
 
 class LabelsRequest(BaseModel):
@@ -1689,9 +1694,12 @@ def create_app(
         if not cfg:
             raise HTTPException(409, "no external drive is connected; register one first")
         await run_in_threadpool(storage.adopt_marker, app.state.experiments_root)
-        dst_root = Path(cfg["root"]) if req.to == "drive" else Path(app.state.experiments_root)
-        if contained(dst_root, src):
+        lib_root = Path(cfg["root"]) if req.to == "drive" else Path(app.state.experiments_root)
+        if contained(lib_root, src):
             raise HTTPException(409, f"{run.name} is already on the {req.to} storage")
+        dst_root = lib_root / ref.collection if ref.collection else lib_root  # keep the collection
+        if storage.destination_clash(dst_root, ref.name) is not None:  # before any copy (exFAT)
+            raise HTTPException(409, _clash_message(ref.collection, req.to, ref.name))
 
         job: dict[str, Any] = {
             "state": "running", "to": req.to, "done": 0, "total": 0, "error": None,
@@ -1722,6 +1730,62 @@ def create_app(
         app.state.render_tasks.add(task)
         task.add_done_callback(app.state.render_tasks.discard)
         return job
+
+    def _clash_message(collection: str | None, library: str, name: str) -> str:
+        where = "the drive" if library == "drive" else "this Mac"
+        return (
+            f"{collection or 'Unsorted'} on {where} already has a run named {name}; "
+            "nothing was moved"
+        )
+
+    def _run_busy(key: str, run_dir: Path) -> str | None:
+        """Why this run cannot be renamed right now, else None."""
+        rec = recorder()
+        if (
+            rec is not None
+            and rec.experiment_dir is not None
+            and rec.experiment_dir.resolve() == run_dir.resolve()
+        ):
+            return "this run is being recorded right now"
+        if app.state.render_locks.get(key).locked():
+            return "this run is busy (a render, export or move is running); try again shortly"
+        for jobs in (
+            app.state.move_jobs, app.state.derived_jobs, app.state.media_jobs, app.state.range_jobs
+        ):
+            job = jobs.get(key)
+            if job is not None and job.get("state") == "running":
+                return "this run is busy (a render, export or move is running); try again shortly"
+        smart = getattr(app.state, "smart_jobs", {})  # (run key, roi id) -> job
+        if any(k[0] == key and j.get("state") == "running" for k, j in smart.items()):
+            return "this run is busy (a smart ROI compute is running); try again shortly"
+        return None
+
+    @app.post("/api/experiments/{name}/collection")
+    async def move_into_collection_route(
+        run: RunDep, req: CollectionMoveRequest
+    ) -> dict[str, Any]:
+        """Rename a run into another collection of the same library (``to: ""`` = Unsorted).
+
+        Same-volume rename only; refused while the run is recording or has a job running, and
+        when the target already has a run with this name. No ``await`` between the busy check and
+        the rename, so no job can start for this run in between (all jobs start on the loop).
+        """
+        if req.to:
+            err = collection_name_error(req.to)
+            if err:
+                raise HTTPException(400, err)
+        ref, src = _resolve(run, req.library)
+        busy = _run_busy(ref.key, src)
+        if busy is not None:
+            raise HTTPException(409, busy)
+        lib, root = next((lib, r) for lib, r in _roots() if contained(r, src))
+        try:
+            storage.move_into_collection(src, root, req.to or None)
+        except storage.CollectionClashError as exc:
+            raise HTTPException(409, _clash_message(req.to or None, lib, ref.name)) from exc
+        except OSError as exc:  # e.g. EXDEV: never fall back to a copy
+            raise HTTPException(500, f"could not move {ref.name}: {exc}") from exc
+        return {"collection": req.to or None, "name": ref.name}
 
     @app.get("/api/experiments/{name}/move/status")
     def move_status(run: RunDep) -> dict[str, Any]:

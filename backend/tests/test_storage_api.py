@@ -73,21 +73,21 @@ def test_move_to_drive_unions_list_and_frees_local(tmp_path: Path) -> None:
         job = _wait_move(c, name, "t")
         assert job["state"] == "done", job
 
-        # gone from local, present on the drive, still one run in the unioned list
-        # (until Task 6 the move lands at the drive's top level, i.e. Unsorted)
+        # gone from local, present on the drive in the same collection, still one run in the
+        # unioned list
         assert not (local / "t" / name).exists()
-        assert (drive / "FLIR-recordings" / name / "metadata.json").is_file()
-        items = c.get("/api/experiments?collection=").json()
+        assert (drive / "FLIR-recordings" / "t" / name / "metadata.json").is_file()
+        items = c.get("/api/experiments?collection=t").json()
         libs = {e["name"]: e["library"] for e in items}
         assert libs.get(name) == "drive"
         # a run on the drive is still openable (resolved across roots)
         assert c.get(f"/api/experiments/{name}").status_code == 200
 
         # and it can be brought back
-        back = c.post(f"/api/experiments/{name}/move?collection=", json={"to": "local"})
+        back = c.post(f"/api/experiments/{name}/move?collection=t", json={"to": "local"})
         assert back.json()["state"] == "running"
-        assert _wait_move(c, name, "")["state"] == "done"
-        assert (local / name / "metadata.json").is_file()
+        assert _wait_move(c, name, "t")["state"] == "done"
+        assert (local / "t" / name / "metadata.json").is_file()
 
 
 def test_drive_runs_stay_listed_as_offline_when_the_drive_is_unplugged(tmp_path: Path) -> None:
@@ -102,11 +102,11 @@ def test_drive_runs_stay_listed_as_offline_when_the_drive_is_unplugged(tmp_path:
         c.post(f"/api/experiments/{on_drive}/move", json={"to": "drive"})
         assert _wait_move(c, on_drive, "t")["state"] == "done"
         # seen while connected
-        seen = {e["name"]: e for e in c.get("/api/experiments?collection=").json()}
+        seen = {e["name"]: e for e in c.get("/api/experiments?collection=t").json()}
         assert seen[on_drive]["library"] == "drive"
 
         drive.rename(tmp_path / "unplugged")  # the drive goes away
-        items = {e["name"]: e for e in c.get("/api/experiments?collection=").json()}
+        items = {e["name"]: e for e in c.get("/api/experiments?collection=t").json()}
         off = items[on_drive]
         assert off["library"] == "offline" and off["offline"] is True  # distinct, never "healthy"
         assert off["drive_label"] == "Field" and off["last_seen_utc"]
@@ -114,12 +114,12 @@ def test_drive_runs_stay_listed_as_offline_when_the_drive_is_unplugged(tmp_path:
         assert c.get(f"/api/experiments/{on_drive}").status_code == 404  # not openable
 
         (tmp_path / "unplugged").rename(drive)  # plugged back in
-        items = {e["name"]: e for e in c.get("/api/experiments?collection=").json()}
+        items = {e["name"]: e for e in c.get("/api/experiments?collection=t").json()}
         assert items[on_drive]["library"] == "drive"
 
         c.delete("/api/storage/drive")  # forgetting the drive forgets its offline runs
         drive.rename(tmp_path / "unplugged")
-        assert on_drive not in {e["name"] for e in c.get("/api/experiments?collection=").json()}
+        assert on_drive not in {e["name"] for e in c.get("/api/experiments?collection=t").json()}
 
 
 def test_move_without_drive_is_409_and_unknown_run_404(tmp_path: Path) -> None:

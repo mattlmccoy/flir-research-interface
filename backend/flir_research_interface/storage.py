@@ -47,6 +47,10 @@ class MoveConflictError(RuntimeError):
     """The destination already holds this run with different content; both copies were kept."""
 
 
+class CollectionClashError(ValueError):
+    """The destination folder already has an entry with this run's name; nothing was moved."""
+
+
 @dataclass(frozen=True)
 class _Part:
     """The subset of ``psutil`` sdiskpart this module needs (also lets tests inject samples)."""
@@ -357,18 +361,58 @@ def move_experiment(
     return dst
 
 
+# -- collections ---------------------------------------------------------------------------------
+
+
+def destination_clash(dst_parent: Path, name: str) -> str | None:
+    """The entry in ``dst_parent`` that a run called ``name`` would collide with, else None.
+
+    Catches an exact match and a case-only twin (exFAT and APFS treat the two as one entry), so a
+    caller can refuse before any copy or rename starts.
+    """
+    twin = _fsutil.casefold_collision(dst_parent, name)
+    if twin is not None:
+        return str(twin)
+    if os.path.lexists(dst_parent / name):
+        return name
+    return None
+
+
+def move_into_collection(run_dir: Path, root: Path, collection: str | None) -> Path:
+    """Rename ``run_dir`` into ``root/<collection>`` (``None``/``""`` = the top level of ``root``).
+
+    Same-volume ``os.rename`` only: a cross-device move raises ``OSError`` rather than copying.
+    Raises ``CollectionClashError`` when the destination already has an entry with this name.
+    """
+    name = run_dir.name
+    dst_parent = root / collection if collection else root
+    clash = destination_clash(dst_parent, name)
+    if clash is not None:
+        raise CollectionClashError(f"{dst_parent} already has {clash}")
+    dst_parent.mkdir(parents=True, exist_ok=True)
+    dst = dst_parent / name
+    os.rename(run_dir, dst)
+    # exFAT keeps a "._<name>" AppleDouble sidecar next to the old folder; it is OS junk.
+    with contextlib.suppress(FileNotFoundError):
+        (run_dir.parent / f"._{name}").unlink()
+    return dst
+
+
 __all__ = [
     "CONFIG_NAME",
     "CRITICAL_FILES",
     "DRIVE_SUBDIR",
+    "CollectionClashError",
     "MoveConflictError",
     "adopt_marker",
     "connected_drive",
+    "destination_clash",
     "forget_drive",
     "offline_runs",
     "remember_drive_runs",
     "load_storage_config",
     "move_experiment",
+    "move_into_collection",
     "register_drive",
     "save_storage_config",
     "selectable_drives",
