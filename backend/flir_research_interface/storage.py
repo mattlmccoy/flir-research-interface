@@ -389,9 +389,16 @@ def move_into_collection(run_dir: Path, root: Path, collection: str | None) -> P
     clash = destination_clash(dst_parent, name)
     if clash is not None:
         raise CollectionClashError(f"{dst_parent} already has {clash}")
+    created = not dst_parent.exists()
     dst_parent.mkdir(parents=True, exist_ok=True)
     dst = dst_parent / name
-    os.rename(run_dir, dst)
+    try:
+        os.rename(run_dir, dst)
+    except OSError:
+        if created:  # leave no empty collection behind; never remove one with content
+            with contextlib.suppress(OSError):
+                dst_parent.rmdir()
+        raise
     # exFAT keeps a "._<name>" AppleDouble sidecar next to the old folder; it is OS junk.
     with contextlib.suppress(FileNotFoundError):
         (run_dir.parent / f"._{name}").unlink()

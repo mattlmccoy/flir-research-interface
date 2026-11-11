@@ -543,6 +543,9 @@ def create_app(
 
     app.state.render_tasks = set()
     app.state.finalizing = set()  # recorders a _finalize_recording is stopping right now
+    # run dirs from before rec.stop until the post-stop exports (which hold the render lock) are
+    # scheduled; covers the visible-recorder stop, which writes into the run dir by path
+    app.state.stopping_dirs = set()
     # job records and render locks are keyed by RunRef.key ("<collection>/<name>" or "<name>")
     app.state.derived_jobs = {}  # run key -> progress record for on-demand regenerate
     app.state.move_jobs = {}  # run key -> progress record for an offload/restore move
@@ -612,6 +615,24 @@ def create_app(
         vis = app.state.visible
         app.state.visible = None
         manifest = None
+        stopping: Path | None = None
+        try:
+            if rec is not None and rec.experiment_dir is not None:
+                stopping = rec.experiment_dir.resolve()
+                app.state.stopping_dirs.add(stopping)
+            manifest, exp_dir = await _finalize_claimed(rec, vis)
+            if manifest is not None and exp_dir is not None:
+                _schedule_post_stop_exports(exp_dir)
+        finally:
+            if stopping is not None:
+                app.state.stopping_dirs.discard(stopping)
+        return manifest
+
+    async def _finalize_claimed(
+        rec: Recorder | None, vis: Any
+    ) -> tuple[dict[str, Any] | None, Path | None]:
+        """Stop the claimed thermal recorder, then the visible one; (manifest, run dir)."""
+        manifest = None
         exp_dir = None
         if rec is not None:
             exp_dir = rec.experiment_dir
@@ -647,9 +668,7 @@ def create_app(
                 visible_info = {"state": "error", "error": str(exc)}
             if manifest is not None:
                 manifest["visible"] = visible_info
-        if manifest is not None and exp_dir is not None:
-            _schedule_post_stop_exports(exp_dir)
-        return manifest
+        return manifest, exp_dir
 
     # -- health / setup --------------------------------------------------------------------
 
@@ -1071,6 +1090,16 @@ def create_app(
             ),
         }
 
+    def _job_tables() -> dict[str, dict[Any, dict[str, Any]]]:
+        """Every per-run job table, keyed by RunRef.key (smart: (run key, roi id) tuples)."""
+        return {
+            "move": app.state.move_jobs,
+            "derived": app.state.derived_jobs,
+            "media": app.state.media_jobs,
+            "range": app.state.range_jobs,
+            "smart": app.state.smart_jobs,
+        }
+
     def _busy() -> list[str]:
         """Why the operator must not be interrupted right now (empty when idle)."""
         from flir_research_interface.rf_status import rf_engaged
@@ -1079,19 +1108,11 @@ def create_app(
         # A running job is also a render_task, so it is reported twice (its label and the
         # background-task count). That double-reporting is intentional: the labels say what, the
         # count catches work that has no job record (the post-stop exports).
-        running = job_labels(
-            {
-                "move": app.state.move_jobs,
-                "derived": app.state.derived_jobs,
-                "media": app.state.media_jobs,
-                "range": app.state.range_jobs,
-                "smart": app.state.smart_jobs,  # keys are (run key, roi id) tuples
-            }
-        )
+        running = job_labels(_job_tables())
         return busy_reasons(
             BusyInputs(
                 recording=rec is not None and rec.state == RecorderState.RECORDING,
-                finalizing=bool(app.state.finalizing),
+                finalizing=bool(app.state.finalizing) or bool(app.state.stopping_dirs),
                 armed=app.state.armer is not None,
                 control_engaged=rf_engaged(
                     app.state.control_last,
@@ -1738,26 +1759,26 @@ def create_app(
             "nothing was moved"
         )
 
-    def _run_busy(key: str, run_dir: Path) -> str | None:
-        """Why this run cannot be renamed right now, else None."""
+    def _run_busy(key: str, run_dir: Path, dst_key: str) -> str | None:
+        """Why this run cannot be renamed to ``dst_key`` right now, else None."""
         rec = recorder()
-        if (
-            rec is not None
-            and rec.experiment_dir is not None
-            and rec.experiment_dir.resolve() == run_dir.resolve()
-        ):
+        here = run_dir.resolve()
+        rec_dir = rec.experiment_dir if rec is not None else None
+        if rec_dir is not None and rec_dir.resolve() == here:
             return "this run is being recorded right now"
+        if here in app.state.stopping_dirs:
+            return "this run is still finishing its recording; try again shortly"
+        busy = "this run is busy (a render, export or move is running); try again shortly"
         if app.state.render_locks.get(key).locked():
-            return "this run is busy (a render, export or move is running); try again shortly"
-        for jobs in (
-            app.state.move_jobs, app.state.derived_jobs, app.state.media_jobs, app.state.range_jobs
-        ):
-            job = jobs.get(key)
-            if job is not None and job.get("state") == "running":
-                return "this run is busy (a render, export or move is running); try again shortly"
-        smart = getattr(app.state, "smart_jobs", {})  # (run key, roi id) -> job
-        if any(k[0] == key and j.get("state") == "running" for k, j in smart.items()):
-            return "this run is busy (a smart ROI compute is running); try again shortly"
+            return busy
+        for jobs in _job_tables().values():
+            for k, job in list(jobs.items()):
+                run_key = k[0] if isinstance(k, tuple) else k
+                if run_key == key and job.get("state") == "running":
+                    return busy
+        dst_move = app.state.move_jobs.get(dst_key)
+        if dst_move is not None and dst_move.get("state") == "running":
+            return f"a move into {dst_key} is running; try again when it finishes"
         return None
 
     @app.post("/api/experiments/{name}/collection")
@@ -1775,7 +1796,9 @@ def create_app(
             if err:
                 raise HTTPException(400, err)
         ref, src = _resolve(run, req.library)
-        busy = _run_busy(ref.key, src)
+        if (req.to or None) == ref.collection:
+            raise HTTPException(400, f"already in {req.to or 'Unsorted'}")
+        busy = _run_busy(ref.key, src, RunRef(req.to or None, ref.name).key)
         if busy is not None:
             raise HTTPException(409, busy)
         lib, root = next((lib, r) for lib, r in _roots() if contained(r, src))

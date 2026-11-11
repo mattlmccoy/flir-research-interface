@@ -11,6 +11,7 @@ import os
 import time
 from pathlib import Path
 
+import pytest
 from collection_helpers import select_collection
 from fastapi.testclient import TestClient
 
@@ -110,6 +111,9 @@ def test_move_refuses_casefold_clash(tmp_path: Path) -> None:
         before = (_listing(local), _listing(drive))
         r = c.post(f"/api/experiments/{name}/move?collection=mattmccoy", json={"to": "drive"})
         assert r.status_code == 409, r.text
+        assert r.json()["detail"] == (
+            f"mattmccoy on the drive already has a run named {name}; nothing was moved"
+        )
         assert (_listing(local), _listing(drive)) == before
 
 
@@ -188,3 +192,68 @@ def test_move_into_collection_refuses_running_job(tmp_path: Path) -> None:
             assert r.status_code == 409, (attr, r.text)
             del table[key]
         assert (local / name).is_dir()
+
+
+def test_move_into_collection_refuses_while_stopping(tmp_path: Path) -> None:
+    local, _drive = _setup(tmp_path)
+    with _client(local) as c:
+        name = _unsorted_run(c, local)
+        # hand-made: the dir _finalize_recording registers while the visible recorder stops
+        c.app.state.stopping_dirs.add((local / name).resolve())  # type: ignore[attr-defined]
+        r = c.post(f"/api/experiments/{name}/collection?collection=", json={"to": "mattmccoy"})
+        assert r.status_code == 409, r.text
+        assert (local / name).is_dir()
+        assert "finishing a recording" in c.get("/api/operator/busy").json()["reasons"]
+
+
+def test_move_into_own_collection_is_400(tmp_path: Path) -> None:
+    local, _drive = _setup(tmp_path)
+    with _client(local) as c:
+        name = _record(c)
+        url = f"/api/experiments/{name}/collection?collection=mattmccoy"
+        r = c.post(url, json={"to": "mattmccoy"})
+        assert r.status_code == 400
+        assert r.json()["detail"] == "already in mattmccoy"
+        assert (local / "mattmccoy" / name).is_dir()
+
+
+def test_move_into_collection_refuses_running_move_to_destination(tmp_path: Path) -> None:
+    local, _drive = _setup(tmp_path)
+    with _client(local) as c:
+        name = _unsorted_run(c, local)
+        # hand-made: a move job record for the destination key, as the move route writes it
+        c.app.state.move_jobs[f"mattmccoy/{name}"] = {"state": "running"}  # type: ignore[attr-defined]
+        r = c.post(f"/api/experiments/{name}/collection?collection=", json={"to": "mattmccoy"})
+        assert r.status_code == 409, r.text
+        assert (local / name).is_dir()
+
+
+def test_move_top_level_run_clash_says_unsorted(tmp_path: Path) -> None:
+    local, drive = _setup(tmp_path)
+    with _client(local) as c:
+        name = _unsorted_run(c, local)
+        c.put("/api/storage/drive", json={"mount": str(drive)})
+        (drive / "FLIR-recordings" / name).mkdir(parents=True)  # hand-made clash
+        r = c.post(f"/api/experiments/{name}/move?collection=", json={"to": "drive"})
+        assert r.status_code == 409
+        assert r.json()["detail"] == (
+            f"Unsorted on the drive already has a run named {name}; nothing was moved"
+        )
+
+
+def test_move_into_collection_removes_new_dir_when_rename_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from flir_research_interface import storage
+
+    run = tmp_path / "root" / "20261111_120000_run"  # hand-made run folder
+    run.mkdir(parents=True)
+
+    def _fail(_a: object, _b: object) -> None:
+        raise OSError(18, "Invalid cross-device link")
+
+    monkeypatch.setattr(storage.os, "rename", _fail)
+    with pytest.raises(OSError):
+        storage.move_into_collection(run, tmp_path / "root", "mattmccoy")
+    assert not (tmp_path / "root" / "mattmccoy").exists()
+    assert run.is_dir()
