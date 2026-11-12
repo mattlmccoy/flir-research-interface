@@ -178,3 +178,29 @@ test("migrator: a backend move after the first ensure() is re-keyed by the next 
   assert.notEqual(st.getItem(`fri.rois.exp.mattmccoy/${RUN}`), null);
   assert.deepEqual(renames, [{ [`exp.${RUN}`]: `exp.mattmccoy/${RUN}` }]);
 });
+
+test("a collection rename moves each run's state from old/<run> to new/<run>", () => {
+  const st = memStorage();
+  const oldKeys = seed(st, `old-proj/${RUN}`);
+  const r = migrateRunScopes(st, [{ collection: "new-proj", name: RUN }], [{ from: "old-proj", to: "new-proj" }]);
+  for (const k of oldKeys) assert.equal(st.getItem(k), null, k);
+  const newKeys = seed(memStorage(), `new-proj/${RUN}`);
+  for (const k of newKeys) assert.notEqual(st.getItem(k), null, k);
+  assert.equal(r.rename[`exp.old-proj/${RUN}`], `exp.new-proj/${RUN}`);
+});
+
+test("chained renames (a -> b -> c) land on the final name", () => {
+  const st = memStorage();
+  seed(st, `a/${RUN}`);
+  migrateRunScopes(st, [{ collection: "c", name: RUN }], [{ from: "a", to: "b" }, { from: "b", to: "c" }]);
+  assert.notEqual(st.getItem(`fri.rois.exp.c/${RUN}`), null);
+  assert.equal(st.getItem(`fri.rois.exp.a/${RUN}`), null);
+});
+
+test("a rename never overwrites state already saved under the new name", () => {
+  const st = memStorage();
+  seed(st, `old-proj/${RUN}`);
+  st.setItem(`fri.rois.exp.new-proj/${RUN}`, "mine");
+  migrateRunScopes(st, [{ collection: "new-proj", name: RUN }], [{ from: "old-proj", to: "new-proj" }]);
+  assert.equal(st.getItem(`fri.rois.exp.new-proj/${RUN}`), "mine");
+});

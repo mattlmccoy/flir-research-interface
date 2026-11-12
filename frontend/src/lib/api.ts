@@ -84,6 +84,9 @@ export interface CollectionsDoc {
   drive_connected: boolean;
   /** A drive is registered (connected or not); with !drive_connected the offline index stands in. */
   drive_registered: boolean;
+  /** Collection renames, oldest first: browsers re-key per-run state from them (scopeMigration.ts).
+   *  Optional: an operator before 0.4.66 does not send it. */
+  renames?: { from: string; to: string; at: number }[];
 }
 /** GET /api/users (backend users.py public_doc): the people at the bench; `current` = who is
  *  using the operator now (remembered across restarts), null = nobody chosen yet. */
@@ -257,6 +260,10 @@ export const api = {
   /** Switches user and selects their last collection (409 while recording or armed). */
   selectUser: (id: string) =>
     j<UsersDoc>(req("/api/users/current", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ id }) })),
+  /** Renames a collection on this Mac and the connected SSD (409 while busy or the SSD holding it
+   *  is unplugged). */
+  renameCollection: (old: string, next: string) =>
+    j<CollectionsDoc>(req("/api/collections/rename", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ old, new: next }) })),
   selectCollection: (name: string | null) =>
     j<CollectionsDoc>(req("/api/collections/selected", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) })),
   /** Every run's location (local, connected drive, offline index); collection null = top level. */

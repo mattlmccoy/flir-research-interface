@@ -28,7 +28,31 @@ const FAMILIES: ((scope: string) => string)[] = [
 /** Moves each family's `exp.<name>` value to `exp.<c>/<name>` when the run's only location is
  *  collection `c`. An existing new key is never overwritten (the old key then stays). Top-level
  *  runs keep their key. Idempotent. */
-export function migrateRunScopes(storage: Storage, locations: RunLocation[]): ScopeMigration {
+export interface CollectionRename { from: string; to: string; }
+
+/** Where collection `name` ended up after every later rename in `renames` (oldest first). */
+function finalName(name: string, renames: readonly CollectionRename[], start: number): string {
+  let cur = name;
+  for (let i = start; i < renames.length; i++) if (renames[i].from === cur) cur = renames[i].to;
+  return cur;
+}
+
+/** Moves one family's value from `from` to `to` unless `to` already holds state. */
+function moveFamilies(storage: Storage, from: string, to: string, moved: string[]): void {
+  for (const key of FAMILIES) {
+    const oldKey = key(from);
+    const newKey = key(to);
+    const value = storage.getItem(oldKey);
+    if (value === null || storage.getItem(newKey) !== null) continue;
+    storage.setItem(newKey, value);
+    storage.removeItem(oldKey);
+    moved.push(oldKey);
+  }
+}
+
+/** `renames`: the operator's collection-rename log (GET /api/collections `renames`), oldest
+ *  first; a run's state under `exp.<old>/<name>` moves to its current collection's key. */
+export function migrateRunScopes(storage: Storage, locations: RunLocation[], renames: readonly CollectionRename[] = []): ScopeMigration {
   const where = new Map<string, Set<string | null>>();
   for (const l of locations) {
     const s = where.get(l.name) ?? new Set<string | null>();
@@ -43,15 +67,13 @@ export function migrateRunScopes(storage: Storage, locations: RunLocation[]): Sc
     const from = `exp.${name}`;
     const to = `exp.${runKey(coll, name)}`;
     out.rename[from] = to;
-    for (const key of FAMILIES) {
-      const oldKey = key(from);
-      const newKey = key(to);
-      const value = storage.getItem(oldKey);
-      if (value === null || storage.getItem(newKey) !== null) continue;
-      storage.setItem(newKey, value);
-      storage.removeItem(oldKey);
-      out.moved.push(oldKey);
-    }
+    moveFamilies(storage, from, to, out.moved);
+    renames.forEach((r, i) => {
+      if (finalName(r.to, renames, i + 1) !== coll) return;
+      const old = `exp.${runKey(r.from, name)}`;
+      out.rename[old] = to;
+      moveFamilies(storage, old, to, out.moved);
+    });
   }
   return out;
 }
@@ -68,10 +90,12 @@ export function createRunScopeMigrator(
   storage: Storage,
   onRename: (rename: Record<string, string>) => void,
   onAmbiguous: (names: string[]) => void = () => undefined,
+  fetchRenames: () => Promise<readonly CollectionRename[]> = () => Promise.resolve([]),
 ): RunScopeMigrator {
   let inFlight: Promise<void> | null = null;
   const run = async (): Promise<void> => {
-    const r = migrateRunScopes(storage, await fetchLocations());
+    const [locations, renames] = await Promise.all([fetchLocations(), fetchRenames()]);
+    const r = migrateRunScopes(storage, locations, renames);
     if (Object.keys(r.rename).length) onRename(r.rename);
     if (r.ambiguous.length) onAmbiguous(r.ambiguous);
   };

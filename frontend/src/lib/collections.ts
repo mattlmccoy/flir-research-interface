@@ -67,3 +67,13 @@ export function collectionsStatus(doc: CollectionsDoc | null, err: string | null
 export function pickerLocked(rec: { state: string } | null): boolean {
   return !!rec && (rec.state === "recording" || rec.state === "armed");
 }
+
+/** null when collection `old` may be renamed to `next`, otherwise why not (the operator answers
+ *  the same with 400/409). */
+export function renameError(old: string, next: string, doc: CollectionsDoc): string | null {
+  const err = collectionNameError(next);
+  if (err) return err;
+  if (next === old) return "That is the same name.";
+  if (doc.collections.some((c) => c.name === next)) return `A collection called ${next} already exists.`;
+  return null;
+}

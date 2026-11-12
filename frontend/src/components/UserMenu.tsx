@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type CollectionsDoc, type UsersDoc } from "../lib/api.ts";
-import { collectionLabel } from "../lib/collections.ts";
+import { collectionLabel, collectionNameError, renameError } from "../lib/collections.ts";
 import { currentUser, slugFor, USER_LOCK_MESSAGE, userChipLabel, userMenuCollections } from "../lib/users.ts";
 
 /** The top-bar "who's using this?" button. Picking a person switches the operator to them and to the
@@ -13,11 +13,13 @@ export function UserMenu({ users, usersErr, collections, locked, onUsers, onColl
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState("");
+  const [collMode, setCollMode] = useState<"none" | "new" | "rename">("none");
+  const [collDraft, setCollDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const box = useRef<HTMLDivElement>(null);
 
-  const close = () => { setOpen(false); setAdding(false); setDraft(""); setErr(null); };
+  const close = () => { setOpen(false); setAdding(false); setDraft(""); setCollMode("none"); setCollDraft(""); setErr(null); };
   useEffect(() => { if (locked) close(); }, [locked]);
   useEffect(() => {
     if (!open) return;
@@ -39,6 +41,15 @@ export function UserMenu({ users, usersErr, collections, locked, onUsers, onColl
     onUsers(added ? await api.selectUser(added.id) : d);
     onCollections(await api.collections());
   });
+  const newCollection = (name: string) => act(async () => {
+    await api.addCollection(name);
+    onCollections(await api.selectCollection(name));
+    onUsers(await api.users());
+  });
+  const renameSelected = (old: string, next: string) => act(async () => {
+    onCollections(await api.renameCollection(old, next));
+    onUsers(await api.users());
+  });
   const pickCollection = (name: string) => act(async () => { onCollections(await api.selectCollection(name)); onUsers(await api.users()); });
 
   const me = currentUser(users);
@@ -48,6 +59,14 @@ export function UserMenu({ users, usersErr, collections, locked, onUsers, onColl
     : users?.users.some((u) => u.id === slug) ? `${slug} is already a user` : null;
   const groups = me && collections ? userMenuCollections(me, collections) : null;
   const sel = collections?.selected ?? null;
+  const collErr = collDraft === "" || !collections ? null
+    : collMode === "rename" && sel ? renameError(sel, collDraft, collections)
+    : collectionNameError(collDraft) ?? (collections.collections.some((c) => c.name === collDraft) ? `${collDraft} already exists; pick it from the list` : null);
+  const submitColl = () => {
+    if (!collDraft || collErr || busy) return;
+    if (collMode === "rename" && sel) void renameSelected(sel, collDraft);
+    else void newCollection(collDraft);
+  };
 
   return (
     <div className="user-menu" ref={box}>
@@ -93,6 +112,27 @@ export function UserMenu({ users, usersErr, collections, locked, onUsers, onColl
                   <span className="nm">{c}</span>
                 </button>
               ))}
+              <div className="coll-add">
+                {collMode === "none"
+                  ? <div className="row">
+                    <button type="button" className="linkish" onClick={() => { setCollMode("new"); setCollDraft(""); }}>+ new collection</button>
+                    {sel && <button type="button" className="linkish" onClick={() => { setCollMode("rename"); setCollDraft(sel); }}>rename {sel}…</button>}
+                  </div>
+                  : <>
+                    <div className="row">
+                      <input autoFocus type="text" value={collDraft} aria-label={collMode === "rename" ? `new name for ${sel}` : "new collection name"}
+                        placeholder={collMode === "rename" ? "new name" : "e.g. rf-sintering"} aria-invalid={!!collErr}
+                        onFocus={(e) => e.target.select()}
+                        onChange={(e) => setCollDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submitColl(); }} />
+                      <button type="button" className="primary" disabled={!collDraft || !!collErr || busy} onClick={submitColl}>{collMode === "rename" ? "rename" : "add"}</button>
+                      <button type="button" className="secondary" onClick={() => { setCollMode("none"); setCollDraft(""); }}>cancel</button>
+                    </div>
+                    {collErr ? <div className="bad" role="alert">{collErr}</div>
+                      : <div className="hint">{collMode === "rename"
+                        ? `renames the ${sel}/ folder on this Mac${collections?.drive_registered ? " and the SSD" : ""}, for everyone who uses it; runs keep their data and saved views`
+                        : "a new, empty collection; existing runs stay where they are"}</div>}
+                  </>}
+              </div>
               {groups.others.length > 0 && (
                 <details className="others">
                   <summary>other collections ({groups.others.length})</summary>

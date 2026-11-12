@@ -118,3 +118,12 @@ test("status label surfaces a failed /api/collections instead of loading forever
   assert.equal(collectionsStatus(null, "Error: 500 boom"), "collections unavailable: Error: 500 boom");
   assert.equal(collectionsStatus(doc(), "stale error"), "mattmccoy");  // a doc wins once it loads
 });
+
+test("renameError: name rules, unchanged name, and an existing collection", async () => {
+  const { renameError } = await import("./collections.ts");
+  const d = doc();
+  assert.equal(renameError("mattmccoy", "rf-heating", d), null);
+  assert.match(renameError("mattmccoy", "Bad Name", d) ?? "", /lowercase/);
+  assert.match(renameError("mattmccoy", "mattmccoy", d) ?? "", /same/);
+  assert.match(renameError("mattmccoy", "rf-sintering", d) ?? "", /already/);
+});

@@ -5,6 +5,9 @@ every browser sees the same one.
 """
 from __future__ import annotations
 
+import contextlib
+import os
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Any
@@ -16,7 +19,9 @@ from flir_research_interface import storage
 from flir_research_interface.collections import (
     RunQuery,
     collection_name_error,
+    load_renames,
     load_selection,
+    record_rename,
     run_name_error,
     save_selection,
     scan_root,
@@ -27,7 +32,7 @@ from flir_research_interface.collections_migration import (
     apply_migration,
     plan_migration,
 )
-from flir_research_interface.users import note_selection, sync_users
+from flir_research_interface.users import note_selection, rename_collection_refs, sync_users
 
 __all__ = ["RunDep", "register_collections_routes", "run_query"]
 
@@ -63,6 +68,11 @@ class _NameBody(BaseModel):
 
 class _SelectBody(BaseModel):
     name: str | None = None
+
+
+class _RenameBody(BaseModel):
+    old: str
+    new: str
 
 
 class _MigrationBody(BaseModel):
@@ -133,6 +143,7 @@ def register_collections_routes(
             ],
             "drive_connected": "drive" in scans,
             "drive_registered": _registered(),
+            "renames": load_renames(_base()),
         }
 
     @app.get("/api/collections")
@@ -179,6 +190,57 @@ def register_collections_routes(
         save_selection(_base(), name)
         note_selection(_base(), name)  # the collection joins the current user's list
         sync_users(_base(), dict(roots()).get("drive"))
+        return _doc()
+
+    @app.post("/api/collections/rename")
+    def rename_collection(body: _RenameBody) -> dict[str, Any]:
+        """Rename collection ``old`` to ``new`` on this Mac and the connected SSD (one folder
+        rename per volume, rolled back if a later one fails), then every reference to it: the SSD
+        index, the selection, each user's list and the rename log the browsers re-key from."""
+        old, new = body.old, body.new
+        for n in (old, new):
+            err = collection_name_error(n)
+            if err:
+                raise HTTPException(400, err)
+        if old == new:
+            raise HTTPException(400, "the new name is the same as the old one")
+        reasons = busy()
+        if live() or reasons:
+            why = ", ".join(reasons) or "recording or armed"
+            raise HTTPException(409, f"operator is busy: {why}; collection not renamed")
+        base = _base()
+        if _offline() and old in storage.offline_collections(base):
+            raise HTTPException(
+                409, f"plug in the SSD first: it holds runs in {old!r} that must be renamed too"
+            )
+        here = [(lib, Path(root)) for lib, root in roots() if (Path(root) / old).is_dir()]
+        if not here:
+            raise HTTPException(404, f"collection {old!r} not found")
+        for _lib, root in roots():
+            clash = storage.destination_clash(Path(root), new)
+            if clash is not None:
+                raise HTTPException(409, f"{new!r} already exists ({Path(root) / clash})")
+        sync_users(base, dict(roots()).get("drive"))  # pull in users known only to the SSD
+        done: list[Path] = []
+        for _lib, root in here:
+            try:
+                os.rename(root / old, root / new)
+            except OSError as exc:
+                for r in reversed(done):  # undo: leave both volumes as they were
+                    with contextlib.suppress(OSError):
+                        os.rename(r / new, r / old)
+                raise HTTPException(500, f"could not rename {root / old}: {exc}") from exc
+            done.append(root)
+            with contextlib.suppress(OSError):  # exFAT AppleDouble sidecar of the old folder
+                (root / f"._{old}").unlink()
+        drive_root = dict(roots()).get("drive")
+        if drive_root is not None:
+            storage.rename_index_collection(base, old, new, drive_root)
+        if load_selection(base) == old:
+            save_selection(base, new)
+        rename_collection_refs(base, old, new)
+        sync_users(base, drive_root)
+        record_rename(base, old, new, time.time())
         return _doc()
 
     def _migration_base(volume: str) -> Path:

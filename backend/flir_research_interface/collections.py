@@ -35,6 +35,9 @@ __all__ = [
     "scan_root",
     "load_selection",
     "save_selection",
+    "RENAMES_FILE",
+    "load_renames",
+    "record_rename",
 ]
 
 SELECTION_FILE = ".collection.json"
@@ -154,3 +157,28 @@ def save_selection(base: Path, selected: str | None) -> None:
             raise ValueError(err)
     base.mkdir(parents=True, exist_ok=True)
     _atomic_json(base / SELECTION_FILE, {"selected": selected})
+
+
+RENAMES_FILE = ".collection-renames.json"
+
+
+def load_renames(base: Path) -> list[dict[str, object]]:
+    """Every collection rename, oldest first (``[]`` when missing or unreadable). Browsers use it to
+    move their per-run settings from ``<old>/<run>`` to ``<new>/<run>``."""
+    try:
+        data = json.loads((base / RENAMES_FILE).read_text())
+    except (OSError, ValueError):
+        return []
+    items = data.get("renames") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return []
+    return [
+        r for r in items
+        if isinstance(r, dict) and isinstance(r.get("from"), str) and isinstance(r.get("to"), str)
+    ]
+
+
+def record_rename(base: Path, old: str, new: str, at: float) -> None:
+    items = load_renames(base)
+    items.append({"from": old, "to": new, "at": at})
+    _atomic_json(base / RENAMES_FILE, {"renames": items})

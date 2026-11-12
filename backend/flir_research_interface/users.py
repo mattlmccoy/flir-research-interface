@@ -38,6 +38,7 @@ __all__ = [
     "merge_users",
     "note_selection",
     "public_doc",
+    "rename_collection_refs",
     "save_user_profile",
     "set_current",
     "slug_for",
@@ -255,3 +256,27 @@ def user_profile(u: dict[str, Any], base: Path) -> dict[str, Any]:
         return validate_profile(u.get("profile"))
     except ValueError:
         return load_profile(base)
+
+
+def rename_collection_refs(base: Path, old: str, new: str) -> int:
+    """Collection ``old`` was renamed: replace it in every user's list and last collection.
+    Returns how many users changed (each gets a fresh ``updated`` so the SSD copy follows)."""
+    with _LOCK:
+        doc = load_users(base)
+        changed = 0
+        for u in doc["users"]:
+            if old not in u["collections"] and u.get("last_collection") != old:
+                continue
+            seen: list[str] = []
+            for c in u["collections"]:
+                c2 = new if c == old else c
+                if c2 not in seen:
+                    seen.append(c2)
+            u["collections"] = seen
+            if u.get("last_collection") == old:
+                u["last_collection"] = new
+            u["updated"] = time.time()
+            changed += 1
+        if changed:
+            _save(base, doc)
+        return changed

@@ -29,7 +29,7 @@ export function CollectionPicker({ doc, error = null, locked, onDoc }: { doc: Co
     try { onDoc(await fn()); close(); } catch (e) { setErr(String(e)); } finally { setBusy(false); }
   }
   const select = (name: string) => act(() => api.selectCollection(name));
-  // a new collection is selected right away: adding one is how a new user or project starts
+  // a new collection is selected right away; it never renames or moves an existing one
   const add = (name: string) => act(async () => { await api.addCollection(name); return api.selectCollection(name); });
 
   const draftErr = draft === "" ? null : collectionNameError(draft);
@@ -56,7 +56,7 @@ export function CollectionPicker({ doc, error = null, locked, onDoc }: { doc: Co
           ))}
           <div className="coll-add">
             {!adding
-              ? <button type="button" className="linkish" onClick={() => setAdding(true)}>+ Add user or project</button>
+              ? <button type="button" className="linkish" onClick={() => setAdding(true)}>+ new collection</button>
               : <>
                 <div className="row">
                   <input autoFocus type="text" value={draft} placeholder="e.g. mattmccoy" aria-label="new collection name"
@@ -65,7 +65,7 @@ export function CollectionPicker({ doc, error = null, locked, onDoc }: { doc: Co
                   <button type="button" className="primary" disabled={!draft || !!draftErr || busy} onClick={() => add(draft)}>add</button>
                 </div>
                 {draftErr ? <div className="bad" role="alert">{draftErr}</div>
-                  : <div className="hint">{draft ? `adds the folder ${draft}/ and records into it` : "lowercase letters, digits, '-' and '_'"}</div>}
+                  : <div className="hint">{draft ? `a new, empty collection ${draft}/ that new runs record into; existing runs stay where they are` : "lowercase letters, digits, '-' and '_'"}</div>}
               </>}
           </div>
           {err && <div className="bad" role="alert">{err}</div>}

@@ -97,7 +97,8 @@ export function App() {
   const migrator = useMemo(() => storage
     ? createRunScopeMigrator(() => api.runLocations(), storage,
       (rename) => dispatch({ type: "renameSmartViewScopes", rename }),
-      (names) => console.warn(`Saved ROI/mask state left under the bare run name (the name is in more than one collection): ${names.join(", ")}`))
+      (names) => console.warn(`Saved ROI/mask state left under the bare run name (the name is in more than one collection): ${names.join(", ")}`),
+      () => api.collections().then((d) => d.renames ?? []))
     : { ensure: () => Promise.resolve() }, []);
   useEffect(() => { migrator.ensure().catch(() => undefined); }, [migrator]);  // warm-up; opening retries
   const presets = usePresets();

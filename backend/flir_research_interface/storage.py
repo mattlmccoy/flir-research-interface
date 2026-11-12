@@ -354,6 +354,29 @@ def reindex_collection(
         return count
 
 
+def rename_index_collection(
+    local_root: Path | str, old: str, new: str, drive_root: Path | str
+) -> int:
+    """After collection ``old`` was renamed to ``new`` on the drive, retag its index entries and
+    rewrite their paths. Returns the count (0 and no write when there is no index)."""
+    root = Path(drive_root)
+    path = Path(local_root) / INDEX_NAME
+    with _INDEX_LOCK:
+        idx = _read_index(path)
+        if not idx:
+            return 0
+        count = 0
+        runs = []
+        for r in _index_runs(idx):
+            if r["collection"] == old:
+                r = _relocated(r, new, root / old, root / new)
+                count += 1
+            runs.append(r)
+        if count:
+            _write_index(path, idx, runs, str(idx.get("label", "drive")))
+        return count
+
+
 def offline_runs(local_root: Path | str, *, collection: str | None) -> list[dict[str, Any]]:
     """The last-seen runs of the registered drive in ``collection`` (``None`` = top level), marked
     ``library: "offline"`` so they can never be mistaken for runs readable right now."""
