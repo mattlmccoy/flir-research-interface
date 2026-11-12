@@ -27,7 +27,7 @@ from flir_research_interface.collections_migration import (
     apply_migration,
     plan_migration,
 )
-from flir_research_interface.users import note_selection
+from flir_research_interface.users import note_selection, sync_users
 
 __all__ = ["RunDep", "register_collections_routes", "run_query"]
 
@@ -178,6 +178,7 @@ def register_collections_routes(
                 raise HTTPException(404, f"collection {name!r} not found")
         save_selection(_base(), name)
         note_selection(_base(), name)  # the collection joins the current user's list
+        sync_users(_base(), dict(roots()).get("drive"))
         return _doc()
 
     def _migration_base(volume: str) -> Path:

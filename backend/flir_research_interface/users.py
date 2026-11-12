@@ -1,6 +1,8 @@
 """User profiles: who is at the bench, the shared collections they use, and their project profile.
 
-One file on the operator (``<local root>/.users.json``) so every browser sees the same people:
+One file on the operator (``<local root>/.users.json``) so every browser sees the same people,
+mirrored to the SSD (``FLIR-recordings/.users.json``) whenever it is connected so the list travels
+with the drive (``sync_users``: union by id, newer ``updated`` wins, ``current`` stays local):
 
     {"current": "mattmccoy",
      "users": [{"id": "mattmccoy", "name": "Matt McCoy", "collections": ["mattmccoy"],
@@ -16,6 +18,7 @@ import json
 import logging
 import re
 import threading
+import time
 import unicodedata
 from pathlib import Path
 from typing import Any
@@ -32,11 +35,13 @@ __all__ = [
     "add_user",
     "current_user",
     "load_users",
+    "merge_users",
     "note_selection",
     "public_doc",
     "save_user_profile",
     "set_current",
     "slug_for",
+    "sync_users",
     "user_id_error",
     "user_profile",
 ]
@@ -72,25 +77,70 @@ def _valid_user(u: Any) -> bool:
         and isinstance(u.get("name"), str)
         and isinstance(u.get("collections"), list)
         and all(isinstance(c, str) and collection_name_error(c) is None for c in u["collections"])
+        and isinstance(u.get("updated", 0), int | float) and not isinstance(u.get("updated"), bool)
     )
+
+
+def _read(path: Path) -> tuple[dict[str, Any], bool]:
+    """The users doc at ``path`` and whether the file may be overwritten (missing or readable).
+    An unreadable file reads as empty and is reported not writable, so it is never clobbered."""
+    empty: dict[str, Any] = {"current": None, "users": []}
+    try:
+        data = json.loads(path.read_text())
+    except FileNotFoundError:
+        return empty, True
+    except (OSError, ValueError) as exc:
+        logger.warning("users file %s unreadable (%s); left untouched", path, exc)
+        return empty, False
+    if not isinstance(data, dict) or not isinstance(data.get("users"), list):
+        logger.warning("users file %s has an unexpected shape; left untouched", path)
+        return empty, False
+    users = [u for u in data["users"] if _valid_user(u)]
+    ids = {u["id"] for u in users}
+    cur = data.get("current")
+    return {"current": cur if cur in ids else None, "users": users}, True
 
 
 def load_users(base: Path) -> dict[str, Any]:
     """The users file, or the empty doc when it is missing or malformed (logged)."""
-    path = base / USERS_FILE
-    try:
-        data = json.loads(path.read_text())
-    except FileNotFoundError:
-        return {"current": None, "users": []}
-    except (OSError, ValueError) as exc:
-        logger.warning("users file %s unreadable (%s); treating as empty", path, exc)
-        return {"current": None, "users": []}
-    if not isinstance(data, dict) or not isinstance(data.get("users"), list):
-        return {"current": None, "users": []}
-    users = [u for u in data["users"] if _valid_user(u)]
-    ids = {u["id"] for u in users}
-    cur = data.get("current")
-    return {"current": cur if cur in ids else None, "users": users}
+    return _read(base / USERS_FILE)[0]
+
+
+def merge_users(a: list[dict[str, Any]], b: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Union by id; when both sides have a person, the record with the newer ``updated`` wins (a
+    tie keeps ``a``). Order: ``a``'s people, then those only in ``b``."""
+    out = {u["id"]: u for u in a}
+    for u in b:
+        mine = out.get(u["id"])
+        if mine is None or float(u.get("updated", 0)) > float(mine.get("updated", 0)):
+            out[u["id"]] = u
+    order = [u["id"] for u in a] + [u["id"] for u in b if u["id"] not in {x["id"] for x in a}]
+    return [out[i] for i in order]
+
+
+def sync_users(base: Path, drive: Path | None) -> dict[str, Any]:
+    """Merge the Mac's list with the SSD's (``drive`` = the connected ``FLIR-recordings`` root, or
+    None) and write back whichever side is behind. ``current`` stays on this computer only; each
+    user's collections are also created on the SSD so another computer sees them."""
+    with _LOCK:
+        local, local_ok = _read(base / USERS_FILE)
+        if drive is None or not drive.is_dir():
+            return local
+        remote, remote_ok = _read(drive / USERS_FILE)
+        merged = merge_users(local["users"], remote["users"])
+        ids = {u["id"] for u in merged}
+        doc = {"current": local["current"] if local["current"] in ids else None, "users": merged}
+        if local_ok and merged != local["users"]:
+            _save(base, doc)
+        if remote_ok and merged != remote["users"]:
+            _save(drive, {"current": None, "users": merged})
+        for u in merged:
+            for c in u["collections"]:
+                try:
+                    (drive / c).mkdir(exist_ok=True)
+                except OSError as exc:
+                    logger.warning("could not create %s on the drive: %s", drive / c, exc)
+        return doc
 
 
 def _save(base: Path, doc: dict[str, Any]) -> None:
@@ -147,7 +197,7 @@ def add_user(base: Path, name: str, collection: str | None = None) -> dict[str, 
         (base / coll).mkdir(parents=True, exist_ok=True)
         doc["users"].append({
             "id": uid, "name": name, "collections": [coll], "last_collection": coll,
-            "profile": load_profile(base),
+            "profile": load_profile(base), "updated": time.time(),
         })
         _save(base, doc)
         return doc
@@ -182,6 +232,7 @@ def note_selection(base: Path, collection: str | None) -> None:
         if collection not in u["collections"]:
             u["collections"].append(collection)
         u["last_collection"] = collection
+        u["updated"] = time.time()
         _save(base, doc)
 
 
@@ -193,6 +244,7 @@ def save_user_profile(base: Path, uid: str, body: Any) -> dict[str, Any]:
         if u is None:
             raise UserError(f"user {uid!r} not found", 404)
         u["profile"] = clean
+        u["updated"] = time.time()
         _save(base, doc)
     return clean
 

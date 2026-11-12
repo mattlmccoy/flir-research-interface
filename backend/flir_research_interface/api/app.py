@@ -948,7 +948,12 @@ def create_app(
     async def put_profile(request: Request) -> dict[str, Any]:
         """Store the project profile (metadata fields + mark buttons) for every client."""
         from flir_research_interface.analysis.profile import save_profile
-        from flir_research_interface.users import UserError, current_user, save_user_profile
+        from flir_research_interface.users import (
+            UserError,
+            current_user,
+            save_user_profile,
+            sync_users,
+        )
 
         root = app.state.experiments_root
         try:
@@ -956,7 +961,9 @@ def create_app(
             user = current_user(root)
             # each person keeps their own profile; the shared file is the template
             if user is not None:
-                return await run_in_threadpool(save_user_profile, root, user["id"], body)
+                saved = await run_in_threadpool(save_user_profile, root, user["id"], body)
+                await run_in_threadpool(sync_users, root, dict(_roots()).get("drive"))
+                return saved
             return await run_in_threadpool(save_profile, root, body)
         except UserError as exc:
             raise HTTPException(exc.status, str(exc)) from exc
@@ -1666,7 +1673,12 @@ def create_app(
         return recording or app.state.armer is not None
 
     register_collections_routes(app, _roots, _recording_or_armed, _busy)
-    register_users_routes(app, lambda: Path(app.state.experiments_root), _recording_or_armed)
+    register_users_routes(
+        app,
+        lambda: Path(app.state.experiments_root),
+        _recording_or_armed,
+        lambda: dict(_roots()).get("drive"),
+    )
 
     # -- external-drive storage (offload) ------------------------------------------------------
 
