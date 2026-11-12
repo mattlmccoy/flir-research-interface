@@ -80,7 +80,7 @@ export function RecordingTo({ name, reason }: { name: string; reason: string | n
   return (
     <div className={`recording-to${reason ? " blocked" : ""}`}>
       <div><span className="k">Recording to:</span> <b>{name}</b></div>
-      {reason && <div className="warnbox" role="alert">{reason} (choose one with the collection picker on the experiments page)</div>}
+      {reason && <div className="warnbox" role="alert">{reason} (pick who's using this from the menu at the top right)</div>}
     </div>
   );
 }

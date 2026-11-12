@@ -24,8 +24,9 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": "http://127.0.0.1:8000",
-      "/ws": { target: "ws://127.0.0.1:8000", ws: true },
+      // FRI_DEV_PROXY points the dev UI at a demo operator, never the live one on :8000
+      "/api": process.env.FRI_DEV_PROXY ?? "http://127.0.0.1:8000",
+      "/ws": { target: (process.env.FRI_DEV_PROXY ?? "http://127.0.0.1:8000").replace(/^http/, "ws"), ws: true },
     },
   },
   build: { outDir: "dist", emptyOutDir: true },

@@ -5,8 +5,8 @@ import { deltaTrace } from "./lib/delta.ts";
 import { ProfilePanel, type FieldSnapshot } from "./components/ProfilePanel.tsx";
 import { radiometryFromCamera } from "./lib/emissivity.ts";
 import { useCallback, useEffect, useReducer, useRef, useState, useMemo } from "react";
-import { api, operatorBase, type CollectionsDoc, type RecordingStatus, type Status } from "./lib/api.ts";
-import { collectionsStatus, pickerLocked } from "./lib/collections.ts";
+import { api, operatorBase, type CollectionsDoc, type RecordingStatus, type Status, type UsersDoc } from "./lib/api.ts";
+import { pickerLocked } from "./lib/collections.ts";
 import { wsUrl } from "./lib/operator.ts";
 import { decodeFrameMessage, type FrameMessage } from "./lib/protocol.ts";
 import type { PaletteName } from "./lib/palette.ts";
@@ -27,6 +27,7 @@ import { fmtCelsius } from "./lib/format.ts";
 import { ThermalView, type StatsMap } from "./components/ThermalView.tsx";
 import { DisplayControls } from "./components/DisplayControls.tsx";
 import { SetupPage } from "./components/SetupPage.tsx";
+import { UserMenu } from "./components/UserMenu.tsx";
 import { RecordPanel } from "./components/RecordPanel.tsx";
 import { RoiRows } from "./components/RoiRows.tsx";
 import { CameraControls } from "./components/CameraControls.tsx";
@@ -322,6 +323,17 @@ export function App() {
     const id = setInterval(tick, 3000);
     return () => clearInterval(id);
   }, []);
+  // Who is using the operator (shared by every browser, remembered across restarts): the top-bar
+  // user menu; the record panel and profile editor remount on a switch to load that person's profile.
+  const [users, setUsers] = useState<UsersDoc | null>(null);
+  const [usersErr, setUsersErr] = useState<string | null>(null);
+  useEffect(() => {
+    const tick = () => { api.users().then((d) => { setUsers(d); setUsersErr(null); }).catch((e) => setUsersErr(String(e))); };
+    tick();
+    const id = setInterval(tick, 3000);
+    return () => clearInterval(id);
+  }, []);
+  const userKey = users?.current ?? "";
   const collectionLocked = pickerLocked(recording);
 
   useEffect(() => {
@@ -420,10 +432,8 @@ export function App() {
         <button className={page === "experiments" || page === "playback" ? "active" : ""} aria-current={page === "experiments" || page === "playback" ? "page" : undefined} onClick={() => setPage("experiments")}>experiments</button>
         <button className={page === "setup" ? "active" : ""} aria-current={page === "setup" ? "page" : undefined} onClick={() => setPage("setup")}>setup</button>
       </nav>
-      <span className={`collection-indicator${collections && !collections.selected ? " unset" : ""}${!collections && collectionsErr ? " error" : ""}`}
-        title="The collection new runs record into (change it on the experiments page)">
-        <span className="k">collection</span>{collectionsStatus(collections, collectionsErr)}
-      </span>
+      <UserMenu users={users} usersErr={usersErr} collections={collections} locked={collectionLocked}
+        onUsers={setUsers} onCollections={setCollections} />
       {page === "playback" && openExp && (
         <span className="crumb">
           <button className="secondary" onClick={() => setPage("experiments")} title="Back to the experiments list" aria-label="Back to experiments">← experiments</button>
@@ -450,7 +460,7 @@ export function App() {
 
   if (page === "setup") {
     return <StudioFrame layout={layout} page topbar={topbar} statusbar={statusbar}
-      center={<SetupPage status={status} onConnectFailed={() => { void refresh(); }} onConnected={() => { void refresh(); setPage("live"); }} />} />;
+      center={<SetupPage key={userKey} status={status} onConnectFailed={() => { void refresh(); }} onConnected={() => { void refresh(); setPage("live"); }} />} />;
   }
   if (page === "experiments") {
     return <StudioFrame layout={layout} page topbar={topbar} statusbar={statusbar}
@@ -526,7 +536,7 @@ export function App() {
             <CameraControls info={info} locked={isRecording} onApplied={refreshInfo} presetSave={<SaveCurrentAs store={presets} onSave={saveCurrent} label="save current as preset…" />} />
           </RailSection>
           <RailSection id="recording" title="recording" open={layout.sections.recording} onToggle={() => dispatch({ type: "toggleSection", section: "recording" })}>
-            <RecordPanel collections={collections} acquiring={status.state === "acquiring"} rois={rois.rois} liveAdjust={layout.visibleAdjust} lastApplied={presets.lastApplied} masks={masks.enabled && masks.shapes.length ? masks.shapes : null} />
+            <RecordPanel key={userKey} collections={collections} acquiring={status.state === "acquiring"} rois={rois.rois} liveAdjust={layout.visibleAdjust} lastApplied={presets.lastApplied} masks={masks.enabled && masks.shapes.length ? masks.shapes : null} />
           </RailSection>
           <RailSection id="display" title="display" open={layout.sections.display} onToggle={() => dispatch({ type: "toggleSection", section: "display" })} tag="visualization only">
             <DisplayControls palette={palette} setPalette={setPalette} scaleMode={scaleMode} setScaleMode={setScaleMode} manual={manual} setManual={setManual} shown={shown} isotherm={layout.isotherm} setIsotherm={(isotherm) => dispatch({ type: "setIsotherm", isotherm })} hasReference={!!reference} onSetReference={() => { if (field) setReference(new Float32Array(field.c)); }} onClearReference={() => setReference(null)} onRangeFromRoi={(() => { const sel = rois.rois.find((r) => r.id === rois.selected); if (!field || !sel || sel.kind === "spot") return null; return () => { const rg = rangeFromRoi(field.c, field.w, field.h, sel); if (rg) { setManual({ min: Math.floor(rg.min * 10) / 10, max: Math.ceil(rg.max * 10) / 10 }); setScaleMode("manual"); } }; })()} hold={layout.hold} setHold={(hold) => dispatch({ type: "setHold", hold })} flipH={layout.flipH} flipV={layout.flipV} setFlip={(h, v) => dispatch({ type: "setFlip", h, v })} agc={layout.agc} setAgc={(agc) => dispatch({ type: "setAgc", agc })} units={layout.units} setUnits={(units) => dispatch({ type: "setUnits", units })} conv={field?.conv ?? null} filter={layout.filter} setFilter={(filter) => dispatch({ type: "setFilter", filter })} rfNotch={layout.rfNotch} setRfNotch={(on) => dispatch({ type: "setRfNotch", on })} rfStatus={rfNotchStatus(layout.rfNotch, frame?.header.display?.rf_notch)} segment={layout.segment} setSegment={(segment) => dispatch({ type: "setSegment", segment })} saturation={(() => { const cs = (info as Record<string, unknown> | null | undefined)?.active_case as { low_c?: number; high_c?: number } | undefined; if (!field || !cs || typeof cs.low_c !== "number" || typeof cs.high_c !== "number") return null; const n = saturationCount(field.c, { low: cs.low_c, high: cs.high_c }); return { ...n, lowC: cs.low_c, highC: cs.high_c }; })()} onSnapshot={saveLiveImage} />

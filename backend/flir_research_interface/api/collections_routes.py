@@ -27,6 +27,7 @@ from flir_research_interface.collections_migration import (
     apply_migration,
     plan_migration,
 )
+from flir_research_interface.users import note_selection
 
 __all__ = ["RunDep", "register_collections_routes", "run_query"]
 
@@ -176,6 +177,7 @@ def register_collections_routes(
             if name not in {c["name"] for c in _doc()["collections"]}:
                 raise HTTPException(404, f"collection {name!r} not found")
         save_selection(_base(), name)
+        note_selection(_base(), name)  # the collection joins the current user's list
         return _doc()
 
     def _migration_base(volume: str) -> Path:

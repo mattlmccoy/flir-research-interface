@@ -115,3 +115,22 @@ def test_armed_start_uses_arm_time_collection(tmp_path: Path) -> None:
         st = _wait(c, lambda s: s["state"] == "recording")
         assert Path(st["experiment_dir"]).parent == root / "mattmccoy"
         _wait(c, lambda s: s["state"] == "idle")
+
+
+def test_recording_stamps_user_and_user_switch_is_locked(tmp_path: Path) -> None:
+    root = tmp_path / "experiments"
+    with _client(root) as c:
+        _connect(c)
+        assert c.post("/api/users", json={"name": "Matt McCoy"}).status_code == 200
+        assert c.post("/api/users", json={"name": "Ana"}).status_code == 200
+        assert c.put("/api/users/current", json={"id": "mattmccoy"}).status_code == 200
+        r = c.post("/api/recording/start", json={"name": "x"})
+        assert r.status_code == 200, r.text
+        run = Path(r.json()["experiment_dir"])
+        assert run.parent == root / "mattmccoy"
+        r = c.put("/api/users/current", json={"id": "ana"})
+        assert r.status_code == 409
+        assert c.post("/api/recording/stop").status_code == 200
+        _wait(c, lambda s: s["state"] == "idle")
+        meta = json.loads((run / "metadata.json").read_text())
+        assert meta["user"] == {"id": "mattmccoy", "name": "Matt McCoy"}

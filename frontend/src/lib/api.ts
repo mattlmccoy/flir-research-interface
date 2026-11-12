@@ -85,6 +85,10 @@ export interface CollectionsDoc {
   /** A drive is registered (connected or not); with !drive_connected the offline index stands in. */
   drive_registered: boolean;
 }
+/** GET /api/users (backend users.py public_doc): the people at the bench; `current` = who is
+ *  using the operator now (remembered across restarts), null = nobody chosen yet. */
+export interface UserInfo { id: string; name: string; collections: string[]; last_collection: string | null; profile_name: string | null; }
+export interface UsersDoc { current: string | null; users: UserInfo[]; }
 /** GET /api/collections/migration (backend api/collections_routes.py `_plan_doc`): a dry run. */
 export interface MigrationPlanDoc {
   volume: "local" | "drive";
@@ -247,6 +251,12 @@ export const api = {
   addCollection: (name: string) =>
     j<CollectionsDoc>(req("/api/collections", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) })),
   /** Select a collection ("" = Unsorted); 409 while a recording or armed trigger is active. */
+  users: () => j<UsersDoc>(req("/api/users")),
+  addUser: (name: string) =>
+    j<UsersDoc>(req("/api/users", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) })),
+  /** Switches user and selects their last collection (409 while recording or armed). */
+  selectUser: (id: string) =>
+    j<UsersDoc>(req("/api/users/current", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ id }) })),
   selectCollection: (name: string | null) =>
     j<CollectionsDoc>(req("/api/collections/selected", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) })),
   /** Every run's location (local, connected drive, offline index); collection null = top level. */

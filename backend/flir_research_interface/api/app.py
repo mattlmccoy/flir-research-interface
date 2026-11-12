@@ -44,6 +44,7 @@ from flir_research_interface.api.smart_roi_routes import (
     compute_stored_smart_rois,
     register_smart_roi_routes,
 )
+from flir_research_interface.api.users_routes import register_users_routes
 from flir_research_interface.busy import BusyInputs, busy_reasons, job_labels
 from flir_research_interface.camera import CAMERA_BACKENDS, create_backend
 from flir_research_interface.camera.base import CameraBackend, CameraError, DeviceDescriptor, Frame
@@ -923,6 +924,15 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
+    def _active_profile() -> dict[str, Any]:
+        """The current user's project profile, else the shared lab profile."""
+        from flir_research_interface.analysis.profile import load_profile
+        from flir_research_interface.users import current_user, user_profile
+
+        root = app.state.experiments_root
+        user = current_user(root)
+        return user_profile(user, root) if user is not None else load_profile(root)
+
     @app.get("/api/profile/suggest")
     def profile_suggest(q: str = "") -> dict[str, Any]:
         """Offline profile builder: fields + marks suggested for a free-text description."""
@@ -932,18 +942,24 @@ def create_app(
 
     @app.get("/api/profile")
     def get_profile() -> dict[str, Any]:
-        from flir_research_interface.analysis.profile import load_profile
-
-        return load_profile(app.state.experiments_root)
+        return _active_profile()
 
     @app.put("/api/profile")
     async def put_profile(request: Request) -> dict[str, Any]:
         """Store the project profile (metadata fields + mark buttons) for every client."""
         from flir_research_interface.analysis.profile import save_profile
+        from flir_research_interface.users import UserError, current_user, save_user_profile
 
+        root = app.state.experiments_root
         try:
             body = await request.json()
-            return await run_in_threadpool(save_profile, app.state.experiments_root, body)
+            user = current_user(root)
+            # each person keeps their own profile; the shared file is the template
+            if user is not None:
+                return await run_in_threadpool(save_user_profile, root, user["id"], body)
+            return await run_in_threadpool(save_profile, root, body)
+        except UserError as exc:
+            raise HTTPException(exc.status, str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
@@ -1134,11 +1150,14 @@ def create_app(
 
     def _recording_extra(req: RecordingStartRequest) -> dict[str, Any]:
         from flir_research_interface.analysis.calibration import load_alignment
-        from flir_research_interface.analysis.profile import load_profile
+        from flir_research_interface.users import current_user
 
         extra: dict[str, Any] = {}
-        prof = load_profile(app.state.experiments_root)
+        prof = _active_profile()
         extra["profile"] = {"name": prof["name"], "marks": [m["label"] for m in prof["marks"]]}
+        user = current_user(app.state.experiments_root)
+        if user is not None:
+            extra["user"] = {"id": user["id"], "name": user["name"]}
         alignment = load_alignment(app.state.experiments_root)
         if alignment:
             extra["visible_alignment"] = alignment
@@ -1647,6 +1666,7 @@ def create_app(
         return recording or app.state.armer is not None
 
     register_collections_routes(app, _roots, _recording_or_armed, _busy)
+    register_users_routes(app, lambda: Path(app.state.experiments_root), _recording_or_armed)
 
     # -- external-drive storage (offload) ------------------------------------------------------
 
