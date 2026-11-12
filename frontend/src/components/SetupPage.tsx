@@ -1,6 +1,8 @@
 import { ProfileEditor } from "./ProfileEditor.tsx";
 import { StoragePanel } from "./StoragePanel.tsx";
-import { CollectionsMigrationPanel } from "./CollectionsMigrationPanel.tsx";
+import { CollectionsCard } from "./CollectionsCard.tsx";
+import type { CollectionsDoc, UsersDoc } from "../lib/api.ts";
+import { currentUser } from "../lib/users.ts";
 import { RfLinkPanel } from "./RfLinkPanel.tsx";
 import { CredentialsHelp } from "./CredentialsHelp.tsx";
 import { useEffect, useState } from "react";
@@ -12,7 +14,12 @@ import { ConnectHintBox } from "./ConnectHintBox.tsx";
 
 type Any = Record<string, unknown>;
 
-export function SetupPage({ onConnected, status, onConnectFailed }: { onConnected: () => void; status?: Status; onConnectFailed?: () => void }) {
+export function SetupPage({ onConnected, status, onConnectFailed, collections = null, users = null, collectionsLocked = false, onCollections = () => undefined, onUsers = () => undefined }: {
+  onConnected: () => void; status?: Status; onConnectFailed?: () => void;
+  collections?: CollectionsDoc | null; users?: UsersDoc | null; collectionsLocked?: boolean;
+  onCollections?: (d: CollectionsDoc) => void; onUsers?: (d: UsersDoc) => void;
+}) {
+  const me = currentUser(users);
   const [sdk, setSdk] = useState<Any | null>(null);
   const [disc, setDisc] = useState<Any | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -129,7 +136,8 @@ export function SetupPage({ onConnected, status, onConnectFailed }: { onConnecte
       </div>
 
       <div className="card">
-        <h2>4. Project profile (metadata fields and mark buttons)</h2>
+        <h2>4. Project profile (metadata fields and mark buttons){me ? ` for ${me.name}` : ""}</h2>
+        {me && <div className="muted" style={{ marginBottom: 6 }}>Each person has their own profile; switching person in the top bar switches it. New people start from a copy of the lab profile.</div>}
         <ProfileEditor />
       </div>
 
@@ -139,8 +147,8 @@ export function SetupPage({ onConnected, status, onConnectFailed }: { onConnecte
       </div>
 
       <div className="card">
-        <h2>Collections: sort existing runs into a collection</h2>
-        <CollectionsMigrationPanel />
+        <h2>Collections</h2>
+        <CollectionsCard collections={collections} users={users} locked={collectionsLocked} onCollections={onCollections} onUsers={onUsers} />
       </div>
 
       {rfEngaged && (

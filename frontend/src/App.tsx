@@ -461,7 +461,7 @@ export function App() {
 
   if (page === "setup") {
     return <StudioFrame layout={layout} page topbar={topbar} statusbar={statusbar}
-      center={<SetupPage key={userKey} status={status} onConnectFailed={() => { void refresh(); }} onConnected={() => { void refresh(); setPage("live"); }} />} />;
+      center={<SetupPage key={userKey} status={status} collections={collections} users={users} collectionsLocked={collectionLocked} onCollections={setCollections} onUsers={setUsers} onConnectFailed={() => { void refresh(); }} onConnected={() => { void refresh(); setPage("live"); }} />} />;
   }
   if (page === "experiments") {
     return <StudioFrame layout={layout} page topbar={topbar} statusbar={statusbar}

@@ -32,3 +32,16 @@ export function userMenuCollections(user: UserInfo, doc: CollectionsDoc): { mine
   const others = doc.collections.map((c) => c.name).filter((n) => !mine.includes(n)).sort();
   return { mine, others };
 }
+
+export interface CollectionRow { name: string; users: string[]; where: string; selected: boolean; }
+
+/** The Setup page's collection table: every collection A-Z, the people whose list has it, where
+ *  its folder is (this Mac, the SSD, or the unplugged SSD's last-seen index) and the selection. */
+export function collectionRows(doc: CollectionsDoc, users: UsersDoc | null): CollectionRow[] {
+  return [...doc.collections].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)).map((c) => {
+    const ssd = c.offline ? "SSD (unplugged)" : "SSD";
+    const where = c.local && c.drive ? `Mac + ${ssd}` : c.drive ? ssd : "Mac";
+    const who = (users?.users ?? []).filter((u) => u.collections.includes(c.name)).map((u) => u.name);
+    return { name: c.name, users: who, where, selected: c.name === doc.selected };
+  });
+}

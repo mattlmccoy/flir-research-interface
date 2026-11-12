@@ -56,3 +56,19 @@ test("menu collections keep a listed collection the doc doesn't show yet (drive 
   assert.deepEqual(m.mine, ["mattmccoy", "rf-sintering"]);
   assert.deepEqual(m.others, []);
 });
+
+test("collectionRows: every collection with who uses it, where it lives, and the selection", async () => {
+  const { collectionRows } = await import("./users.ts");
+  const c = cols(["ana", "mattmccoy", "rf-sintering", "zeta"]);
+  c.collections[1] = { name: "mattmccoy", local: true, drive: true, offline: false };
+  c.collections[2] = { name: "rf-sintering", local: false, drive: true, offline: true };
+  const rows = collectionRows(c, users());
+  assert.deepEqual(rows.map((r) => r.name), ["ana", "mattmccoy", "rf-sintering", "zeta"]);
+  assert.deepEqual(rows[1], { name: "mattmccoy", users: ["Matt McCoy"], where: "Mac + SSD", selected: true });
+  assert.deepEqual(rows[0].users, ["Ana"]);
+  assert.equal(rows[2].where, "SSD (unplugged)");
+  assert.deepEqual(rows[2].users, ["Matt McCoy"]);
+  assert.equal(rows[3].where, "Mac");
+  assert.deepEqual(rows[3].users, []);
+  assert.deepEqual(collectionRows(c, null)[1].users, []);
+});

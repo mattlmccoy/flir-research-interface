@@ -57,9 +57,13 @@ function VolumeMigration({ volume, label, target, disabled }: { volume: Volume; 
   );
 }
 
-/** Setup → Collections: move the top-level runs of each volume into one collection. */
-export function CollectionsMigrationPanel() {
-  const [target, setTarget] = useState("mattmccoy");
+/** Setup → Collections: move the top-level runs of each volume into one collection (the selected
+ *  collection by default). */
+export function CollectionsMigrationPanel({ defaultTarget = "" }: { defaultTarget?: string }) {
+  // follows the selected collection until the field is edited by hand
+  const [typed, setTyped] = useState<string | null>(null);
+  const target = typed ?? defaultTarget;
+  const setTarget = (v: string) => setTyped(v);
   const [info, setInfo] = useState<StorageInfo | null>(null);
   useEffect(() => {
     const tick = () => { api.storage().then(setInfo).catch(() => undefined); };
