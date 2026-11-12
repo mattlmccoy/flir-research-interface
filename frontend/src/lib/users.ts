@@ -45,3 +45,29 @@ export function collectionRows(doc: CollectionsDoc, users: UsersDoc | null): Col
     return { name: c.name, users: who, where, selected: c.name === doc.selected };
   });
 }
+
+/** Avatar fallback letters: first letter of the first and last word ("Matt McCoy" -> "MM"). */
+export function initials(name: string): string {
+  const w = name.trim().split(/\s+/).filter(Boolean);
+  if (w.length === 0) return "?";
+  return (w[0][0] + (w.length > 1 ? w[w.length - 1][0] : "")).toUpperCase();
+}
+
+/** The centred square of a w x h photo and the output side (``target``, never upscaled). Any size
+ *  photo is accepted: the browser crops and shrinks it before upload. */
+export function squareCrop(w: number, h: number, target: number): { sx: number; sy: number; side: number; out: number } {
+  const side = Math.min(w, h);
+  return { sx: Math.floor((w - side) / 2), sy: Math.floor((h - side) / 2), side, out: Math.min(side, target) };
+}
+
+type KV = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+const PICKER_KEY = "fri.profilePicker.skip";
+
+/** Whether this browser shows the "who's using this?" screen when the app opens. */
+export function pickerAtStartup(store: KV | null): boolean {
+  try { return store?.getItem(PICKER_KEY) !== "1"; } catch { return true; }
+}
+
+export function setPickerAtStartup(store: KV | null, show: boolean): void {
+  try { if (show) store?.removeItem(PICKER_KEY); else store?.setItem(PICKER_KEY, "1"); } catch { /* storage blocked: stays on */ }
+}

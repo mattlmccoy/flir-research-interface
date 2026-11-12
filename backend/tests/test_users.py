@@ -53,7 +53,8 @@ def test_add_user_creates_their_collection_and_copies_the_lab_profile(tmp_path: 
     assert r.status_code == 200, r.text
     doc = r.json()
     assert doc["users"] == [{"id": "mattmccoy", "name": "Matt McCoy", "collections": ["mattmccoy"],
-                             "last_collection": "mattmccoy", "profile_name": "RF heating"}]
+                             "last_collection": "mattmccoy", "profile_name": "RF heating",
+                             "avatar": None}]
     assert (root / "mattmccoy").is_dir()
     assert (root / USERS_FILE).is_file()
 

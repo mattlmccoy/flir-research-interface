@@ -28,6 +28,8 @@ import { ThermalView, type StatsMap } from "./components/ThermalView.tsx";
 import { DisplayControls } from "./components/DisplayControls.tsx";
 import { SetupPage } from "./components/SetupPage.tsx";
 import { UserMenu } from "./components/UserMenu.tsx";
+import { ProfilePicker } from "./components/ProfilePicker.tsx";
+import { pickerAtStartup, setPickerAtStartup } from "./lib/users.ts";
 import { RecordPanel } from "./components/RecordPanel.tsx";
 import { RoiRows } from "./components/RoiRows.tsx";
 import { CameraControls } from "./components/CameraControls.tsx";
@@ -335,6 +337,8 @@ export function App() {
     return () => clearInterval(id);
   }, []);
   const userKey = users?.current ?? "";
+  const [pickerOpen, setPickerOpen] = useState(() => pickerAtStartup(storage));
+  const [pickerOnLaunch, setPickerOnLaunch] = useState(() => pickerAtStartup(storage));
   const collectionLocked = pickerLocked(recording);
 
   useEffect(() => {
@@ -434,7 +438,12 @@ export function App() {
         <button className={page === "setup" ? "active" : ""} aria-current={page === "setup" ? "page" : undefined} onClick={() => setPage("setup")}>setup</button>
       </nav>
       <UserMenu users={users} usersErr={usersErr} collections={collections} locked={collectionLocked}
-        onUsers={setUsers} onCollections={setCollections} />
+        onUsers={setUsers} onCollections={setCollections} onOpenPicker={() => setPickerOpen(true)} />
+      {pickerOpen && (
+        <ProfilePicker users={users} usersErr={usersErr} locked={collectionLocked}
+          showAtStartup={pickerOnLaunch} onShowAtStartup={(v) => { setPickerAtStartup(storage, v); setPickerOnLaunch(v); }}
+          onUsers={setUsers} onCollections={setCollections} onClose={() => setPickerOpen(false)} />
+      )}
       {page === "playback" && openExp && (
         <span className="crumb">
           <button className="secondary" onClick={() => setPage("experiments")} title="Back to the experiments list" aria-label="Back to experiments">← experiments</button>

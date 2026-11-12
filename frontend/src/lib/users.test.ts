@@ -72,3 +72,30 @@ test("collectionRows: every collection with who uses it, where it lives, and the
   assert.deepEqual(rows[3].users, []);
   assert.deepEqual(collectionRows(c, null)[1].users, []);
 });
+
+test("initials: first letters of the first and last word", async () => {
+  const { initials } = await import("./users.ts");
+  assert.equal(initials("Matt McCoy"), "MM");
+  assert.equal(initials("ana"), "A");
+  assert.equal(initials("  Ana  Ruiz Lopez "), "AL");
+  assert.equal(initials(""), "?");
+});
+
+test("squareCrop: the centred square of any photo, scaled to the target size", async () => {
+  const { squareCrop } = await import("./users.ts");
+  assert.deepEqual(squareCrop(4000, 3000, 160), { sx: 500, sy: 0, side: 3000, out: 160 });
+  assert.deepEqual(squareCrop(600, 900, 160), { sx: 0, sy: 150, side: 600, out: 160 });
+  assert.deepEqual(squareCrop(64, 48, 160), { sx: 8, sy: 0, side: 48, out: 48 }); // never upscale
+});
+
+test("startup picker: shown unless this browser opted out; the choice persists", async () => {
+  const { pickerAtStartup, setPickerAtStartup } = await import("./users.ts");
+  const mem = new Map<string, string>();
+  const store = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => { mem.set(k, v); }, removeItem: (k: string) => { mem.delete(k); } };
+  assert.equal(pickerAtStartup(store), true);
+  setPickerAtStartup(store, false);
+  assert.equal(pickerAtStartup(store), false);
+  setPickerAtStartup(store, true);
+  assert.equal(pickerAtStartup(store), true);
+  assert.equal(pickerAtStartup(null), true);
+});

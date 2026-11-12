@@ -17,6 +17,7 @@ from flir_research_interface.users import (
     UserError,
     add_user,
     public_doc,
+    set_avatar,
     set_current,
     sync_users,
 )
@@ -31,6 +32,10 @@ class _AddBody(BaseModel):
 
 class _CurrentBody(BaseModel):
     id: str
+
+
+class _AvatarBody(BaseModel):
+    image: str
 
 
 def register_users_routes(
@@ -66,3 +71,18 @@ def register_users_routes(
         if pick:
             save_selection(base(), pick)
         return public_doc(sync_users(base(), drive()))
+
+    def _avatar(uid: str, image: str | None) -> dict[str, Any]:
+        try:
+            set_avatar(base(), uid, image)
+        except UserError as exc:
+            raise HTTPException(exc.status, str(exc)) from exc
+        return public_doc(sync_users(base(), drive()))
+
+    @app.put("/api/users/{uid}/avatar")
+    def put_avatar(uid: str, body: _AvatarBody) -> dict[str, Any]:
+        return _avatar(uid, body.image)
+
+    @app.delete("/api/users/{uid}/avatar")
+    def delete_avatar(uid: str) -> dict[str, Any]:
+        return _avatar(uid, None)

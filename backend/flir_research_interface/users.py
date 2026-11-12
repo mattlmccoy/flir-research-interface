@@ -14,6 +14,8 @@ gets a collection of the same name by default.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import logging
 import re
@@ -40,6 +42,7 @@ __all__ = [
     "public_doc",
     "rename_collection_refs",
     "save_user_profile",
+    "set_avatar",
     "set_current",
     "slug_for",
     "sync_users",
@@ -49,6 +52,7 @@ __all__ = [
 
 USERS_FILE = ".users.json"
 MAX_NAME = 60
+MAX_AVATAR_BYTES = 200_000  # decoded image bytes; the browser sends ~10 kB
 _LOCK = threading.Lock()
 
 
@@ -169,6 +173,7 @@ def public_doc(doc: dict[str, Any]) -> dict[str, Any]:
                 "collections": list(u["collections"]),
                 "last_collection": u.get("last_collection"),
                 "profile_name": (u.get("profile") or {}).get("name"),
+                "avatar": u.get("avatar") if isinstance(u.get("avatar"), str) else None,
             }
             for u in doc["users"]
         ],
@@ -248,6 +253,35 @@ def save_user_profile(base: Path, uid: str, body: Any) -> dict[str, Any]:
         u["updated"] = time.time()
         _save(base, doc)
     return clean
+
+
+_AVATAR_RE = re.compile(r"^data:image/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$")
+
+
+def set_avatar(base: Path, uid: str, image: str | None) -> None:
+    """Store (or, with None, remove) a user's profile picture: a ``data:image/png|jpeg|webp``
+    base64 URL of at most ``MAX_AVATAR_BYTES`` decoded bytes, kept in their record."""
+    if image is not None:
+        m = _AVATAR_RE.match(image)
+        if not m:
+            raise UserError("the picture must be a PNG, JPEG or WebP image")
+        try:
+            raw = base64.b64decode(m.group(2), validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise UserError("the picture data is not valid base64") from exc
+        if len(raw) > MAX_AVATAR_BYTES:
+            raise UserError(f"the picture is over {MAX_AVATAR_BYTES // 1000} kB", 413)
+    with _LOCK:
+        doc = load_users(base)
+        u = _find(doc, uid)
+        if u is None:
+            raise UserError(f"user {uid!r} not found", 404)
+        if image is None:
+            u.pop("avatar", None)
+        else:
+            u["avatar"] = image
+        u["updated"] = time.time()
+        _save(base, doc)
 
 
 def user_profile(u: dict[str, Any], base: Path) -> dict[str, Any]:

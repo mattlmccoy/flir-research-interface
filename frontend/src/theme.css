@@ -40,6 +40,14 @@
   --trace-6: #b48cff;
   --image-bg: #000;
   --scrim: rgba(11, 14, 18, 0.85);
+  /* startup profile screen */
+  --pp-glow: rgba(255, 180, 84, 0.16);
+  --pp-glow-hot: rgba(255, 95, 86, 0.08);
+  --pp-backdrop: rgba(6, 8, 11, 0.94);
+  --pp-tile: rgba(20, 25, 32, 0.7);
+  --pp-tile-hover: rgba(255, 180, 84, 0.06);
+  --pp-ring-glow: rgba(255, 180, 84, 0.35);
+  --pp-me-line: rgba(255, 180, 84, 0.55);
   --danger-ink: #ffffff;
   --font-ui: "IBM Plex Sans", system-ui, sans-serif;
   --font-mono: "Space Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;

@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type CollectionsDoc, type UsersDoc } from "../lib/api.ts";
 import { collectionLabel, collectionNameError, renameError } from "../lib/collections.ts";
+import { Avatar, usePhotoPicker } from "./Avatar.tsx";
 import { currentUser, slugFor, USER_LOCK_MESSAGE, userChipLabel, userMenuCollections } from "../lib/users.ts";
 
 /** The top-bar "who's using this?" button. Picking a person switches the operator to them and to the
  *  collection they used last; the menu also switches collection and adds people. Shared by every
  *  browser (the operator holds it). Locked while a recording or armed trigger is active. */
-export function UserMenu({ users, usersErr, collections, locked, onUsers, onCollections }: {
+export function UserMenu({ users, usersErr, collections, locked, onUsers, onCollections, onOpenPicker }: {
   users: UsersDoc | null; usersErr: string | null; collections: CollectionsDoc | null; locked: boolean;
-  onUsers: (d: UsersDoc) => void; onCollections: (d: CollectionsDoc) => void;
+  onUsers: (d: UsersDoc) => void; onCollections: (d: CollectionsDoc) => void; onOpenPicker: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -53,6 +54,7 @@ export function UserMenu({ users, usersErr, collections, locked, onUsers, onColl
   const pickCollection = (name: string) => act(async () => { onCollections(await api.selectCollection(name)); onUsers(await api.users()); });
 
   const me = currentUser(users);
+  const photo = usePhotoPicker((url, id) => void act(async () => onUsers(await api.setAvatar(id, url)), true), setErr);
   const unset = !!users && !me;
   const slug = slugFor(draft);
   const draftErr = draft.trim() === "" ? null : !slug ? "the name needs at least one letter or digit"
@@ -74,19 +76,20 @@ export function UserMenu({ users, usersErr, collections, locked, onUsers, onColl
         disabled={!users || locked} aria-haspopup="menu" aria-expanded={open}
         title={locked ? USER_LOCK_MESSAGE : "Who's using this? Switch person or collection"}
         onClick={() => (open ? close() : setOpen(true))}>
-        <span className="avatar" aria-hidden>{me ? me.name.trim().charAt(0).toUpperCase() : "?"}</span>
+        <Avatar user={me} size={22} />
         <span className="nm">{userChipLabel(users, usersErr)}</span>
         {me && <span className="sub">→ {collectionLabel(sel)}</span>}
         <span aria-hidden>▾</span>
       </button>
       {open && users && (
         <div className="user-pop" role="menu" aria-label="users">
+          {photo.el}
           <div className="sec-h">who's using this?</div>
           {users.users.length === 0 && <div className="hint">Nobody yet. Add yourself below.</div>}
           {users.users.map((u) => (
             <button key={u.id} type="button" role="menuitemradio" aria-checked={u.id === users.current}
               className={`coll-opt${u.id === users.current ? " on" : ""}`} disabled={busy} onClick={() => switchTo(u.id)}>
-              <span className="nm">{u.name}</span><span className="note">{u.profile_name ?? ""}</span>
+              <span className="who"><Avatar user={u} size={18} /><span className="nm">{u.name}</span></span><span className="note">{u.profile_name ?? ""}</span>
             </button>
           ))}
           <div className="coll-add">
@@ -147,6 +150,12 @@ export function UserMenu({ users, usersErr, collections, locked, onUsers, onColl
               )}
             </>
           )}
+          <div className="sec-h">this browser</div>
+          <div className="row user-tools">
+            {me && <button type="button" className="linkish" disabled={busy} onClick={() => photo.open(me.id)}>{me.avatar ? "change" : "add"} my photo…</button>}
+            {me?.avatar && <button type="button" className="linkish" disabled={busy} onClick={() => act(async () => onUsers(await api.clearAvatar(me.id)), true)}>remove photo</button>}
+            <button type="button" className="linkish" onClick={() => { close(); onOpenPicker(); }}>profile screen…</button>
+          </div>
           {err && <div className="bad" role="alert">{err}</div>}
         </div>
       )}

@@ -38,6 +38,7 @@ const REQUIRED_TOKENS = [
   "--rec",
   "--trace-3", "--trace-4", "--trace-5", "--trace-6",
   "--image-bg", "--scrim", "--shadow", "--danger-ink",
+  "--pp-glow", "--pp-glow-hot", "--pp-backdrop", "--pp-tile", "--pp-tile-hover", "--pp-ring-glow", "--pp-me-line",
   "--font-ui", "--font-mono", "--font-read",
   "--fs", "--space", "--radius",
   "--strip-w", "--rail-w", "--dock-h", "--topbar-h", "--statusbar-h",

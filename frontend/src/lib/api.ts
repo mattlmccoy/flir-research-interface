@@ -90,7 +90,7 @@ export interface CollectionsDoc {
 }
 /** GET /api/users (backend users.py public_doc): the people at the bench; `current` = who is
  *  using the operator now (remembered across restarts), null = nobody chosen yet. */
-export interface UserInfo { id: string; name: string; collections: string[]; last_collection: string | null; profile_name: string | null; }
+export interface UserInfo { id: string; name: string; collections: string[]; last_collection: string | null; profile_name: string | null; avatar?: string | null; }
 export interface UsersDoc { current: string | null; users: UserInfo[]; }
 /** GET /api/collections/migration (backend api/collections_routes.py `_plan_doc`): a dry run. */
 export interface MigrationPlanDoc {
@@ -258,6 +258,10 @@ export const api = {
   addUser: (name: string) =>
     j<UsersDoc>(req("/api/users", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) })),
   /** Switches user and selects their last collection (409 while recording or armed). */
+  setAvatar: (id: string, image: string) =>
+    j<UsersDoc>(req(`/api/users/${encodeURIComponent(id)}/avatar`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ image }) })),
+  clearAvatar: (id: string) =>
+    j<UsersDoc>(req(`/api/users/${encodeURIComponent(id)}/avatar`, { method: "DELETE" })),
   selectUser: (id: string) =>
     j<UsersDoc>(req("/api/users/current", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ id }) })),
   /** Renames a collection on this Mac and the connected SSD (409 while busy or the SSD holding it
