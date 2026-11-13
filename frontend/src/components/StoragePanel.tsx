@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type StorageInfo, type Volume } from "../lib/api.ts";
+import { offloadHeadline, offloadRow, type OffloadDoc } from "../lib/offloadStatus.ts";
 
 function gb(bytes: number | undefined | null): string {
   return bytes == null ? "—" : `${(bytes / 1e9).toFixed(0)} GB`;
@@ -9,12 +10,15 @@ function gb(bytes: number | undefined | null): string {
 export function StoragePanel() {
   const [info, setInfo] = useState<StorageInfo | null>(null);
   const [vols, setVols] = useState<Volume[] | null>(null);
+  const [off, setOff] = useState<OffloadDoc | null>(null);
+  const [offErr, setOffErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     api.storage().then(setInfo).catch((e) => setErr(String(e)));
     api.storageVolumes().then(setVols).catch(() => setVols([]));
+    api.offload().then((d) => { setOff(d); setOffErr(null); }).catch((e) => { setOff(null); setOffErr(String(e)); });
   }, []);
   useEffect(() => { refresh(); const id = setInterval(refresh, 5000); return () => clearInterval(id); }, [refresh]);
 
@@ -25,6 +29,11 @@ export function StoragePanel() {
   async function forget() {
     setBusy(true); setErr(null);
     try { setInfo(await api.forgetDrive()); refresh(); } catch (e) { setErr(String(e)); } finally { setBusy(false); }
+  }
+
+  async function offloadAct(fn: () => Promise<OffloadDoc>) {
+    setBusy(true); setErr(null);
+    try { setOff(await fn()); setOffErr(null); } catch (e) { setErr(String(e)); } finally { setBusy(false); }
   }
 
   const drive = info?.drive ?? null;
@@ -51,6 +60,43 @@ export function StoragePanel() {
         Recording always writes to local disk. Registering a drive lets you <b>move finished runs</b> to
         it (copy → verify → delete) from the experiments page to free space, and browse/play runs stored
         there. One drive at a time.
+      </div>
+      <div className="offload">
+        <div className="row" style={{ alignItems: "center", justifyContent: "space-between" }}>
+          <label className="offload-toggle">
+            <input type="checkbox" checked={!!off?.enabled} disabled={busy || !off}
+              onChange={(e) => void offloadAct(() => api.setOffload(e.target.checked))} />
+            <b>Auto-move finished runs to the SSD</b>
+          </label>
+          <span className={`badge ${off == null ? "bad" : off.pending.some((p) => offloadRow(p).tone === "bad") ? "bad" : off.enabled ? "ok" : "lib"}`}>
+            {offloadHeadline(off)}
+          </span>
+        </div>
+        <div className="hint">
+          {drive
+            ? <>Each run records here first, then moves to <b>{drive.mount}</b> once its exports finish and nothing is recording (copy → verify → delete). If the SSD drops off or a copy fails, the run stays on this Mac and is retried.</>
+            : <>Register a drive below to use this. Runs record on this Mac until then.</>}
+        </div>
+        {offErr && <div className="errbox">offload status unavailable: {offErr}</div>}
+        {off && off.pending.length > 0 && (
+          <>
+            <ul className="offload-list">
+              {off.pending.map((p) => {
+                const r = offloadRow(p);
+                return (
+                  <li key={`${p.collection}/${p.name}`} className={`offload-item ${r.tone}`}>
+                    <span className="offload-run"><span className="muted">{p.collection}/</span>{p.name}</span>
+                    <span className="offload-state">{r.label}</span>
+                  </li>
+                );
+              })}
+            </ul>
+            <div className="row">
+              <button className="secondary" disabled={busy} onClick={() => void offloadAct(api.retryOffload)}
+                title="clear failure counts and try every waiting run now">retry now</button>
+            </div>
+          </>
+        )}
       </div>
       <div className="row" style={{ marginTop: 8, alignItems: "center" }}>
         <b className="hint">Detected drives</b>

@@ -8,6 +8,7 @@ import type { Preset, PresetsDoc, ThermalValue } from "./presets.ts";
 import type { SmartOverlay } from "./smartLabels.ts";
 import type { SmartJob } from "./smartSeries.ts";
 import type { ErrorHint } from "./connectHint.ts";
+import type { OffloadDoc } from "./offloadStatus.ts";
 import { runPath, type RunKey } from "./runKey.ts";
 
 /** Site mode: the UI is served from GitHub Pages and talks to a local operator (spec §6.3). */
@@ -307,6 +308,11 @@ export const api = {
   registerDrive: (mount: string) =>
     j<StorageInfo>(req("/api/storage/drive", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ mount }) })),
   forgetDrive: () => j<StorageInfo>(req("/api/storage/drive", { method: "DELETE" })),
+  /** Auto-offload: finished runs move to the registered SSD by themselves. */
+  offload: () => j<OffloadDoc>(req("/api/storage/offload")),
+  setOffload: (enabled: boolean) =>
+    j<OffloadDoc>(req("/api/storage/offload", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled }) })),
+  retryOffload: () => j<OffloadDoc>(req("/api/storage/offload/retry", { method: "POST" })),
   moveExperiment: (name: RunKey, to: "drive" | "local") =>
     j<MoveJob>(req(runPath(name, `/move`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ to }) })),
   /** Rename a run into another collection of its library ("" = Unsorted); 409 when busy or clashing. */
