@@ -38,6 +38,7 @@ from flir_research_interface.api.collections_routes import (
     register_collections_routes,
 )
 from flir_research_interface.api.frames import encode_frame_message
+from flir_research_interface.api.offload_routes import register_offload_routes
 from flir_research_interface.api.presets_routes import make_presets_router
 from flir_research_interface.api.reveal import Runner, contained, reveal
 from flir_research_interface.api.smart_roi_routes import (
@@ -347,6 +348,7 @@ def create_app(
     autoconnect: bool = False,
     autoconnect_backend: str = "spinnaker",
     autoconnect_interval_s: float = 10.0,
+    offload_interval_s: float = 30.0,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
@@ -372,7 +374,11 @@ def create_app(
         task = None
         if autoconnect and os.environ.get("FRI_NO_AUTOCONNECT") != "1":
             task = asyncio.create_task(_auto_connect_loop())
+        offload_task = asyncio.create_task(_offload_loop())
         yield
+        offload_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await offload_task
         if task is not None:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -547,6 +553,7 @@ def create_app(
     # run dirs from before rec.stop until the post-stop exports (which hold the render lock) are
     # scheduled; covers the visible-recorder stop, which writes into the run dir by path
     app.state.stopping_dirs = set()
+    app.state.exporting = set()  # run dirs whose post-stop exports have not finished
     # job records and render locks are keyed by RunRef.key ("<collection>/<name>" or "<name>")
     app.state.derived_jobs = {}  # run key -> progress record for on-demand regenerate
     app.state.move_jobs = {}  # run key -> progress record for an offload/restore move
@@ -571,7 +578,17 @@ def create_app(
         Stop/Disconnect that hangs that long invites repeat clicks. All are derived and
         regenerable from the run's store."""
 
+        here = exp_dir.resolve()
+        app.state.exporting.add(here)
+
         async def _job() -> None:
+            try:
+                await _exports()
+            finally:
+                app.state.exporting.discard(here)
+            await app.state.offload_sweep()  # the run may now go to the SSD
+
+        async def _exports() -> None:
             async with app.state.render_locks.get(_dir_key(exp_dir)):
                 for step, fn in (
                     # smart series first: the ROI CSV and run summary read them (Task 6)
@@ -624,6 +641,10 @@ def create_app(
             manifest, exp_dir = await _finalize_claimed(rec, vis)
             if manifest is not None and exp_dir is not None:
                 _schedule_post_stop_exports(exp_dir)
+                try:
+                    app.state.offload_queue(exp_dir)
+                except Exception:  # noqa: BLE001 - the run is safe on the Mac either way
+                    logger.exception("could not queue %s for auto-offload", exp_dir)
         finally:
             if stopping is not None:
                 app.state.stopping_dirs.discard(stopping)
@@ -1679,6 +1700,68 @@ def create_app(
         _recording_or_armed,
         lambda: dict(_roots()).get("drive"),
     )
+
+    # -- auto-offload: finished runs move to the SSD by themselves (offload.py) -----------------
+
+    def _offload_idle() -> bool:
+        """No recording, arm, finalize or closed-loop session: the camera and the SSD share the
+        USB hub, so copies wait until the bench is quiet."""
+        from flir_research_interface.rf_status import rf_engaged
+
+        rec = recorder()
+        return not (
+            (rec is not None and rec.state == RecorderState.RECORDING)
+            or app.state.armer is not None
+            or app.state.finalizing or app.state.stopping_dirs
+            or rf_engaged(app.state.control_last, app.state.rf_link_last_event,
+                          datetime.now(timezone.utc))
+        )
+
+    def _offload_run_busy(run_dir: Path) -> bool:
+        here = run_dir.resolve()
+        if here in app.state.exporting or here in app.state.stopping_dirs:
+            return True
+        return run_dir.is_dir() and app.state.render_locks.get(_dir_key(run_dir)).locked()
+
+    async def _offload_move(src: Path, dst_parent: Path) -> None:
+        """The same verified move as the Offload button, recorded in move_jobs (so the busy
+        check and the run's move status see it)."""
+        key = _dir_key(src)
+        job: dict[str, Any] = {"state": "running", "to": "drive", "done": 0, "total": 0,
+                               "error": None, "full_verify": True, "auto": True}
+        app.state.move_jobs[key] = job
+
+        def _cb(done: int, total: int) -> None:
+            job["done"], job["total"] = done, total
+
+        await run_in_threadpool(storage.adopt_marker, app.state.experiments_root)
+        try:
+            async with app.state.render_locks.get(key):
+                await run_in_threadpool(
+                    lambda: storage.move_experiment(src, dst_parent, on_progress=_cb)
+                )
+            job["state"] = "done"
+        except Exception as exc:
+            job["state"], job["error"] = "error", str(exc)
+            raise
+
+    app.state.offload_queue, app.state.offload_sweep = register_offload_routes(
+        app,
+        lambda: Path(app.state.experiments_root),
+        lambda: dict(_roots()).get("drive"),
+        _offload_idle,
+        _offload_run_busy,
+        _offload_move,
+    )
+
+    async def _offload_loop() -> None:
+        """Retry queued runs every ``offload_interval_s`` (the SSD came back, a recording ended)."""
+        while True:
+            await asyncio.sleep(offload_interval_s)
+            try:
+                await app.state.offload_sweep()
+            except Exception:  # noqa: BLE001 - never let the timer die
+                logger.exception("auto-offload sweep failed")
 
     # -- external-drive storage (offload) ------------------------------------------------------
 
