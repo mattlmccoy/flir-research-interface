@@ -443,3 +443,19 @@ def test_smart_overlay_shape() -> None:
     }
     off = smart_overlay(SmartResult(state="searching", valid=False), 4)
     assert off["bbox"] is None and off["labels"] is None and off["valid"] is False
+
+
+def test_relock_after_the_sample_outgrows_the_last_outline() -> None:
+    """2026-11-12 run 154353: the track was lost at ~58 s and stayed "searching" for 17 min, while
+    a fresh tracker on the same frames locked at once. Re-lock only searched round the stale
+    outline; a sample that had grown past it always touched that search edge. After a hold and a
+    search longer than HOLD_S, the tracker must search the whole drawn outline again."""
+    t = SmartTracker(_spec(), W, H)
+    assert t.update(_blob(), 0.0).state == "locked"
+    big = _blob(scale=2.4)  # outgrew old outline + rings + margin at once (still inside BOX)
+    assert SmartTracker(_spec(), W, H).update(big, 0.0).state == "locked"  # a fresh lock works
+    states = [t.update(big, 1.0 + i / 30).state for i in range(int(4 * HOLD_S * 30))]
+    assert "locked" in states, states[-5:]
+    first = states.index("locked")
+    assert first / 30 <= 3 * HOLD_S, first
+    assert all(s == "locked" for s in states[first:])

@@ -142,8 +142,11 @@ def test_ring_over_range_alone_keeps_the_sample_valid() -> None:
     frame = _blob()
     t = SmartTracker(_spec(), W, H)
     first = t.update(frame, 0.0)
-    rho = _rho()
-    ring_px = (rho > 1.0) & (rho < 1.08) & (np.mgrid[0:H, 0:W][1] > CX + RX)  # right edge, ring 0
+    assert first.bbox is not None and first.labels is not None
+    ring0 = np.zeros((H, W), dtype=bool)  # ring 0 as the tracker drew it, right side only
+    x0, y0, x1, y1 = first.bbox
+    ring0[y0:y1, x0:x1] = first.labels == 2
+    ring_px = np.asarray(ring0 & (np.mgrid[0:H, 0:W][1] > CX + RX), dtype=bool)
     frame2 = frame.copy()
     frame2[ring_px] = -60.0
     r = t.update(frame2, 1 / 30, over=ring_px, ceiling_c=250.0)
@@ -212,3 +215,44 @@ def test_feed_contract_unchanged_for_over_range() -> None:
     assert all(g["mean_c"] is None and g["max_c"] is None and g["min_c"] is None
                for g in e["rings"])
     assert e["dims"] is None
+
+
+# --- tracking through saturation (2026-11-12: "once a pixel goes over range the whole thing
+# locks"). Over-range pixels are hotter than anything in range, so they are sample, not holes. --
+
+
+def _right_half_over() -> np.ndarray:
+    """Over-range on the hot right half of the sample, reaching its edge (not an enclosed core)."""
+    xs = np.mgrid[0:H, 0:W][1]
+    return np.asarray((_rho() <= 1.0) & (xs >= CX), dtype=bool)
+
+
+def test_saturation_reaching_the_edge_keeps_the_whole_outline() -> None:
+    t = SmartTracker(_spec(), W, H)
+    first = t.update(_blob(), 0.0)
+    assert first.dims is not None
+    over = _right_half_over()
+    for i in range(1, 61):  # two seconds of frames: past HOLD_S, so a lost track would show
+        frame = _blob()
+        frame[over] = -80.0  # 16-bit wrapped readings, as the A70 reports them
+        r = t.update(frame, i / 30, over=over, ceiling_c=250.0)
+        assert r.state == "locked", (i, r.state)
+        assert r.dims is not None
+        assert abs(r.dims["area_px"] / first.dims["area_px"] - 1.0) < 0.05, (i, r.dims["area_px"])
+    assert r.over_range is True and r.valid is False  # the feed stays honest
+    assert r.over_stats["sample"]["over_px"] == int(over.sum())
+
+
+def test_saturation_spreading_frame_by_frame_stays_locked() -> None:
+    """The sample heats from one side: more of it goes over range each frame."""
+    t = SmartTracker(_spec(), W, H)
+    t.update(_blob(), 0.0)
+    xs = np.mgrid[0:H, 0:W][1]
+    inside = _rho() <= 1.0
+    for i, edge in enumerate(range(int(CX + RX), int(CX - RX), -2), start=1):
+        over = np.asarray(inside & (xs >= edge), dtype=bool)
+        frame = _blob()
+        frame[over] = -80.0
+        r = t.update(frame, i / 30, over=over, ceiling_c=250.0)
+        assert r.state == "locked", (i, edge, r.state)
+        assert r.dims is not None

@@ -309,13 +309,15 @@ class SmartTracker:
         return np.asarray(labels == k, dtype=bool)
 
     def _detect(
-        self, field_c: FloatArr, search: BoolArr, bad: BoolArr, cold: float | None
+        self, field_c: FloatArr, search: BoolArr, bad: BoolArr, cold: float | None,
+        filled: BoolArr | None = None,
     ) -> tuple[BoolArr | None, float | None]:
         """(sample mask or None if this frame fails the checks, edge level). ``hot`` is the p90 of
         the chosen region itself, so neither the background share of the search area, a hotter
         neighbour inside it, nor a runaway hot spot on the sample moves the sample's edge."""
         usable = search & ~bad
-        vals = field_c[usable]
+        measured = usable if filled is None else usable & ~filled  # levels: in-range pixels only
+        vals = field_c[measured]
         if vals.size == 0 or cold is None:
             return None, None
         s = self.spec.sensitivity
@@ -325,7 +327,8 @@ class SmartTracker:
         comp = self._choose(usable & (field_c >= level))  # provisional region
         if comp is None:
             return None, level
-        hot = float(np.percentile(field_c[comp], _REGION_HOT_PCT))
+        in_range = comp if filled is None else comp & ~filled
+        hot = float(np.percentile(field_c[in_range if in_range.any() else comp], _REGION_HOT_PCT))
         if hot - cold < MIN_CONTRAST_C:
             return None, level
         if fixed is None:
@@ -357,6 +360,14 @@ class SmartTracker:
         self._ceiling = self.field_ceilings(ceiling_c)
         if self._state != "searching" and t_s - self._last_good_t > HOLD_S:
             self._state = "searching"  # the last lock is stale: search again from this frame
+        if self._state == "searching" and self._outline is not None and (
+            t_s - self._last_good_t > 2 * HOLD_S
+        ):
+            # Re-lock round the stale outline failed for a further HOLD_S: forget it and search
+            # the whole drawn outline like a first lock (2026-11-12: a sample that grew past the
+            # old outline always touched that search edge, so the track stayed lost for 17 min).
+            # The % change baseline is kept.
+            self._outline, self._outline_box, self._last_area = None, None, 0
         relock = self._state == "searching"
         step = self._step(celsius, t_s, over)
         if relock and step is not None and self._state == "locked":
@@ -416,7 +427,10 @@ class SmartTracker:
                 cold = float(np.median(sample_c[band]))
         if cold is None:
             cold = self._user_cold(celsius, over)
-        sample, self._level = self._detect(sample_c, search, bad, cold)
+        filled = self._fillable(over_c, sbox, work, band_c is not None)
+        sample, self._level = self._detect(
+            self._hot_fill(sample_c, over_c, filled), search, bad & ~filled, cold, filled
+        )
         if sample is not None:
             self._state, self._last_good_t, self._last_area = "locked", t_s, int(sample.sum())
             sb = _bbox(sample)
@@ -430,6 +444,32 @@ class SmartTracker:
             self._state = "holding"
             sample = _place(self._outline, self._outline_box, work)
         return sample, work, sample_c, ring_c, over_c, self._level
+
+    def _fillable(self, over_c: BoolArr, sbox: Box, work: Box, tracking: bool) -> BoolArr:
+        """Over-range pixels that count as sample for edge finding: while tracking, those inside
+        the last outline; before a lock, all of them. Over-range pixels further out (a
+        spark or reflection in a ring) stay excluded, as before."""
+        if not over_c.any() or not tracking or self._outline is None or self._outline_box is None:
+            return over_c
+        prior = _place(self._outline, self._outline_box, work)
+        return over_c & prior
+
+    def _hot_fill(self, field_c: FloatArr, over_c: BoolArr, filled: BoolArr) -> FloatArr:
+        """The field for edge finding: a ``filled`` over-range pixel is hotter than anything in
+        range, so it reads as the hottest in-range value here (or the range ceiling, if higher).
+        It is then part of the hot sample instead of a hole that breaks the outline (2026-11-12: a
+        saturated edge made the area jump, the track held, then searched). The edge level is
+        still set from in-range pixels only (``_detect``), and readings keep the honest
+        over-range stats."""
+        if not filled.any():
+            return field_c
+        good = field_c[~over_c & np.isfinite(field_c)]
+        fills = [float(good.max())] if good.size else []
+        if self._ceiling[0] is not None:
+            fills.append(float(self._ceiling[0]))
+        if not fills:
+            return field_c
+        return np.where(filled, max(fills), field_c)
 
     def _lost(self, level: float | None) -> SmartResult:
         rings = [
