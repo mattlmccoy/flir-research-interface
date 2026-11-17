@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type StorageInfo, type Volume } from "../lib/api.ts";
-import { offloadHeadline, offloadRow, type OffloadDoc } from "../lib/offloadStatus.ts";
+import { canSkipVideo, offloadHeadline, offloadRow, type OffloadDoc } from "../lib/offloadStatus.ts";
 
 function gb(bytes: number | undefined | null): string {
   return bytes == null ? "—" : `${(bytes / 1e9).toFixed(0)} GB`;
@@ -65,7 +65,7 @@ export function StoragePanel() {
         <div className="row" style={{ alignItems: "center", justifyContent: "space-between" }}>
           <label className="offload-toggle">
             <input type="checkbox" checked={!!off?.enabled} disabled={busy || !off}
-              onChange={(e) => void offloadAct(() => api.setOffload(e.target.checked))} />
+              onChange={(e) => void offloadAct(() => api.setOffload({ enabled: e.target.checked }))} />
             <b>Auto-move finished runs to the SSD</b>
           </label>
           <span className={`badge ${off == null ? "bad" : off.pending.some((p) => offloadRow(p).tone === "bad") ? "bad" : off.enabled ? "ok" : "lib"}`}>
@@ -77,6 +77,11 @@ export function StoragePanel() {
             ? <>Each run records here first, then moves to <b>{drive.mount}</b> once its exports finish and nothing is recording (copy → verify → delete). If the SSD drops off or a copy fails, the run stays on this Mac and is retried.</>
             : <>Register a drive below to use this. Runs record on this Mac until then.</>}
         </div>
+        <label className="offload-toggle">
+          <input type="checkbox" checked={!!off?.roi_video} disabled={busy || !off}
+            onChange={(e) => void offloadAct(() => api.setOffload({ roi_video: e.target.checked }))} />
+          <span>Also make the ROI-overlay video after each run <span className="muted">(slow: can hold a long run on this Mac for an hour; you can always make it later from the run page)</span></span>
+        </label>
         {offErr && <div className="errbox">offload status unavailable: {offErr}</div>}
         {off && off.pending.length > 0 && (
           <>
@@ -86,7 +91,14 @@ export function StoragePanel() {
                 return (
                   <li key={`${p.collection}/${p.name}`} className={`offload-item ${r.tone}`}>
                     <span className="offload-run"><span className="muted">{p.collection}/</span>{p.name}</span>
-                    <span className="offload-state">{r.label}</span>
+                    <span className="offload-state">
+                      {r.label}
+                      {canSkipVideo(p) && (
+                        <button className="secondary offload-skip" disabled={busy}
+                          title="stop the video render so the run moves now; you can make the video later from the run page"
+                          onClick={() => void offloadAct(() => api.skipOffloadVideo(p.collection, p.name))}>skip video</button>
+                      )}
+                    </span>
                   </li>
                 );
               })}

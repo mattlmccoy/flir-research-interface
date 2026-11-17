@@ -181,3 +181,27 @@ def test_encode_temp_lives_outside_the_experiment_dir() -> None:
         assert str(p).startswith(str(_t.gettempdir())), f"{p} is not under the system temp dir"
     finally:
         p.unlink(missing_ok=True)
+
+
+class _CancelError(Exception):
+    pass
+
+
+def test_a_cancel_from_progress_stops_the_encode_and_leaves_no_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Skipping a post-stop video raises from on_progress: ffmpeg is stopped, the partial encode
+    is removed and no export file appears (it can be regenerated later)."""
+    import flir_research_interface.analysis.thermal_video as tv
+
+    d = _make_experiment(tmp_path / "runs", n=12)
+    part = tmp_path / "enc.mp4"
+    monkeypatch.setattr(tv, "_encode_tmp", lambda suffix: part)
+
+    def cancel(done: int, total: int) -> None:
+        raise _CancelError
+
+    with pytest.raises(_CancelError):
+        render_thermal_video(ExperimentReader(d), on_progress=cancel)
+    assert not part.exists()
+    assert not (d / "exports" / "thermal_preview.mp4").exists()

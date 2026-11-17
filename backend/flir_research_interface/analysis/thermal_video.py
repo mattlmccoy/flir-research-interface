@@ -331,6 +331,11 @@ def render_thermal_video(
                 on_progress(min(s + BLOCK, reader.n_frames), reader.n_frames)
     except BrokenPipeError:
         pass  # ffmpeg died early; its stderr explains why (reported below)
+    except BaseException:  # cancelled (a skipped post-stop video) or failed: no partial file
+        proc.kill()
+        proc.communicate()
+        tmp.unlink(missing_ok=True)
+        raise
     _, err = proc.communicate(timeout=300)  # closes stdin, drains stderr, waits
     if proc.returncode != 0 or not tmp.is_file() or tmp.stat().st_size == 0:
         tmp.unlink(missing_ok=True)

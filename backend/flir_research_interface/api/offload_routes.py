@@ -13,7 +13,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from flir_research_interface import offload
@@ -23,8 +23,14 @@ logger = logging.getLogger(__name__)
 __all__ = ["register_offload_routes"]
 
 
-class _EnabledBody(BaseModel):
-    enabled: bool
+class _SettingsBody(BaseModel):
+    enabled: bool | None = None
+    roi_video: bool | None = None
+
+
+class _RunBody(BaseModel):
+    collection: str
+    name: str
 
 
 Sweep = Callable[[], Awaitable[dict[str, Any]]]
@@ -37,11 +43,16 @@ def register_offload_routes(
     idle: Callable[[], bool],
     run_busy: Callable[[Path], bool],
     move: Callable[[Path, Path], Awaitable[None]],
+    *,
+    export_info: Callable[[Path], dict[str, Any] | None] = lambda _p: None,
+    skip_video: Callable[[Path], bool] = lambda _p: False,
 ) -> tuple[Callable[[Path], None], Sweep]:
     """``drive()`` is the connected SSD's ``FLIR-recordings`` root (None when unplugged);
     ``idle()`` is False while recording, armed, finalizing or under closed-loop control;
     ``run_busy(dir)`` is True while that run's exports run; ``move(src, dst_parent)`` performs
-    the verified move (raising on failure, the Mac copy intact)."""
+    the verified move (raising on failure, the Mac copy intact); ``export_info(dir)`` is the
+    step a run's post-stop exports are on (``{"step", "done", "total"}``) and ``skip_video(dir)``
+    skips its video render (False when nothing is exporting for it)."""
     lock = asyncio.Lock()
     moving: set[tuple[str, str]] = set()
 
@@ -58,10 +69,16 @@ def register_offload_routes(
     def _doc() -> dict[str, Any]:
         doc = offload.load_offload(base())
         d, now = drive(), time.time()
+        b = base()
         return {
             "enabled": doc["enabled"],
+            "roi_video": doc["roi_video"],
             "drive_connected": d is not None,
-            "pending": [{**e, "state": _state(e, d, now)} for e in doc["pending"]],
+            "pending": [
+                {**e, "state": _state(e, d, now),
+                 "export": export_info(b / e["collection"] / e["name"])}
+                for e in doc["pending"]
+            ],
         }
 
     def queue(run_dir: Path) -> None:
@@ -115,9 +132,21 @@ def register_offload_routes(
         return _doc()
 
     @app.put("/api/storage/offload")
-    async def put_offload(body: _EnabledBody) -> dict[str, Any]:
-        offload.set_enabled(base(), body.enabled)
+    async def put_offload(body: _SettingsBody) -> dict[str, Any]:
+        """Turn auto-move on/off and/or the ROI video after each run."""
+        if body.roi_video is not None:
+            offload.set_roi_video(base(), body.roi_video)
+        if body.enabled is not None:
+            offload.set_enabled(base(), body.enabled)
         return await sweep() if body.enabled else _doc()
+
+    @app.post("/api/storage/offload/skip-video")
+    async def skip_offload_video(body: _RunBody) -> dict[str, Any]:
+        """Skip the post-stop video render of a run still finishing its exports, so it can move
+        to the SSD now; the video can be rendered later from the run page."""
+        if not skip_video(base() / body.collection / body.name):
+            raise HTTPException(409, f"{body.collection}/{body.name} is not rendering anything")
+        return _doc()
 
     @app.post("/api/storage/offload/retry")
     async def retry_offload() -> dict[str, Any]:

@@ -28,7 +28,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, StrictFloat
 
-from flir_research_interface import __version__, storage
+from flir_research_interface import __version__, offload, storage
 from flir_research_interface import labels as labels_mod
 from flir_research_interface import visible_adjust_store as vadj_store
 from flir_research_interface.acquisition.service import AcquisitionService, ServiceState
@@ -65,6 +65,10 @@ from flir_research_interface.sdk_install import detect_and_select, pyspin_import
 from flir_research_interface.visible import full_range
 
 logger = logging.getLogger(__name__)
+
+
+class _VideoSkippedError(Exception):
+    """The operator skipped a post-stop video render (it can be rendered later on demand)."""
 
 API_VERSION = "1.1"
 """Handshake version for the site UI (spec §6.3): major mismatch = refuse, minor = banner."""
@@ -554,6 +558,8 @@ def create_app(
     # scheduled; covers the visible-recorder stop, which writes into the run dir by path
     app.state.stopping_dirs = set()
     app.state.exporting = set()  # run dirs whose post-stop exports have not finished
+    app.state.export_progress = {}  # run dir -> {"step", "done", "total"} of its post-stop exports
+    app.state.skip_video = set()  # run dirs whose post-stop video render the operator skipped
     # job records and render locks are keyed by RunRef.key ("<collection>/<name>" or "<name>")
     app.state.derived_jobs = {}  # run key -> progress record for on-demand regenerate
     app.state.move_jobs = {}  # run key -> progress record for an offload/restore move
@@ -564,13 +570,32 @@ def create_app(
     app.state.render_locks = KeyedLocks()
 
     def _render_thermal_video(exp_dir: Path) -> None:
-        """exports/thermal_preview.mp4 (clean) and thermal_preview_rois.mp4 (ROIs drawn)."""
-        from flir_research_interface.analysis.thermal_video import render_thermal_video
+        """exports/thermal_preview.mp4 (clean), and thermal_preview_rois.mp4 (ROIs drawn) when the
+        operator turned the ROI video on (it is the slowest export and holds the run off the SSD).
+        Either render stops when the operator skips it; both can be rendered later on demand."""
+        from flir_research_interface.analysis import thermal_video
+
+        here = exp_dir.resolve()
+        prog = app.state.export_progress.setdefault(here, {})
+
+        def _render(step: str, **kw: Any) -> None:
+            if here in app.state.skip_video:
+                raise _VideoSkippedError
+
+            def _cb(done: int, total: int) -> None:
+                if here in app.state.skip_video:
+                    raise _VideoSkippedError
+                prog.update(step=step, done=done, total=total)
+
+            prog.update(step=step, done=0, total=0)
+            thermal_video.render_thermal_video(reader, on_progress=_cb, **kw)
 
         reader = ExperimentReader(exp_dir)
-        render_thermal_video(reader)
-        if reader.metadata.get("rois"):
-            render_thermal_video(reader, with_rois=True)
+        _render("thermal video")
+        if reader.metadata.get("rois") and offload.load_offload(
+            Path(app.state.experiments_root)
+        )["roi_video"]:
+            _render("ROI video", with_rois=True)
 
     def _schedule_post_stop_exports(exp_dir: Path) -> None:
         """ROI series, run summary, visible sample analysis, then the thermal video, without
@@ -586,6 +611,8 @@ def create_app(
                 await _exports()
             finally:
                 app.state.exporting.discard(here)
+                app.state.export_progress.pop(here, None)
+                app.state.skip_video.discard(here)
             await app.state.offload_sweep()  # the run may now go to the SSD
 
         async def _exports() -> None:
@@ -598,8 +625,11 @@ def create_app(
                     ("visible sample analysis", _analyse_visible_sample),
                     ("thermal preview video render", _render_thermal_video),
                 ):
+                    app.state.export_progress[here] = {"step": step, "done": 0, "total": 0}
                     try:
                         await run_in_threadpool(fn, exp_dir)
+                    except _VideoSkippedError:
+                        logger.info("%s skipped by the operator for %s", step, exp_dir)
                     except Exception:  # noqa: BLE001 - a convenience file must never surface
                         logger.exception("%s failed for %s", step, exp_dir)
 
@@ -1745,6 +1775,19 @@ def create_app(
             job["state"], job["error"] = "error", str(exc)
             raise
 
+    def _export_info(run_dir: Path) -> dict[str, Any] | None:
+        prog = app.state.export_progress.get(run_dir.resolve())
+        return dict(prog) if prog else None
+
+    def _skip_video(run_dir: Path) -> bool:
+        """Skip the post-stop video render of a run whose exports are still running (the one in
+        progress stops, a later one never starts). False when nothing is exporting for it."""
+        here = run_dir.resolve()
+        if here not in app.state.exporting:
+            return False
+        app.state.skip_video.add(here)
+        return True
+
     app.state.offload_queue, app.state.offload_sweep = register_offload_routes(
         app,
         lambda: Path(app.state.experiments_root),
@@ -1752,6 +1795,8 @@ def create_app(
         _offload_idle,
         _offload_run_busy,
         _offload_move,
+        export_info=_export_info,
+        skip_video=_skip_video,
     )
 
     async def _offload_loop() -> None:

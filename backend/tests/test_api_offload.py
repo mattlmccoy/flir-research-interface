@@ -128,3 +128,70 @@ def test_no_drive_registered_does_nothing(tmp_path: Path) -> None:
         st = c.get("/api/storage/offload").json()
         assert exp.is_dir() and st["pending"] == []
     shutil.rmtree(root)
+
+
+ROI = {"id": 1, "name": "spot", "kind": "circle", "cx": 320, "cy": 240, "r": 20}
+
+
+def _record_with_roi(c: TestClient, name: str) -> Path:
+    devs = c.get("/api/camera/devices").json()
+    assert c.post("/api/camera/connect",
+                  json={"backend": "simulated", "serial": devs[0]["serial"]}).status_code == 200
+    r = c.post("/api/recording/start", json={"name": name, "visible": False, "rois": [ROI]})
+    assert r.status_code == 200, r.text
+    exp = Path(r.json()["experiment_dir"])
+    _until(lambda: c.get("/api/recording/status").json().get("frames_written", 0) >= 10)
+    assert c.post("/api/recording/stop").status_code == 200
+    assert c.post("/api/camera/disconnect").status_code == 200
+    return exp
+
+
+def test_roi_video_is_skipped_after_a_run_unless_turned_on(env) -> None:  # type: ignore[no-untyped-def]
+    _root, _mount, drive, c = env
+    assert c.get("/api/storage/offload").json()["roi_video"] is False
+    exp = _record_with_roi(c, "a")
+    _until(lambda: _idle(c) and c.get("/api/storage/offload").json()["pending"] == [])
+    moved = drive / "rf-heating" / exp.name / "exports"
+    assert (moved / "thermal_preview.mp4").is_file()
+    assert not (moved / "thermal_preview_rois.mp4").exists()
+
+    assert c.put("/api/storage/offload", json={"roi_video": True}).json()["roi_video"] is True
+    exp = _record_with_roi(c, "b")
+    _until(lambda: _idle(c) and c.get("/api/storage/offload").json()["pending"] == [])
+    assert (drive / "rf-heating" / exp.name / "exports" / "thermal_preview_rois.mp4").is_file()
+
+
+def test_a_running_video_can_be_skipped_and_the_run_moves(env, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import flir_research_interface.analysis.thermal_video as tv
+
+    _root, _mount, drive, c = env
+
+    def slow(reader: Any, *a: Any, on_progress: Any = None, **k: Any) -> dict[str, Any]:
+        for i in range(2000):  # ~200 s unless skipped
+            time.sleep(0.1)
+            if on_progress is not None:
+                on_progress(i, 2000)
+        raise AssertionError("the skip never reached the render")
+
+    monkeypatch.setattr(tv, "render_thermal_video", slow)
+    exp = _record(c)
+
+    def rendering() -> Any:
+        (e,) = c.get("/api/storage/offload").json()["pending"] or [None]
+        return e and e.get("export") and "video" in e["export"]["step"] and e
+
+    e = _until(rendering)
+    assert e["state"] == "wait:finishing exports"
+    r = c.post("/api/storage/offload/skip-video",
+               json={"collection": "rf-heating", "name": exp.name})
+    assert r.status_code == 200, r.text
+    _until(lambda: c.get("/api/storage/offload").json()["pending"] == [], timeout=30)
+    moved = drive / "rf-heating" / exp.name
+    assert (moved / "manifest.json").is_file()
+    assert not (moved / "exports" / "thermal_preview.mp4").exists()
+
+
+def test_skip_video_with_nothing_rendering_is_a_409(env) -> None:  # type: ignore[no-untyped-def]
+    _root, _mount, _drive, c = env
+    r = c.post("/api/storage/offload/skip-video", json={"collection": "rf-heating", "name": "nope"})
+    assert r.status_code == 409

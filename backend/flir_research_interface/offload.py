@@ -8,7 +8,7 @@ recording/arm/closed-loop session is active, and the run's post-stop exports are
 move leaves the Mac copy intact and is retried with back-off, then flagged after
 ``MAX_ATTEMPTS``. The queue survives restarts.
 
-    {"enabled": true,
+    {"enabled": true, "roi_video": false,
      "pending": [{"collection": "rf-heating", "name": "20261112_150000_run", "queued": 1.7e9,
                   "attempts": 0, "last_try": null, "error": null}]}
 """
@@ -35,6 +35,7 @@ __all__ = [
     "record_failure",
     "retry_all",
     "set_enabled",
+    "set_roi_video",
 ]
 
 OFFLOAD_FILE = ".auto-offload.json"
@@ -45,7 +46,7 @@ _LOCK = threading.Lock()
 
 def _read(base: Path) -> tuple[dict[str, Any], bool]:
     """The queue doc and whether the file may be overwritten (missing or readable)."""
-    empty: dict[str, Any] = {"enabled": True, "pending": []}
+    empty: dict[str, Any] = {"enabled": True, "roi_video": False, "pending": []}
     try:
         data = json.loads((base / OFFLOAD_FILE).read_text())
     except FileNotFoundError:
@@ -61,7 +62,11 @@ def _read(base: Path) -> tuple[dict[str, Any], bool]:
         if isinstance(e, dict) and isinstance(e.get("collection"), str)
         and isinstance(e.get("name"), str)
     ]
-    return {"enabled": data.get("enabled", True) is not False, "pending": pending}, True
+    return {
+        "enabled": data.get("enabled", True) is not False,
+        "roi_video": data.get("roi_video") is True,
+        "pending": pending,
+    }, True
 
 
 def load_offload(base: Path) -> dict[str, Any]:
@@ -84,6 +89,12 @@ def _same(e: dict[str, Any], collection: str, name: str) -> bool:
 
 def set_enabled(base: Path, on: bool) -> None:
     _update(base, lambda d: d.__setitem__("enabled", bool(on)))
+
+
+def set_roi_video(base: Path, on: bool) -> None:
+    """Whether the post-stop exports also render the (slow) ROI-overlay video; off by default so
+    a finished run reaches the SSD sooner. It can always be rendered later from the run page."""
+    _update(base, lambda d: d.__setitem__("roi_video", bool(on)))
 
 
 def queue_run(base: Path, collection: str, name: str, *, now: float) -> None:

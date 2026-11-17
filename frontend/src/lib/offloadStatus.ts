@@ -9,8 +9,10 @@ export interface OffloadEntry {
   last_try: number | null;
   error: string | null;
   state: string;
+  /** The post-stop export step this run is on, while it is still finishing (null otherwise). */
+  export?: { step: string; done: number; total: number } | null;
 }
-export interface OffloadDoc { enabled: boolean; drive_connected: boolean; pending: OffloadEntry[]; }
+export interface OffloadDoc { enabled: boolean; roi_video: boolean; drive_connected: boolean; pending: OffloadEntry[]; }
 export type Tone = "busy" | "wait" | "bad";
 
 const needsAttention = (e: OffloadEntry): boolean => e.state === "stuck" || e.state === "clash";
@@ -23,6 +25,12 @@ export function offloadRow(e: OffloadEntry): { label: string; tone: Tone } {
   }
   if (e.state === "clash") {
     return { label: "a run with this name is already on the SSD; both kept, move it by hand", tone: "bad" };
+  }
+  if (e.state === "wait:finishing exports" && e.export) {
+    const { step, done, total } = e.export;
+    const what = /video/i.test(step) ? `rendering ${step}` : step;
+    const pct = total > 0 ? `, ${Math.round((100 * done) / total)}%` : "";
+    return { label: `waiting: ${what}${pct}`, tone: "wait" };
   }
   if (e.state.startsWith("wait:")) {
     const why = e.state.slice(5);
@@ -40,4 +48,10 @@ export function offloadHeadline(d: OffloadDoc | null): string {
   const bad = d.pending.filter(needsAttention).length;
   const head = `on: ${n} run${n === 1 ? "" : "s"} waiting`;
   return bad ? `${head}, ${bad} need${bad === 1 ? "s" : ""} attention` : head;
+}
+
+/** A run still finishing its post-stop exports can have its video render skipped (the one in
+ *  progress stops, a later one never starts) so it moves to the SSD sooner. */
+export function canSkipVideo(e: OffloadEntry): boolean {
+  return e.state === "wait:finishing exports" && !!e.export;
 }

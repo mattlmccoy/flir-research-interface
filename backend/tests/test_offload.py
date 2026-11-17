@@ -32,7 +32,7 @@ IDLE = dict(drive=True, idle=True, src_exists=True, dst_exists=False, run_busy=F
 
 
 def test_on_by_default_and_queue_is_deduplicated(tmp_path: Path) -> None:
-    assert load_offload(tmp_path) == {"enabled": True, "pending": []}
+    assert load_offload(tmp_path) == {"enabled": True, "roi_video": False, "pending": []}
     queue_run(tmp_path, "rf-heating", "r1", now=1.0)
     queue_run(tmp_path, "rf-heating", "r1", now=2.0)
     assert [e["name"] for e in load_offload(tmp_path)["pending"]] == ["r1"]
@@ -84,3 +84,13 @@ def test_queue_survives_as_json(tmp_path: Path) -> None:
     queue_run(tmp_path, "c", "r1", now=1.0)
     doc = json.loads((tmp_path / ".auto-offload.json").read_text())
     assert doc["pending"][0]["collection"] == "c"
+
+
+def test_roi_video_after_a_run_is_off_by_default_and_persists(tmp_path: Path) -> None:
+    from flir_research_interface.offload import set_roi_video
+
+    assert load_offload(tmp_path)["roi_video"] is False
+    set_roi_video(tmp_path, True)
+    assert load_offload(tmp_path)["roi_video"] is True
+    queue_run(tmp_path, "c", "r1", now=1.0)  # other writes keep it
+    assert load_offload(tmp_path)["roi_video"] is True

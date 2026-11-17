@@ -310,8 +310,10 @@ export const api = {
   forgetDrive: () => j<StorageInfo>(req("/api/storage/drive", { method: "DELETE" })),
   /** Auto-offload: finished runs move to the registered SSD by themselves. */
   offload: () => j<OffloadDoc>(req("/api/storage/offload")),
-  setOffload: (enabled: boolean) =>
-    j<OffloadDoc>(req("/api/storage/offload", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled }) })),
+  setOffload: (settings: { enabled?: boolean; roi_video?: boolean }) =>
+    j<OffloadDoc>(req("/api/storage/offload", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(settings) })),
+  skipOffloadVideo: (collection: string, name: string) =>
+    j<OffloadDoc>(req("/api/storage/offload/skip-video", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ collection, name }) })),
   retryOffload: () => j<OffloadDoc>(req("/api/storage/offload/retry", { method: "POST" })),
   moveExperiment: (name: RunKey, to: "drive" | "local") =>
     j<MoveJob>(req(runPath(name, `/move`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ to }) })),

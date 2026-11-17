@@ -615,3 +615,4 @@ button:disabled .spinner { opacity: 0.7; }
 .offload-run { font-family: var(--font-mono); overflow-wrap: anywhere; }
 .offload-state { color: var(--muted); }
 .offload-item.bad .offload-state { color: var(--err); }
+.offload-skip { margin-left: 8px; padding: 1px 8px; font-size: 11px; }
