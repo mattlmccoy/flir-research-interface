@@ -59,6 +59,7 @@ from flir_research_interface.collections import (
     scan_root,
 )
 from flir_research_interface.concurrency import KeyedLocks
+from flir_research_interface.dir_size import DirSizeCache
 from flir_research_interface.playback.reader import ExperimentReader, list_experiments
 from flir_research_interface.recording.recorder import Recorder, RecorderState
 from flir_research_interface.sdk_install import detect_and_select, pyspin_importable
@@ -1572,15 +1573,17 @@ def create_app(
         st["visible"] = _visible_status()
         return st
 
+    app.state.dir_sizes = DirSizeCache()
+
     def _dir_size(path: Path) -> int:
-        total = 0
-        for root_dir, _dirs, files in os.walk(path):
-            for f in files:
-                try:
-                    total += (Path(root_dir) / f).stat().st_size
-                except OSError:
-                    pass
-        return total
+        """Bytes in a run folder, reused until the folder changes (see dir_size.py); the run being
+        recorded grows files in place, so it is always measured afresh."""
+        rec: Recorder | None = getattr(app.state, "recorder", None)  # set by the lifespan
+        live = (
+            rec is not None and rec.experiment_dir is not None
+            and rec.experiment_dir.resolve() == path.resolve()
+        )
+        return int(app.state.dir_sizes.size(path, fresh=live))
 
     def _roots() -> list[tuple[str, Path]]:
         """(library, root) pairs to resolve runs in: always local, plus the drive when mounted."""
